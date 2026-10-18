@@ -163,5 +163,11 @@ The display follow-up enables A6PLTE hardware auto-refresh during lk2nd display
 initialization, keeps debug output in the USB-readable log buffer instead of
 overwriting the menu, and cleans framebuffer cache lines before triggering DMA.
 The corrected image was built locally with ARM bare-metal GCC, with UART/DCC/JTAG
-still disabled, and `fastboot flash lk2nd` completed successfully. Physical-panel
-visibility is being checked separately from framebuffer contents read over USB.
+still disabled, and `fastboot flash lk2nd` completed successfully. The user confirmed the physical fastboot menu is visible after this update.
+
+
+The boot bridge now prints package-header/CRC/copy/entry milestones and installs
+EL1 exception vectors before reading the kernel package. An early synchronous
+fault prints ESR/ELR/FAR on the framebuffer. CRC integrity remains mandatory and
+uses an incremental nibble-table implementation checked against zlib. The kernel
+package has been detected on the phone; reaching XNU entry is still unconfirmed.
