@@ -211,7 +211,7 @@ index e37762b..d4c57c8 100644
  
  ifeq ($(ARM64_LARGE_MEMORY),1)
 diff --git i/osfmk/arm/arm_init.c w/osfmk/arm/arm_init.c
-index 6690846..3c9da1b 100644
+index 6690846..ac35993 100644
 --- i/osfmk/arm/arm_init.c
 +++ w/osfmk/arm/arm_init.c
 @@ -356,6 +356,12 @@ arm_init(
@@ -241,6 +241,17 @@ index 6690846..3c9da1b 100644
  
  	if (debug_boot_arg) {
  		patch_low_glo();
+@@ -583,6 +595,10 @@ arm_init(
+ 
+ 	/* Setup debugging output. */
+ 	const unsigned int serial_exists = serial_init();
++#if defined(A6PLTE)
++	extern void a6_xnu_install_runtime_vectors(void);
++	a6_xnu_install_runtime_vectors();
++#endif
+ 	kernel_startup_initialize_upto(STARTUP_SUB_KPRINTF);
+ 	kprintf("kprintf initialized\n");
+ 
 diff --git i/osfmk/arm/commpage/commpage_asm.s w/osfmk/arm/commpage/commpage_asm.s
 index 4a74130..14f1a6b 100644
 --- i/osfmk/arm/commpage/commpage_asm.s
@@ -541,7 +552,7 @@ index 0554aa8..4bb305b 100644
  #else
  	/* Run the registered interrupt handler. */
 diff --git i/osfmk/arm64/start.s w/osfmk/arm64/start.s
-index 6aa6fe4..baf32b2 100644
+index 6aa6fe4..ee6a35e 100644
 --- i/osfmk/arm64/start.s
 +++ w/osfmk/arm64/start.s
 @@ -33,7 +33,9 @@
@@ -639,7 +650,32 @@ index 6aa6fe4..baf32b2 100644
  	.align 12, 0
  
  #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
-@@ -399,7 +455,7 @@ start_cpu:
+@@ -291,6 +347,17 @@ LEXT(bootstrap_instructions)
+ #endif /* defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR) */
+ 	.align 2
+ 	.globl EXT(resume_idle_cpu)
++#if defined(A6PLTE)
++	/* Leave the halt-and-report vectors before normal IRQ handling starts. */
++	.globl EXT(a6_xnu_install_runtime_vectors)
++LEXT(a6_xnu_install_runtime_vectors)
++	adrp x0, EXT(ExceptionVectorsBase)@page
++	add x0, x0, EXT(ExceptionVectorsBase)@pageoff
++	msr VBAR_EL1, x0
++	isb
++	ret
++	.align 2
++#endif
+ LEXT(resume_idle_cpu)
+ 	adrp	lr, EXT(arm_init_idle_cpu)@page
+ 	add		lr, lr, EXT(arm_init_idle_cpu)@pageoff
+@@ -393,13 +460,14 @@ start_cpu:
+  *   arg5 - Scratch register
+  *   arg6 - Scratch register
+  *   arg7 - Scratch register
++ *   x8   - Lower descriptor attributes (normal RAM or bootstrap framebuffer)
+  */
+ .macro create_l2_block_entries
+ 	and		$4,	$0, #(ARM_TT_L2_INDEX_MASK)
  	lsr		$4, $4, #(ARM_TTE_BLOCK_L2_SHIFT)	// Get index in L2 table for block entry
  	lsl		$4, $4, #(TTE_SHIFT)				// Convert index into pointer offset
  	add		$4, $2, $4							// Get L2 entry pointer
@@ -648,7 +684,7 @@ index 6aa6fe4..baf32b2 100644
  	orr		$5, $5, #(ARM_TTE_BOOT_BLOCK_UPPER)
  	and		$6, $1, #(ARM_TTE_BLOCK_L2_MASK)	// Get address bits of block mapping
  	orr		$6, $5, $6
-@@ -467,8 +523,18 @@ start_cpu:
+@@ -467,8 +535,18 @@ start_cpu:
  	.globl EXT(start_first_cpu)
  LEXT(start_first_cpu)
  
@@ -669,7 +705,7 @@ index 6aa6fe4..baf32b2 100644
  	msr		DAIFSet, #(DAIFSC_ALL)				// Disable all interrupts
  
  	mov		x20, x0
-@@ -479,6 +545,12 @@ LEXT(start_first_cpu)
+@@ -479,6 +557,12 @@ LEXT(start_first_cpu)
  	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
  	MSR_VBAR_EL1_X0
  
@@ -682,7 +718,7 @@ index 6aa6fe4..baf32b2 100644
  
  	// Get the kernel memory parameters from the boot args
  	ldr		x22, [x20, BA_VIRT_BASE]			// Get the kernel virt base
-@@ -536,7 +608,11 @@ LEXT(start_first_cpu)
+@@ -536,7 +620,11 @@ LEXT(start_first_cpu)
  	mov		x0, #(ARM_TTE_EMPTY)				// Load invalid entry template
  	mov		x1, x25								// Start at V=P pagetable root
  	mov		x2, #(TTE_PGENTRIES)				// Load number of entries per page
@@ -694,7 +730,7 @@ index 6aa6fe4..baf32b2 100644
  
  Linvalidate_bootstrap:							// do {
  	str		x0, [x1], #(1 << TTE_SHIFT)			//   Invalidate and advance
-@@ -613,6 +689,7 @@ Lkernelcache_base_found:
+@@ -613,6 +701,7 @@ Lkernelcache_base_found:
  	 * x5 - total number of L2 entries to allocate
  	 */
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
@@ -702,7 +738,7 @@ index 6aa6fe4..baf32b2 100644
  	/* create_bootstrap_mapping(vbase, pbase, num_ents, L1 table, freeptr) */
  	create_bootstrap_mapping x0,  x4,  x5, x1, x2, x6, x10, x11, x12, x13
  
-@@ -620,6 +697,30 @@ Lkernelcache_base_found:
+@@ -620,6 +709,30 @@ Lkernelcache_base_found:
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
  	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
  
@@ -733,7 +769,7 @@ index 6aa6fe4..baf32b2 100644
  	/* Ensure TTEs are visible */
  	dsb		ish
  
-@@ -727,6 +828,11 @@ common_start:
+@@ -727,6 +840,11 @@ common_start:
  1:
  
  	// Set up the exception vectors
@@ -745,7 +781,7 @@ index 6aa6fe4..baf32b2 100644
  #if __ARM_KERNEL_PROTECT__
  	/* If this is not the first reset of the boot CPU, the alternate mapping
  	 * for the exception vectors will be set up, so use it.  Otherwise, we
-@@ -740,6 +846,7 @@ common_start:
+@@ -740,6 +858,7 @@ common_start:
  	add		x0, x0, EXT(ExceptionVectorsBase)@pageoff
  	add		x0, x0, x22									// Convert exception vector address to KVA
  	sub		x0, x0, x23
@@ -753,7 +789,7 @@ index 6aa6fe4..baf32b2 100644
  1:
  	MSR_VBAR_EL1_X0
  
-@@ -770,6 +877,9 @@ common_start:
+@@ -770,6 +889,9 @@ common_start:
  	msr		CPACR_EL1, x0
  #endif
  
@@ -763,7 +799,7 @@ index 6aa6fe4..baf32b2 100644
  	// Clear thread pointer
  	msr		TPIDR_EL1, xzr						// Set thread register
  
-@@ -781,10 +891,11 @@ common_start:
+@@ -781,10 +903,11 @@ common_start:
  	// Initialization common to all non-virtual Apple targets
  #endif  // APPLE_ARM64_ARCH_FAMILY
  
@@ -777,7 +813,7 @@ index 6aa6fe4..baf32b2 100644
  
  #if HAS_CLUSTER && !NO_CPU_OVRD
  	// Unmask external IRQs if we're restarting from non-retention WFI
-@@ -796,6 +907,15 @@ common_start:
+@@ -796,6 +919,15 @@ common_start:
  	// If x21 != 0, we're doing a warm reset, so we need to trampoline to the kernel pmap.
  	cbnz	x21, Ltrampoline
  
