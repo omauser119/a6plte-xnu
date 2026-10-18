@@ -971,6 +971,30 @@ index 7784e72..9aafe75 100644
  uint32_t cons_ops_index = VC_CONS_OPS;
  #else
  SECURITY_READ_ONLY_LATE(uint32_t) cons_ops_index = VC_CONS_OPS;
+diff --git i/osfmk/console/video_console.c w/osfmk/console/video_console.c
+index 648cb70..f27df27 100644
+--- i/osfmk/console/video_console.c
++++ w/osfmk/console/video_console.c
+@@ -2796,6 +2796,11 @@ vc_initialize(__unused struct vc_info * vinfo_p)
+ void
+ initialize_screen(PE_Video * boot_vinfo, unsigned int op)
+ {
++#if defined(A6PLTE)
++	/* Startup and IOKit also call this entry directly. Keep the packed RGB888
++	 * framebuffer with the board renderer across every screen transition. */
++	(void)PE_initialize_console(boot_vinfo, op);
++#else
+ 	unsigned int newMapSize = 0;
+ 	vm_offset_t newVideoVirt = 0;
+ 	boolean_t graphics_now;
+@@ -3048,6 +3053,7 @@ initialize_screen(PE_Video * boot_vinfo, unsigned int op)
+ 	}
+ #endif
+ 	}
++#endif /* A6PLTE */
+ }
+ 
+ void vcattach(void); /* XXX gcc 4 warning cleanup */
 diff --git i/osfmk/kern/debug.c w/osfmk/kern/debug.c
 index 48f9405..8e7ad1e 100644
 --- i/osfmk/kern/debug.c
@@ -1526,7 +1550,7 @@ index 937ce42..deffc98 100644
  	if (args != NULL) {
  		if (!pe_arm_map_interrupt_controller()) {
 diff --git i/pexpert/arm/pe_init.c w/pexpert/arm/pe_init.c
-index db1c4a0..9602448 100644
+index db1c4a0..60297a8 100644
 --- i/pexpert/arm/pe_init.c
 +++ w/pexpert/arm/pe_init.c
 @@ -218,6 +218,21 @@ check_for_panic_log(void)
@@ -1559,6 +1583,18 @@ index db1c4a0..9602448 100644
  }
  
  void
+@@ -311,7 +327,10 @@ PE_init_iokit(void)
+ 	scale = PE_state.video.v_scale;
+ 	flip = 1;
+ 
+-#if defined(XNU_TARGET_OS_OSX)
++#if defined(A6PLTE)
++	/* The board console retains the display; generic progress drawing is unused. */
++	show_progress = FALSE;
++#elif defined(XNU_TARGET_OS_OSX)
+ 	int notused;
+ 	show_progress = TRUE;
+ 	if (PE_parse_boot_argn("-restore", &notused, sizeof(notused))) {
 diff --git i/pexpert/arm/pe_kprintf.c w/pexpert/arm/pe_kprintf.c
 index 7a4bbd3..a7e8dae 100644
 --- i/pexpert/arm/pe_kprintf.c
