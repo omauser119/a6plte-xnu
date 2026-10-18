@@ -1,0 +1,9 @@
+/artifacts/
+/build/
+/toolchain/
+/xnu/
+/lk2nd/
+/reference/*
+!/reference/a6plte-r4.dts
+__pycache__/
+*.pyc

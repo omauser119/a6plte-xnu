@@ -1,0 +1,59 @@
+name: A6PLTE bring-up
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: bringup-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  framebuffer-and-lk2nd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang llvm lld device-tree-compiler mkbootimg gcc-arm-none-eabi libnewlib-arm-none-eabi ripgrep
+      - run: python3 scripts/fetch-sources.py
+      - run: ./scripts/test.sh
+      - run: ./scripts/build-smoke.sh
+      - run: ./scripts/build-lk2nd.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: framebuffer-and-lk2nd-NOT-XNU
+          path: |
+            artifacts/*boot.img
+            artifacts/lk2nd-a6plte-xnu.img
+            artifacts/*.log
+  xnu-apple-clang:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install bison flex tcsh
+      - name: Select Apple compiler and SDK
+        run: |
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+          echo "SDK=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          clang --version
+      - run: python3 scripts/fetch-sources.py
+      - name: Platform objects and MIG generation
+        run: ./scripts/check-platform.sh > platform.log 2>&1
+      - name: Check OSFMK objects
+        if: success()
+        run: python3 scripts/check-component.py osfmk > osfmk.log 2>&1
+      - name: Check generated MIG objects
+        if: always() && hashFiles('build/mig-generated/results.json') != ''
+        run: python3 scripts/check-component.py mig > mig.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xnu-compile-diagnostics-NOT-A-KERNEL
+          path: |
+            *.log
+            artifacts/**/*.log
+            artifacts/**/results.json
+            build/mig-generated/results.json

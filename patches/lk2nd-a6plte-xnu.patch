@@ -1,0 +1,116 @@
+diff --git i/app/aboot/aboot.c w/app/aboot/aboot.c
+index b44a5c2..2ec4725 100644
+--- i/app/aboot/aboot.c
++++ w/app/aboot/aboot.c
+@@ -1205,6 +1205,8 @@ void boot_linux(void *kernel, unsigned *tags,
+ 		enum boot_type boot_type)
+ {
+ 	unsigned char *final_cmdline;
++	/* The XNU bridge inherits MDSS/DSI state. Exact leading token only. */
++	bool preserve_xnu = cmdline && !strncmp(cmdline, "a6plte-xnu ", 11);
+ #if DEVICE_TREE
+ 	int ret = 0;
+ #endif
+@@ -1282,11 +1284,13 @@ tags_done:
+ 
+ 	/* Turn off splash screen if enabled */
+ #if DISPLAY_SPLASH_SCREEN
+-	target_display_shutdown();
++	if (!preserve_xnu)
++		target_display_shutdown();
+ #endif
+ 
+ 	/* Perform target specific cleanup */
+-	target_uninit();
++	if (!preserve_xnu)
++		target_uninit();
+ #if VERIFIED_BOOT_2
+ 	free_verified_boot_resource(&info);
+ #endif
+@@ -1299,7 +1303,8 @@ tags_done:
+ 	enter_critical_section();
+ 
+ 	/* do any platform specific cleanup before kernel entry */
+-	platform_uninit();
++	if (!preserve_xnu)
++		platform_uninit();
+ 
+ 	arch_disable_cache(UCACHE);
+ 
+diff --git i/lk2nd/display/cont-splash/refresh.c w/lk2nd/display/cont-splash/refresh.c
+index c7e4424..bd1ba77 100644
+--- i/lk2nd/display/cont-splash/refresh.c
++++ w/lk2nd/display/cont-splash/refresh.c
+@@ -121,7 +121,9 @@ static void mdp5_enable_auto_refresh(struct fbcon_config *fb)
+ 	uint32_t mdss_mdp_rev = readl(MDP_HW_REV);
+ 	uint32_t pp0_base;
+ 
+-	if (mdss_mdp_rev >= MDSS_MDP_HW_REV_105)
++	if (MDSS_IS_MAJOR_MINOR_MATCHING(mdss_mdp_rev, MDSS_MDP_HW_REV_116))
++		pp0_base = MDP_PP_0_BASE;
++	else if (mdss_mdp_rev >= MDSS_MDP_HW_REV_105)
+ 		pp0_base = REG_MDP(0x71000);
+ 	else if (mdss_mdp_rev >= MDSS_MDP_HW_REV_102)
+ 		pp0_base = REG_MDP(0x12D00);
+diff --git i/platform/msm_shared/dev_tree.c w/platform/msm_shared/dev_tree.c
+index 86757c0..a160425 100644
+--- i/platform/msm_shared/dev_tree.c
++++ w/platform/msm_shared/dev_tree.c
+@@ -2096,6 +2096,35 @@ static void dev_tree_update_memory_node(uint32_t offset)
+ 	mem_node.size_cell_size = 1;
+ }
+ 
++/*
++ * Linux DTs conventionally name the node memory@<base>.  Older LK code used
++ * the abbreviated /memory path, which rejects those DTs before it can fill
++ * the real RAM map from SMEM.  Keep the old path first and fall back to the
++ * standard device_type property.
++ */
++static int dev_tree_find_memory_node(const void *fdt)
++{
++	int node;
++	int depth;
++	int len;
++	const char *type;
++
++	node = fdt_path_offset(fdt, "/memory");
++	if (node >= 0)
++		return node;
++
++	depth = 0;
++	for (node = fdt_next_node(fdt, -1, &depth);
++	     node >= 0;
++	     node = fdt_next_node(fdt, node, &depth)) {
++		type = fdt_getprop(fdt, node, "device_type", &len);
++		if (type && len == 7 && !memcmp(type, "memory\0", 7))
++			return node;
++	}
++
++	return -FDT_ERR_NOTFOUND;
++}
++
+ /* Function to add the subsequent RAM partition info to the device tree. */
+ int dev_tree_add_mem_info(void *fdt, uint32_t offset, uint64_t addr, uint64_t size)
+ {
+@@ -2258,7 +2287,7 @@ int update_device_tree(void *fdt, const char *cmdline, enum boot_type boot_type,
+ 	}
+ 
+ 	/* Get offset of the memory node */
+-	ret = fdt_path_offset(fdt, "/memory");
++	ret = dev_tree_find_memory_node(fdt);
+ 	if (ret < 0)
+ 	{
+ 		dprintf(CRITICAL, "Could not find memory node.\n");
+diff --git i/project/lk2nd-msm8953-a6plte-xnu.mk w/project/lk2nd-msm8953-a6plte-xnu.mk
+new file mode 100644
+index 0000000..5bf8338
+--- /dev/null
++++ w/project/lk2nd-msm8953-a6plte-xnu.mk
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: BSD-2-Clause
++TARGET := msm8953
++DEBUG_FBCON := 1
++include lk2nd/project/lk2nd.mk
++# No UART or DCC initialization or output in this build.
++DEFINES := $(filter-out WITH_DEBUG_UART=% WITH_DEBUG_DCC=% WITH_DEBUG_JTAG=%, $(DEFINES))
++DEFINES += WITH_DEBUG_UART=0 WITH_DEBUG_DCC=0 WITH_DEBUG_JTAG=0

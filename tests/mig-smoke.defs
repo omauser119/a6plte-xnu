@@ -1,0 +1,3 @@
+subsystem a6_mig_smoke 48000;
+#include <mach/std_types.defs>
+routine Ping(server: mach_port_t; in value: integer_t);
