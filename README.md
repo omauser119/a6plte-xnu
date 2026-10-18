@@ -2,6 +2,11 @@
 
 **Experimental XNU 12377 port. ARM64 kernel and lk2nd boot image build successfully. UART is not used.**
 
+The first complete milestone is a Darwin ramdisk built from Apple Open Source,
+with an interactive Bash session over SSH through USB Ethernet. The
+[project roadmap](ROADMAP.md) records the hardware evidence, dependencies and
+acceptance checks for each step.
+
 The modified lk2nd menu and the first framebuffer output from the actual linked
 XNU kernel have been confirmed on SM-A605FN. After temporary loading with
 `fastboot boot`, XNU prints `start_first_cpu: MMU OFF` and
@@ -34,7 +39,7 @@ Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download the RGB888 console update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup3).
+[Download the bootstrap random update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup4).
 
 ## GitHub Actions
 
@@ -45,8 +50,8 @@ framebuffer physical address 0x90001000. GIC integration is not hardware-validat
 - **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
 Artifacts include the linked XNU kernel, packaged boot image, lk2nd image and
-build diagnostics. All three jobs passed for the RGB888 console update
-([run 39155881013](https://github.com/omauser119/a6plte-xnu/actions/runs/39155881013), source `c29dd20`).
+build diagnostics. All three jobs passed for the bootstrap random update
+([run 39157836872](https://github.com/omauser119/a6plte-xnu/actions/runs/39157836872), source `0654e57`).
 A successful build does not establish runtime progress on hardware. No workflow
 flashes a device.
 
