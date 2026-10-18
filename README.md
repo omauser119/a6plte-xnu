@@ -37,14 +37,21 @@ board-name match and a higher probe score than the fallback. It uses the native
 platform and power-domain setup, publishes CPU/SoC device-tree services, and
 keeps unavailable firmware NVRAM absent. It also finalizes discovery of the single
 boot CPU so `kperf` can leave `ml_wait_max_cpus()`.
-The first platform-expert image was temporarily loaded. Hardware reports show
-progress through ZALLOC startup ranks, with full callback tracing slowing output;
-successful platform registration is not yet confirmed.
+Hardware now confirms successful platform registration and entry into BSD
+initialization: the MAC framework and network buffer pools initialize. The next
+photographed panic is `pthread kernel extension not loaded (function table is
+NULL)`. The source now builds Apple's actual libpthread kernel component into
+the image, registers its function table before lockdown, and adapts its private
+ABI to this XNU revision. The image was temporarily loaded; progress beyond the
+previous panic still needs hardware validation.
 Native `startup_debug=1` tracing is enabled in the bridge's boot arguments.
 On A6PLTE this now prints startup stages without logging every startup callback.
 `startup_debug=3` also enables per-callback addresses for targeted diagnosis;
-frequent scrolling on the early framebuffer is slow. Regular kernel logs and
-panic output are unaffected by this trace selection.
+Regular kernel logs and panic output are unaffected by this trace selection.
+Framebuffer scrolling and clearing now use aligned scalar 64-bit transfers, with
+a byte fallback for unaligned geometry. Host tests compare 648 configurations
+against a byte-exact reference under address and undefined-behavior sanitizers;
+the speed improvement has not yet been measured on the phone.
 The random changes do not register a full corecrypto provider.
 Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 
@@ -66,12 +73,14 @@ Timer interrupts, sustained scheduling and userspace are not yet confirmed.
   Apple Image4/AMFI providers are absent; no NULL provider callbacks are invoked.
 - Built-in A6PLTE IOKit platform expert and matching personality, with native
   device-tree nub publication for the bridge's CPU and SoC nodes.
+- Built-in Apple libpthread kernel sources for native thread and synchronization
+  callbacks, with a shared wait-queue layout and early provider registration.
 - Pinned upstream patches, native config/MIG tools and component compilation probes.
 
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download the concise startup-trace update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup8).
+[Download the pthread and framebuffer-scroll update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup9).
 
 ## GitHub Actions
 
@@ -82,8 +91,8 @@ framebuffer physical address 0x90001000. GIC integration is not hardware-validat
 - **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
 Artifacts include the linked XNU kernel, packaged boot image, lk2nd image and
-build diagnostics. All three jobs passed for the concise startup-trace update
-([run 39164037581](https://github.com/omauser119/a6plte-xnu/actions/runs/39164037581), source `fbb4927`).
+build diagnostics. All three jobs passed for the pthread and framebuffer-scroll update
+([run 39166107962](https://github.com/omauser119/a6plte-xnu/actions/runs/39166107962), source `af76c83`).
 A successful build does not establish runtime progress on hardware. No workflow
 flashes a device.
 
@@ -159,6 +168,8 @@ Upstream sources are fetched at fixed commits; this repository stores patches:
 - [lk2nd](https://github.com/msm8916-mainline/lk2nd), `dd6c1db1c085b419ac5dfffbd429aadb994ac094`.
 - [XNU rel/xnu-12377](https://github.com/apple-oss-distributions/xnu/tree/rel/xnu-12377),
   `ac9718fb1af618d5ce8678d0dc6e8a58f252216f` (12377.121.6).
+- [libpthread-539.100.4](https://github.com/apple-oss-distributions/libpthread/tree/libpthread-539.100.4),
+  `1f4f5265b319111142f1bf3a27d4484ef5a98314`, kernel component.
 - [bootstrap_cmds](https://github.com/apple-oss-distributions/bootstrap_cmds),
   `c71d2d72f48995baaea76148f61002e5299841de`, native MIG.
 - [PureDarwin](https://github.com/PureDarwin/PureDarwin),
