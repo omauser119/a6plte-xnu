@@ -134,6 +134,68 @@ index 4b1e8a9..706f289 100644
  #if CONFIG_SPTM
  	ret = txm_query_trust_cache(query_type, cdhash, query_token);
  #elif PMAP_CS_PPL_MONITOR
+diff --git i/bsd/pthread/pthread_shims.c w/bsd/pthread/pthread_shims.c
+index e5e58b5..29dbc4e 100644
+--- i/bsd/pthread/pthread_shims.c
++++ w/bsd/pthread/pthread_shims.c
+@@ -60,6 +60,11 @@
+ /* version number of the in-kernel shims given to pthread.kext */
+ #define PTHREAD_SHIMS_VERSION 1
+ 
++#if A6PLTE
++#include <kern/startup.h>
++#include <mach/kmod.h>
++#endif
++
+ #define PTHREAD_CALLBACK_MEMBER kevent_workq_internal
+ 
+ /* compile time asserts to check the length of structures in pthread_shims.h */
+@@ -624,6 +629,21 @@ static const struct pthread_callbacks_s pthread_callbacks = {
+ SECURITY_READ_ONLY_LATE(pthread_callbacks_t) pthread_kern = &pthread_callbacks;
+ SECURITY_READ_ONLY_LATE(pthread_functions_t) pthread_functions = NULL;
+ 
++#if A6PLTE
++/* Register the real built-in Apple libpthread table before read-only lockdown. */
++extern kern_return_t pthread_start(kmod_info_t *, void *);
++static void
++a6_pthread_register(void)
++{
++	if (pthread_start(NULL, NULL) != KERN_SUCCESS || pthread_functions == NULL ||
++	    pthread_functions->pthread_init == NULL) {
++		panic("A6PLTE: Apple pthread kernel component registration failed");
++	}
++	kprintf("A6PLTE: Apple pthread kernel component registered\n");
++}
++STARTUP(EARLY_BOOT, STARTUP_RANK_FIRST, a6_pthread_register);
++#endif
++
+ /*
+  * pthread_kext_register is called by pthread.kext upon load, it has to provide
+  * us with a function pointer table of pthread internal calls. In return, this
+diff --git i/bsd/sys/pthread_internal.h w/bsd/sys/pthread_internal.h
+index 42e23d8..c355403 100644
+--- i/bsd/sys/pthread_internal.h
++++ w/bsd/sys/pthread_internal.h
+@@ -33,7 +33,18 @@
+ #include <kern/thread_call.h>
+ 
+ struct ksyn_waitq_element {
+-#if __LP64__
++#if A6PLTE
++	/* Built-in Apple libpthread-539.100.4 wait-state layout, shared with XNU. */
++	TAILQ_ENTRY(ksyn_waitq_element) kwe_list;
++	void *kwe_kwqqueue;
++	thread_t kwe_thread;
++	uint16_t kwe_state;
++	uint16_t kwe_flags;
++	uint32_t kwe_lockseq;
++	uint32_t kwe_count;
++	uint32_t kwe_psynchretval;
++	void *kwe_uth;
++#elif __LP64__
+ 	char opaque[48];
+ #else
+ 	char opaque[32];
 diff --git i/config/MASTER.arm64.a6plte.MacOSX w/config/MASTER.arm64.a6plte.MacOSX
 new file mode 100644
 index 0000000..d983bb1
@@ -1853,10 +1915,10 @@ index 0000000..1727b0b
 +#endif
 diff --git i/pexpert/arm/a6plte/fb.c w/pexpert/arm/a6plte/fb.c
 new file mode 100644
-index 0000000..a5af984
+index 0000000..1bec1ee
 --- /dev/null
 +++ w/pexpert/arm/a6plte/fb.c
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,88 @@
 +#if defined(A6PLTE)
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#include "fb.h"
@@ -1871,6 +1933,24 @@ index 0000000..a5af984
 +    __asm__ volatile("dsb sy" ::: "memory");
 +#endif
 +}
++typedef uint64_t a6_word __attribute__((__may_alias__));
++static void clear_bytes(volatile uint8_t *dst, uint64_t n) {
++    while (n && ((uintptr_t)dst & 7)) { *dst++=0; --n; }
++    while (n>=8) { *(volatile a6_word *)dst=0; dst+=8; n-=8; }
++    while (n--) *dst++=0;
++}
++static void scroll_bytes(volatile uint8_t *dst, const volatile uint8_t *src, uint64_t n) {
++    /* Forward memmove: the source is at a higher address than the destination.
++     * Naturally aligned scalar accesses are valid for Device memory too. */
++    if ((((uintptr_t)dst ^ (uintptr_t)src) & 7)==0) {
++        while (n && ((uintptr_t)dst & 7)) { *dst++=*src++; --n; }
++        while (n>=8) {
++            *(volatile a6_word *)dst=*(const volatile a6_word *)src;
++            dst+=8; src+=8; n-=8;
++        }
++    }
++    while (n--) *dst++=*src++;
++}
 +int a6_fb_init(struct a6_fb *f, uintptr_t base, uint64_t size,
 +               uint32_t w, uint32_t h, uint32_t stride, uint32_t format) {
 +    unsigned p = bpp(format);
@@ -1882,7 +1962,7 @@ index 0000000..a5af984
 +}
 +void a6_fb_clear(struct a6_fb *f) {
 +    if (!f->base) return;
-+    for (uint64_t i=0; i<(uint64_t)f->stride*f->height; ++i) f->base[i]=0;
++    clear_bytes(f->base,(uint64_t)f->stride*f->height);
 +    f->x=f->y=0;
 +    barrier();
 +}
@@ -1896,8 +1976,8 @@ index 0000000..a5af984
 +    uint32_t rows=f->height/CH;
 +    if (f->y < rows) return;
 +    uint64_t line=(uint64_t)CH*f->stride, used=(uint64_t)rows*line;
-+    for (uint64_t i=0; i<used-line; ++i) f->base[i]=f->base[i+line];
-+    for (uint64_t i=used-line; i<used; ++i) f->base[i]=0;
++    scroll_bytes(f->base,f->base+line,used-line);
++    clear_bytes(f->base+used-line,line);
 +    f->y=rows-1;
 +}
 +void a6_fb_putc(struct a6_fb *f, char ch) {

@@ -5,10 +5,12 @@ from concurrent.futures import ThreadPoolExecutor
 import json, os, re, subprocess, sys
 root = Path(__file__).resolve().parents[1]
 component = sys.argv[1] if len(sys.argv) > 1 else 'osfmk'
-if component not in ('osfmk', 'pexpert', 'mig', 'bsd', 'libkern', 'iokit', 'libsa', 'security', 'san'):
+if component not in ('osfmk', 'pexpert', 'mig', 'bsd', 'libkern', 'iokit', 'libsa', 'security', 'san', 'pthread'):
     raise SystemExit('Unsupported XNU component')
 sources = []
-if component == 'mig':
+if component == 'pthread':
+    sources = ['reference/libpthread/kern/'+name+'.c' for name in ('kern_init','kern_support','kern_synch')]
+elif component == 'mig':
     makefile=(root/'build/xnu/osfmk/Makefile').read_text().replace('\\\n', ' ')
     match=re.search(r'^CFILES\s*=([^\n]*)',makefile,re.M)
     for path in re.findall(r'(?<!\S)\./([^\s]+)', match[1]):
