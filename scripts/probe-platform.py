@@ -24,6 +24,8 @@ flags += ['-D'+name+'=1' for name in component_defines[component]]
 if source.endswith(('.cpp', '.cc')):
     flags[0] = 'clang++'
     flags.remove('-std=gnu17')
+    sdk=Path(os.environ.get('SDK',str(Path.home()/'.local/share/theos/sdks/iPhoneOS16.5.sdk')))
+    flags += ['-I'+str(r/'build/cxx-compiler'), '-I'+str(sdk/'usr/include/c++/v1')]
     flags += ['-std=gnu++2b', '-nostdinc++', '-fsized-deallocation', '-fapple-kext', '-fno-rtti', '-I'+str(r/'build/cxx-support')]
 
 if component != 'osfmk': flags += ['-I'+str(r/'build/export-headers')]
@@ -39,9 +41,6 @@ if source.startswith('reference/libdispatch/'):
 if source.startswith('osfmk/corecrypto/'): flags+=['-I'+str(x/'EXTERNAL_HEADERS/corecrypto')]
 if mig_generated: flags += ['-I'+str(r/'build/kernel-headers'/directory) for directory in ('gssd', 'lockd', 'kextd')]
 if mig_generated: flags+=['-I'+str(r/'build/kernel-headers/mach'),'-I'+str(r/'build/kernel-headers/device'),'-I'+str(r/'build/kernel-headers/UserNotification')]
-if source.endswith(('.cpp', '.cc')):
-    sdk=Path(os.environ.get('SDK',str(Path.home()/'.local/share/theos/sdks/iPhoneOS16.5.sdk')))
-    flags += ['-idirafter',str(sdk/'usr/include/c++/v1')]
 assembly=source.endswith('/genassym.c')
 if assembly: flags+=['-fno-integrated-as']
 if source in ('pexpert/arm/a6plte/early.c','pexpert/arm/a6plte/fb.c'):

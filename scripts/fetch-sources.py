@@ -17,6 +17,6 @@ for directory,repo,commit,patch in sources:
     git('fetch','--depth=1','origin',commit)
     if directory=='reference/platform-headers':
         git('sparse-checkout','init','--cone')
-        git('sparse-checkout','set','EXTERNAL_HEADERS/CoreEntitlements/V2','EXTERNAL_HEADERS/TrustCache')
+        git('sparse-checkout','set','EXTERNAL_HEADERS/CoreEntitlements/V2','EXTERNAL_HEADERS/TrustCache','EXTERNAL_HEADERS/CodeSignature')
     git('checkout','--detach','FETCH_HEAD')
     if patch: git('apply',str(r/'patches'/patch))

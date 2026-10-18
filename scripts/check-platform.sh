@@ -10,6 +10,7 @@ cd "$ROOT"
 mkdir -p build/kernel-headers/{san,mach,CoreEntitlements} artifacts
 cp -R reference/platform-headers/EXTERNAL_HEADERS/CoreEntitlements/V2 build/kernel-headers/CoreEntitlements/
 cp -R reference/platform-headers/EXTERNAL_HEADERS/TrustCache build/kernel-headers/
+cp -R reference/platform-headers/EXTERNAL_HEADERS/CodeSignature build/kernel-headers/
 ln -sfn "$ROOT/xnu/osfmk/libsa/string.h" build/kernel-headers/string.h
 ln -sfn "$ROOT/xnu/osfmk/libsa/types.h" build/kernel-headers/types.h
 ln -sfn "$ROOT/xnu/osfmk/libsa/stdlib.h" build/kernel-headers/stdlib.h
@@ -19,12 +20,13 @@ done
 for header in Availability.h AvailabilityInternal.h AvailabilityMacros.h AvailabilityVersions.h; do
     ln -sfn "$SDK/usr/include/$header" "build/kernel-headers/$header"
 done
-mkdir -p build/cxx-support
+mkdir -p build/cxx-support build/cxx-compiler
+ln -sfn "$(clang -print-resource-dir)/include/stdatomic.h" build/cxx-compiler/stdatomic.h
 for header in errno.h stdio.h stdlib.h; do
     ln -sfn "$ROOT/xnu/libkern/libcxx_support/$header" "build/cxx-support/$header"
 done
 mkdir -p build/kernel-headers/skywalk
-for header in xnu/bsd/skywalk/*/os_*.h; do
+for header in xnu/bsd/skywalk/*/*.h; do
     ln -sfn "$ROOT/$header" "build/kernel-headers/skywalk/$(basename "$header")"
 done
 ./scripts/generate-version.sh
