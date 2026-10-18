@@ -211,7 +211,7 @@ index e37762b..d4c57c8 100644
  
  ifeq ($(ARM64_LARGE_MEMORY),1)
 diff --git i/osfmk/arm/arm_init.c w/osfmk/arm/arm_init.c
-index 6690846..ac35993 100644
+index 6690846..d470c14 100644
 --- i/osfmk/arm/arm_init.c
 +++ w/osfmk/arm/arm_init.c
 @@ -356,6 +356,12 @@ arm_init(
@@ -241,12 +241,15 @@ index 6690846..ac35993 100644
  
  	if (debug_boot_arg) {
  		patch_low_glo();
-@@ -583,6 +595,10 @@ arm_init(
+@@ -583,6 +595,13 @@ arm_init(
  
  	/* Setup debugging output. */
  	const unsigned int serial_exists = serial_init();
 +#if defined(A6PLTE)
 +	extern void a6_xnu_install_runtime_vectors(void);
++	if (!serial_exists) {
++		panic("A6PLTE: framebuffer remapping failed");
++	}
 +	a6_xnu_install_runtime_vectors();
 +#endif
  	kernel_startup_initialize_upto(STARTUP_SUB_KPRINTF);
@@ -432,10 +435,20 @@ index 0000000..8570b16
 +}
 +#endif
 diff --git i/osfmk/arm64/arm_vm_init.c w/osfmk/arm64/arm_vm_init.c
-index 756af52..73f7763 100644
+index 756af52..d8f196a 100644
 --- i/osfmk/arm64/arm_vm_init.c
 +++ w/osfmk/arm64/arm_vm_init.c
-@@ -1841,6 +1841,10 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -357,6 +357,9 @@ SECURITY_READ_ONLY_LATE(vm_offset_t) arm_vm_kernelcache_phys_end;
+ 
+ #if __ARM_KERNEL_PROTECT__
+ extern void ExceptionVectorsBase;
++#if defined(A6PLTE)
++extern void LowExceptionVectorBase;
++#endif
+ extern void ExceptionVectorsEnd;
+ #endif /* __ARM_KERNEL_PROTECT__ */
+ 
+@@ -1841,6 +1844,10 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	 */
  	gPhysSize = mem_size = ((gPhysBase + args->memSize) & ~PAGE_MASK) - gPhysBase;
  	mem_actual = args->memSizeActual ? args->memSizeActual : mem_size;
@@ -446,7 +459,7 @@ index 756af52..73f7763 100644
  
  	if ((memory_size != 0) && (mem_size > memory_size)) {
  		mem_size = memory_size;
-@@ -1862,7 +1866,13 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1862,7 +1869,13 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  
  	// Slide the physical aperture to a random page-aligned location within the slide range
@@ -460,7 +473,7 @@ index 756af52..73f7763 100644
  	assert(physmap_slide < ARM64_PHYSMAP_SLIDE_RANGE);
  
  	physmap_base += physmap_slide;
-@@ -1945,6 +1955,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1945,6 +1958,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  
  	/* Initialize invalid tte page */
@@ -470,7 +483,7 @@ index 756af52..73f7763 100644
  	invalid_tte = (tt_entry_t *)alloc_ptpage(TRUE);
  	invalid_ttep = kvtophys((vm_offset_t)invalid_tte);
  	bzero(invalid_tte, ARM_PGBYTES);
-@@ -1991,6 +2004,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1991,6 +2007,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	/*
  	 * Now retrieve addresses for various segments from kernel mach-o header
  	 */
@@ -480,7 +493,7 @@ index 756af52..73f7763 100644
  	segPRELINKTEXTB  = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PRELINK_TEXT", &segSizePRELINKTEXT);
  	segPLKDATACONSTB = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PLK_DATA_CONST", &segSizePLKDATACONST);
  	segPLKTEXTEXECB  = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PLK_TEXT_EXEC", &segSizePLKTEXTEXEC);
-@@ -2121,6 +2137,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2121,6 +2140,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	vm_prelink_sdata = segPRELINKDATAB;
  	vm_prelink_edata = segPRELINKDATAB + segSizePRELINKDATA;
  
@@ -490,7 +503,7 @@ index 756af52..73f7763 100644
  	arm_vm_prot_init(args);
  
  	/*
-@@ -2161,10 +2180,21 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2161,14 +2183,32 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	kasan_init();
  #endif /* KASAN */
  
@@ -500,9 +513,11 @@ index 756af52..73f7763 100644
  	arm_vm_physmap_init(args);
 +#if defined(A6PLTE)
 +	extern void a6_xnu_puts(const char *);
-+	extern void a6_xnu_suspend_console(void);
 +	a6_xnu_puts("arm_vm_init: switching to final page tables\n");
-+	a6_xnu_suspend_console();
++	/* Keep TTBR0 and the physical exception reporter until the final console
++	 * is mapped. A broken TTBR1 must still produce a visible fault report. */
++	vm_offset_t low_vectors_pa = kvtophys((vm_offset_t)&LowExceptionVectorBase);
++	__asm__ volatile("msr VBAR_EL1, %0; isb" :: "r"(low_vectors_pa) : "memory");
 +#endif
  	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
  
@@ -510,8 +525,17 @@ index 756af52..73f7763 100644
  	ml_enable_monitor();
 +#endif /* A6PLTE uses the Qualcomm EL3 monitor, not Apple's memory monitor. */
  
++#if !defined(A6PLTE)
  	set_mmu_ttb(invalid_ttep & TTBR_BADDR_MASK);
++#endif
  
+ 	flush_mmu_tlb();
++#if defined(A6PLTE)
++	kprintf("arm_vm_init: final TTBR1 active\n");
++#endif
+ 	kva_active = TRUE;
+ 	// global table pointers may need to be different due to physical aperture remapping
+ 	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
 diff --git i/osfmk/arm64/caches_asm.s w/osfmk/arm64/caches_asm.s
 index 1588830..ff2b64e 100644
 --- i/osfmk/arm64/caches_asm.s
@@ -611,7 +635,7 @@ index 0554aa8..4bb305b 100644
  #else
  	/* Run the registered interrupt handler. */
 diff --git i/osfmk/arm64/start.s w/osfmk/arm64/start.s
-index 6aa6fe4..ee6a35e 100644
+index 6aa6fe4..33c3cb2 100644
 --- i/osfmk/arm64/start.s
 +++ w/osfmk/arm64/start.s
 @@ -33,7 +33,9 @@
@@ -709,7 +733,7 @@ index 6aa6fe4..ee6a35e 100644
  	.align 12, 0
  
  #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
-@@ -291,6 +347,17 @@ LEXT(bootstrap_instructions)
+@@ -291,6 +347,28 @@ LEXT(bootstrap_instructions)
  #endif /* defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR) */
  	.align 2
  	.globl EXT(resume_idle_cpu)
@@ -721,13 +745,24 @@ index 6aa6fe4..ee6a35e 100644
 +	add x0, x0, EXT(ExceptionVectorsBase)@pageoff
 +	msr VBAR_EL1, x0
 +	isb
++	/* serial_init has installed a final KVA framebuffer mapping. Retire the
++	 * temporary identity map only after that mapping and real vectors work. */
++	adrp x1, EXT(invalid_ttep)@page
++	add x1, x1, EXT(invalid_ttep)@pageoff
++	ldr x1, [x1]
++	dsb ish
++	msr TTBR0_EL1, x1
++	isb
++	tlbi vmalle1
++	dsb ish
++	isb
 +	ret
 +	.align 2
 +#endif
  LEXT(resume_idle_cpu)
  	adrp	lr, EXT(arm_init_idle_cpu)@page
  	add		lr, lr, EXT(arm_init_idle_cpu)@pageoff
-@@ -393,13 +460,14 @@ start_cpu:
+@@ -393,13 +471,14 @@ start_cpu:
   *   arg5 - Scratch register
   *   arg6 - Scratch register
   *   arg7 - Scratch register
@@ -743,7 +778,7 @@ index 6aa6fe4..ee6a35e 100644
  	orr		$5, $5, #(ARM_TTE_BOOT_BLOCK_UPPER)
  	and		$6, $1, #(ARM_TTE_BLOCK_L2_MASK)	// Get address bits of block mapping
  	orr		$6, $5, $6
-@@ -467,8 +535,18 @@ start_cpu:
+@@ -467,8 +546,18 @@ start_cpu:
  	.globl EXT(start_first_cpu)
  LEXT(start_first_cpu)
  
@@ -764,7 +799,7 @@ index 6aa6fe4..ee6a35e 100644
  	msr		DAIFSet, #(DAIFSC_ALL)				// Disable all interrupts
  
  	mov		x20, x0
-@@ -479,6 +557,12 @@ LEXT(start_first_cpu)
+@@ -479,6 +568,12 @@ LEXT(start_first_cpu)
  	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
  	MSR_VBAR_EL1_X0
  
@@ -777,7 +812,7 @@ index 6aa6fe4..ee6a35e 100644
  
  	// Get the kernel memory parameters from the boot args
  	ldr		x22, [x20, BA_VIRT_BASE]			// Get the kernel virt base
-@@ -536,7 +620,11 @@ LEXT(start_first_cpu)
+@@ -536,7 +631,11 @@ LEXT(start_first_cpu)
  	mov		x0, #(ARM_TTE_EMPTY)				// Load invalid entry template
  	mov		x1, x25								// Start at V=P pagetable root
  	mov		x2, #(TTE_PGENTRIES)				// Load number of entries per page
@@ -789,7 +824,7 @@ index 6aa6fe4..ee6a35e 100644
  
  Linvalidate_bootstrap:							// do {
  	str		x0, [x1], #(1 << TTE_SHIFT)			//   Invalidate and advance
-@@ -613,6 +701,7 @@ Lkernelcache_base_found:
+@@ -613,6 +712,7 @@ Lkernelcache_base_found:
  	 * x5 - total number of L2 entries to allocate
  	 */
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
@@ -797,7 +832,7 @@ index 6aa6fe4..ee6a35e 100644
  	/* create_bootstrap_mapping(vbase, pbase, num_ents, L1 table, freeptr) */
  	create_bootstrap_mapping x0,  x4,  x5, x1, x2, x6, x10, x11, x12, x13
  
-@@ -620,6 +709,30 @@ Lkernelcache_base_found:
+@@ -620,6 +720,30 @@ Lkernelcache_base_found:
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
  	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
  
@@ -828,7 +863,7 @@ index 6aa6fe4..ee6a35e 100644
  	/* Ensure TTEs are visible */
  	dsb		ish
  
-@@ -727,6 +840,11 @@ common_start:
+@@ -727,6 +851,11 @@ common_start:
  1:
  
  	// Set up the exception vectors
@@ -840,7 +875,7 @@ index 6aa6fe4..ee6a35e 100644
  #if __ARM_KERNEL_PROTECT__
  	/* If this is not the first reset of the boot CPU, the alternate mapping
  	 * for the exception vectors will be set up, so use it.  Otherwise, we
-@@ -740,6 +858,7 @@ common_start:
+@@ -740,6 +869,7 @@ common_start:
  	add		x0, x0, EXT(ExceptionVectorsBase)@pageoff
  	add		x0, x0, x22									// Convert exception vector address to KVA
  	sub		x0, x0, x23
@@ -848,7 +883,7 @@ index 6aa6fe4..ee6a35e 100644
  1:
  	MSR_VBAR_EL1_X0
  
-@@ -770,6 +889,9 @@ common_start:
+@@ -770,6 +900,9 @@ common_start:
  	msr		CPACR_EL1, x0
  #endif
  
@@ -858,7 +893,7 @@ index 6aa6fe4..ee6a35e 100644
  	// Clear thread pointer
  	msr		TPIDR_EL1, xzr						// Set thread register
  
-@@ -781,10 +903,11 @@ common_start:
+@@ -781,10 +914,11 @@ common_start:
  	// Initialization common to all non-virtual Apple targets
  #endif  // APPLE_ARM64_ARCH_FAMILY
  
@@ -872,7 +907,7 @@ index 6aa6fe4..ee6a35e 100644
  
  #if HAS_CLUSTER && !NO_CPU_OVRD
  	// Unmask external IRQs if we're restarting from non-retention WFI
-@@ -796,6 +919,15 @@ common_start:
+@@ -796,6 +930,15 @@ common_start:
  	// If x21 != 0, we're doing a warm reset, so we need to trampoline to the kernel pmap.
  	cbnz	x21, Ltrampoline
  
