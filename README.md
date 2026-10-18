@@ -24,7 +24,7 @@ fastboot transfer/boot commands; XNU screen output still needs confirmation.
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download the first linked kernel and lk2nd build](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup1).
+[Download the display and bootstrap-alignment update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup2).
 
 ## GitHub Actions
 
