@@ -102,7 +102,7 @@ void xnu_load(struct platform *p,const void *dtb,struct range image) {
     args->video=(struct a6_boot_video){(uintptr_t)fb->base,0,fb->stride,fb->width,fb->height,fb->format==A6_RGB888?24:fb->format==A6_XRGB8888?32:16};
     /* XNU consumes a virtual DT pointer after its bootstrap identity -> KVA transition. */
     args->device_tree=h.virt+tree_pa-dest; args->device_tree_length=tree_size;
-    const char cmd[]="-v debug=0x14 cpus=1 serial=1";
+    const char cmd[]="-v debug=0x14 cpus=1 serial=1 startup_debug=1";
     copy(args->command_line,cmd,sizeof(cmd));
     a6_fb_puts(fb,"Entering experimental XNU. Waiting for XNU marker.\n");
     a6_fb_puts(fb,"ENTRY PA: "); a6_fb_hex(fb,dest+h.entry-h.virt);

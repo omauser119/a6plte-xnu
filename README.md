@@ -29,9 +29,15 @@ The A6PLTE source now keeps that runtime absent when Image4/AMFI providers are
 missing: hash/UUID queries report no match, loading is unsupported, and the
 static-cache capability query reports no capabilities. It supplies no successful
 trust decisions and does not change executable signature enforcement.
-The trust-cache image has been temporarily loaded through lk2nd; its further
-runtime progress still requires a screen observation. The random changes do
-not register a full corecrypto provider.
+The trust-cache update passed that stop on hardware and reached IOKit platform
+matching after machine lockdown. The next photographed panic is the fallback
+`IOPanicPlatform`, because no driver matched `samsung,a6plte`.
+The source now adds a built-in `A6PLTEPlatformExpert` personality with an exact
+board-name match and a higher probe score than the fallback. It uses the native
+platform and power-domain setup, publishes CPU/SoC device-tree services, and
+keeps unavailable firmware NVRAM absent. Its hardware check is pending.
+Native `startup_debug=1` tracing is enabled in the bridge's boot arguments.
+The random changes do not register a full corecrypto provider.
 Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 
 ## Implemented
@@ -50,6 +56,8 @@ Timer interrupts, sustained scheduling and userspace are not yet confirmed.
   generation; host tests include the RFC 8439 block vector and range rejection.
 - Explicit unavailable trust-cache state for the standalone A6PLTE image when
   Apple Image4/AMFI providers are absent; no NULL provider callbacks are invoked.
+- Built-in A6PLTE IOKit platform expert and matching personality, with native
+  device-tree nub publication for the bridge's CPU and SoC nodes.
 - Pinned upstream patches, native config/MIG tools and component compilation probes.
 
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,

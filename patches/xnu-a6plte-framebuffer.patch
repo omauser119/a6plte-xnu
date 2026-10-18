@@ -275,6 +275,113 @@ index 0000000..d983bb1
 +options   CONFIG_KERNEL_TAGGING		# <kernel_tagging>
 +
 +options A6PLTE # <a6plte>
+diff --git i/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
+new file mode 100644
+index 0000000..314cd95
+--- /dev/null
++++ w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
+@@ -0,0 +1,70 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#if A6PLTE
++
++#include <IOKit/IODeviceTreeSupport.h>
++#include <IOKit/IOLib.h>
++#include <IOKit/IOPlatformExpert.h>
++
++/*
++ * The low-level PE code already owns the framebuffer, GICv2 and boot CPU.
++ * This built-in service supplies their board identity to IOKit and publishes
++ * the bridge's CPU/SoC device-tree nodes for subsequent device drivers.
++ */
++class A6PLTEPlatformExpert : public IODTPlatformExpert {
++	OSDeclareDefaultStructors(A6PLTEPlatformExpert);
++
++public:
++	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++	void processTopLevel(IORegistryEntry *rootEntry) APPLE_KEXT_OVERRIDE;
++	const char *deleteList(void) APPLE_KEXT_OVERRIDE;
++	const char *excludeList(void) APPLE_KEXT_OVERRIDE;
++};
++
++#define super IODTPlatformExpert
++OSDefineMetaClassAndStructors(A6PLTEPlatformExpert, IODTPlatformExpert);
++
++bool
++A6PLTEPlatformExpert::start(IOService *provider)
++{
++	if (!super::start(provider)) {
++		return false;
++	}
++
++	registerService();
++	IOLog("A6PLTEPlatformExpert: SM-A605FN platform registered\n");
++	return true;
++}
++
++const char *
++A6PLTEPlatformExpert::deleteList(void)
++{
++	return "()";
++}
++
++const char *
++A6PLTEPlatformExpert::excludeList(void)
++{
++	/* These are boot metadata, or published separately below. */
++	return "(chosen, cpus, defaults, options, memory-map)";
++}
++
++void
++A6PLTEPlatformExpert::processTopLevel(IORegistryEntry *rootEntry)
++{
++	IOLog("A6PLTEPlatformExpert: publishing CPU and SoC device-tree services\n");
++
++	/*
++	 * IODTPlatformExpert's default implementation requires an /options NVRAM
++	 * service. lk2nd does not supply Apple firmware NVRAM. Keep it absent and
++	 * publish the real nodes without creating an emulated firmware service.
++	 */
++	IORegistryEntry *cpus = rootEntry->childFromPath("cpus", gIODTPlane);
++	if (cpus != NULL) {
++		createNubs(this, IODTFindMatchingEntries(cpus, kIODTExclusive, NULL));
++		cpus->release();
++	}
++
++	createNubs(this, IODTFindMatchingEntries(rootEntry, kIODTExclusive, excludeList()));
++}
++
++#endif /* A6PLTE */
+diff --git i/iokit/KernelConfigTables.cpp w/iokit/KernelConfigTables.cpp
+index 559a9db..4aecef1 100644
+--- i/iokit/KernelConfigTables.cpp
++++ w/iokit/KernelConfigTables.cpp
+@@ -34,6 +34,14 @@
+ 
+ const char * gIOKernelConfigTables =
+     "("
++#if A6PLTE
++    "   {"
++    "     'IOClass'         = A6PLTEPlatformExpert;"
++    "     'IOProviderClass' = IOPlatformExpertDevice;"
++    "     'IONameMatch'     = 'samsung,a6plte';"
++    "     'IOProbeScore'    = 10000:32;"
++    "   },"
++#endif
+     "   {"
+     "     'IOClass'         = IOPanicPlatform;"
+     "     'IOProviderClass' = IOPlatformExpertDevice;"
+diff --git i/iokit/conf/files w/iokit/conf/files
+index c72c690..6aa4089 100644
+--- i/iokit/conf/files
++++ w/iokit/conf/files
+@@ -80,6 +80,7 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
+ iokit/Kernel/IOGuardPageMemoryDescriptor.cpp		optional iokitcpp
+ 
+ iokit/Kernel/IOPlatformExpert.cpp			optional iokitcpp
++iokit/Kernel/arm/A6PLTEPlatformExpert.cpp		optional a6plte
+ iokit/Kernel/IOPlatformIO.cpp				optional iokitcpp
+ 
+ iokit/Kernel/IOCPU.cpp					optional iokitcpp
 diff --git i/libkern/conf/files w/libkern/conf/files
 index c4684c2..a3d38b1 100644
 --- i/libkern/conf/files
