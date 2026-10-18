@@ -39,6 +39,10 @@ keeps unavailable firmware NVRAM absent. It also finalizes discovery of the sing
 boot CPU so `kperf` can leave `ml_wait_max_cpus()`.
 The image has been temporarily loaded; further hardware progress is pending.
 Native `startup_debug=1` tracing is enabled in the bridge's boot arguments.
+On A6PLTE this prints startup stages without logging each of the 4,744 callbacks.
+`startup_debug=3` also enables per-callback addresses for targeted diagnosis;
+frequent scrolling on the early framebuffer is slow. Regular kernel logs and
+panic output are unaffected by this trace selection.
 The random changes do not register a full corecrypto provider.
 Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 

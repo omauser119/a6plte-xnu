@@ -1470,6 +1470,44 @@ index 2fc6931..c3a04a3 100644
  		struct console_printbuf_state info_data;
  
  		va_list ap;
+diff --git i/osfmk/kern/startup.c w/osfmk/kern/startup.c
+index c977c98..22519db 100644
+--- i/osfmk/kern/startup.c
++++ w/osfmk/kern/startup.c
+@@ -460,11 +460,17 @@ void
+ kernel_startup_initialize_upto(startup_subsystem_id_t upto)
+ {
+ 	struct startup_entry *cur = startup_entry_cur;
++#if A6PLTE
++	/* Thousands of callback lines make Device-memory framebuffer scrolling slow. */
++	const startup_debug_t callback_trace = STARTUP_DEBUG_CALLBACKS;
++#else
++	const startup_debug_t callback_trace = STARTUP_DEBUG_VERBOSE;
++#endif
+ 
+ 	assert(startup_phase < upto);
+ 
+ 	while (cur < startup_entries_end && cur->subsystem <= upto) {
+-		if ((startup_debug & STARTUP_DEBUG_VERBOSE) &&
++		if ((startup_debug & callback_trace) &&
+ 		    startup_phase >= STARTUP_SUB_KPRINTF) {
+ 			kprintf("%s[%d, rank %d]: %p(%p)\n", __func__,
+ 			    cur->subsystem, cur->rank, cur->func, cur->arg);
+diff --git i/osfmk/kern/startup.h w/osfmk/kern/startup.h
+index 5243b5d..0b5d000 100644
+--- i/osfmk/kern/startup.h
++++ w/osfmk/kern/startup.h
+@@ -96,6 +96,10 @@ extern startup_subsystem_id_t startup_phase;
+ __options_decl(startup_debug_t, uint32_t, {
+ 	STARTUP_DEBUG_NONE    = 0x00000000,
+ 	STARTUP_DEBUG_VERBOSE = 0x00000001,
++#if A6PLTE
++	/* Full per-callback tracing is opt-in on the early framebuffer console. */
++	STARTUP_DEBUG_CALLBACKS = 0x00000002,
++#endif
+ });
+ 
+ /*!
 diff --git i/osfmk/mach/vm_map.defs w/osfmk/mach/vm_map.defs
 index c941237..1607619 100644
 --- i/osfmk/mach/vm_map.defs
