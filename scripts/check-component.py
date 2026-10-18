@@ -5,8 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 import json, os, re, subprocess, sys
 root = Path(__file__).resolve().parents[1]
 component = sys.argv[1] if len(sys.argv) > 1 else 'osfmk'
-if component not in ('osfmk', 'pexpert', 'mig'):
-    raise SystemExit('Supported components: osfmk, pexpert, mig')
+if component not in ('osfmk', 'pexpert', 'mig', 'bsd', 'libkern', 'iokit', 'libsa', 'security', 'san'):
+    raise SystemExit('Unsupported XNU component')
 sources = []
 if component == 'mig':
     makefile=(root/'xnu/osfmk/mach/Makefile').read_text().replace('\\\n', ' ')
@@ -17,7 +17,7 @@ if component == 'mig':
                    ('device_server.c','UNDRequest_user.c','UNDReplyServer.c'))
 else:
     makefile = (root/'build/xnu'/component/'Makefile').read_text().replace('\\\n', ' ')
-    for group in ('CFILES', 'SFILES'):
+    for group in ('CFILES', 'CXXFILES', 'SFILES'):
         match = re.search(r'^' + group + r'\s*=([^\n]*)', makefile, re.M)
         if match:
             sources.extend(re.findall(r'\$\(SOURCE_DIR\)/([^\s]+)', match[1]))

@@ -25,7 +25,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: framebuffer-and-lk2nd-NOT-XNU
+          name: a6plte-boot-images
           path: |
             artifacts/*boot.img
             artifacts/lk2nd-a6plte-xnu.img
@@ -51,12 +51,21 @@ jobs:
       - name: Check generated MIG objects
         if: always() && hashFiles('build/mig-generated/results.json') != ''
         run: python3 scripts/check-component.py mig 2>&1 | tee mig.log
+      - name: Build remaining kernel components
+        if: always() && hashFiles('build/xnu/bsd/Makefile') != ''
+        run: |
+          failed=0
+          for component in pexpert bsd libkern iokit libsa security san; do
+            python3 scripts/check-component.py "$component" 2>&1 | tee "$component.log" || failed=1
+          done
+          exit "$failed"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: xnu-compile-diagnostics-NOT-A-KERNEL
+          name: xnu-build-output
           path: |
             *.log
             artifacts/**/*.log
             artifacts/**/results.json
+            artifacts/**/*.macho.o
             build/mig-generated/results.json
