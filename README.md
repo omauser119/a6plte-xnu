@@ -44,7 +44,7 @@ Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download the bootstrap random update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup4).
+[Download the kmem random update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup5).
 
 ## GitHub Actions
 
@@ -55,8 +55,8 @@ framebuffer physical address 0x90001000. GIC integration is not hardware-validat
 - **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
 Artifacts include the linked XNU kernel, packaged boot image, lk2nd image and
-build diagnostics. All three jobs passed for the bootstrap random update
-([run 39157836872](https://github.com/omauser119/a6plte-xnu/actions/runs/39157836872), source `0654e57`).
+build diagnostics. All three jobs passed for the kmem random update
+([run 39159683209](https://github.com/omauser119/a6plte-xnu/actions/runs/39159683209), source `fa4e0fe`).
 A successful build does not establish runtime progress on hardware. No workflow
 flashes a device.
 
