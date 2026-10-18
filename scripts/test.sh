@@ -3,6 +3,13 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$ROOT/artifacts"
 sed 's/reg = <0x00 0x10000000 0x00 0x00>;/reg = <0x00 0x80000000 0x00 0xc0000000>;/' "$ROOT/reference/a6plte-r4.dts" > "$ROOT/artifacts/test.dts"
+python3 - "$ROOT/artifacts/test.dts" <<'PY'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1])
+seed=' '.join(f'{i:02x}' for i in range(256))
+p.write_text(p.read_text().replace('chosen {', 'chosen {\n rng-seed = ['+seed+'];', 1))
+PY
 dtc -q -I dts -O dtb -o "$ROOT/artifacts/test.dtb" "$ROOT/artifacts/test.dts" 2>/dev/null
 clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_console.c" "$ROOT/console/fb.c" "$ROOT/shim/fdt.c" -o "$ROOT/artifacts/test-console"
 "$ROOT/artifacts/test-console" "$ROOT/artifacts/test.dtb"

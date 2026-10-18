@@ -24,9 +24,11 @@ int main(int argc,char **argv) {
     struct platform p;
     /* fixture has a real RAM bank in place of the upstream bootloader-filled placeholder */
     assert(platform_parse(blob,&p)==0); assert(p.fb.width==1080 && p.fb.height==2220 && p.fb.stride==3240);
+    assert(p.rng_seed_size==256);
+    for(unsigned i=0;i<256;++i) assert(p.rng_seed[i]==i);
     uint64_t addr;
     assert(!platform_alloc(&p,0x1000000,0x200000,(struct range){0x80000000,0x100000},&addr));
     assert(addr>=0x80200000);
     blob[0]=0; assert(platform_parse(blob,&p)!=0); free(blob);
-    puts("PASS: RGB888/XRGB8888/RGB565, scroll/wrap/padding/guards, FDT, RAM reservations");
+    puts("PASS: RGB888/XRGB8888/RGB565, scroll/wrap/padding/guards, FDT boot entropy, RAM reservations");
 }

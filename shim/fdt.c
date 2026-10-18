@@ -55,6 +55,11 @@ int platform_parse(const void *blob,struct platform *out) {
                 if(eq(key,"linux,initrd-start")) out->initrd_start=cells(p,nbytes/4);
                 if(eq(key,"linux,initrd-end")) out->initrd_end=cells(p,nbytes/4);
             }
+            if(n->chosen && eq(key,"rng-seed")) {
+                unsigned size=nbytes<sizeof(out->rng_seed)?nbytes:sizeof(out->rng_seed);
+                for(unsigned i=0;i<size;++i) out->rng_seed[i]=p[i];
+                out->rng_seed_size=size;
+            }
             p+=al;
         } else if(token==2) {
             if(d<0) return -1; struct node *n=&stack[d--];

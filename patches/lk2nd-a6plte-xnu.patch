@@ -102,6 +102,23 @@ index 0db087c..2492f98 100644
  	return true;
  }
  
+diff --git i/lk2nd/rng-seed/rng-seed.c w/lk2nd/rng-seed/rng-seed.c
+index df5c16a..5fbb585 100644
+--- i/lk2nd/rng-seed/rng-seed.c
++++ w/lk2nd/rng-seed/rng-seed.c
+@@ -7,7 +7,12 @@
+ #include <string.h>
+ #include <sys/types.h>
+ 
++#if LK2ND_A6PLTE_XNU
++/* XNU arm64 bootseed_init() requires four SHA-512 digests of input. */
++#define RNG_SEED_BYTES 256
++#else
+ #define RNG_SEED_BYTES 64
++#endif
+ 
+ /**
+  * lk2nd_rng_seed_dt_update() - write a random seed to /chosen/rng-seed
 diff --git i/platform/msm_shared/dev_tree.c w/platform/msm_shared/dev_tree.c
 index 86757c0..a160425 100644
 --- i/platform/msm_shared/dev_tree.c

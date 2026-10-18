@@ -432,12 +432,71 @@ index 0000000..8570b16
 +}
 +#endif
 diff --git i/osfmk/arm64/arm_vm_init.c w/osfmk/arm64/arm_vm_init.c
-index 756af52..66fa2cd 100644
+index 756af52..73f7763 100644
 --- i/osfmk/arm64/arm_vm_init.c
 +++ w/osfmk/arm64/arm_vm_init.c
-@@ -2162,9 +2162,17 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1841,6 +1841,10 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	 */
+ 	gPhysSize = mem_size = ((gPhysBase + args->memSize) & ~PAGE_MASK) - gPhysBase;
+ 	mem_actual = args->memSizeActual ? args->memSizeActual : mem_size;
++#if defined(A6PLTE)
++	kprintf("arm_vm_init: RAM PA=%llx size=%llx top=%llx\n",
++	    args->physBase, args->memSize, args->topOfKernelData);
++#endif
+ 
+ 	if ((memory_size != 0) && (mem_size > memory_size)) {
+ 		mem_size = memory_size;
+@@ -1862,7 +1866,13 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ #endif
+ 
+ 	// Slide the physical aperture to a random page-aligned location within the slide range
++#if defined(A6PLTE)
++	kprintf("arm_vm_init: boot entropy begin\n");
++#endif
+ 	uint64_t physmap_slide = early_random() & ARM64_PHYSMAP_SLIDE_MASK & ~((uint64_t)PAGE_MASK);
++#if defined(A6PLTE)
++	kprintf("arm_vm_init: boot entropy ready\n");
++#endif
+ 	assert(physmap_slide < ARM64_PHYSMAP_SLIDE_RANGE);
+ 
+ 	physmap_base += physmap_slide;
+@@ -1945,6 +1955,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ #endif
+ 
+ 	/* Initialize invalid tte page */
++#if defined(A6PLTE)
++	kprintf("arm_vm_init: allocating translation tables\n");
++#endif
+ 	invalid_tte = (tt_entry_t *)alloc_ptpage(TRUE);
+ 	invalid_ttep = kvtophys((vm_offset_t)invalid_tte);
+ 	bzero(invalid_tte, ARM_PGBYTES);
+@@ -1991,6 +2004,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	/*
+ 	 * Now retrieve addresses for various segments from kernel mach-o header
+ 	 */
++#if defined(A6PLTE)
++	kprintf("arm_vm_init: L1/L2 tables ready\n");
++#endif
+ 	segPRELINKTEXTB  = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PRELINK_TEXT", &segSizePRELINKTEXT);
+ 	segPLKDATACONSTB = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PLK_DATA_CONST", &segSizePLKDATACONST);
+ 	segPLKTEXTEXECB  = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PLK_TEXT_EXEC", &segSizePLKTEXTEXEC);
+@@ -2121,6 +2137,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	vm_prelink_sdata = segPRELINKDATAB;
+ 	vm_prelink_edata = segPRELINKDATAB + segSizePRELINKDATA;
+ 
++#if defined(A6PLTE)
++	kprintf("arm_vm_init: applying Mach-O segment permissions\n");
++#endif
+ 	arm_vm_prot_init(args);
+ 
+ 	/*
+@@ -2161,10 +2180,21 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	kasan_init();
  #endif /* KASAN */
  
++#if defined(A6PLTE)
++	kprintf("arm_vm_init: building physical aperture\n");
++#endif
  	arm_vm_physmap_init(args);
 +#if defined(A6PLTE)
 +	extern void a6_xnu_puts(const char *);
@@ -860,6 +919,23 @@ index 878b515..f90a83f 100644
 +osfmk/arm/arm_init.c optional a6plte
 +osfmk/arm64/arm_vm_init.c optional a6plte
 +osfmk/arm64/start.s optional a6plte
+diff --git i/osfmk/kern/debug.c w/osfmk/kern/debug.c
+index 48f9405..8e7ad1e 100644
+--- i/osfmk/kern/debug.c
++++ w/osfmk/kern/debug.c
+@@ -1261,6 +1261,12 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
+ 	if (PE_kputc == NULL) {
+ 		char buf[EARLY_PANIC_BUFLEN];
+ 		vsnprintf(buf, EARLY_PANIC_BUFLEN, panic_format_str, *panic_args);
++#if defined(A6PLTE)
++		extern void a6_xnu_puts(const char *);
++		a6_xnu_puts("\nXNU EARLY PANIC: ");
++		a6_xnu_puts(buf);
++		a6_xnu_puts("\n");
++#endif
+ 		paniclog_append_noflush("panic: %s\n", buf);
+ 		paniclog_append_noflush("Kernel panicked very early before serial init, spinning forever...\n");
+ 		panic_spin_forever();
 diff --git i/osfmk/mach/vm_map.defs w/osfmk/mach/vm_map.defs
 index c941237..1607619 100644
 --- i/osfmk/mach/vm_map.defs

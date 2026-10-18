@@ -8,6 +8,8 @@ struct platform {
     struct range ram[16], reserved[96];
     unsigned nr_ram, nr_reserved;
     uint64_t initrd_start, initrd_end;
+    uint8_t rng_seed[256];
+    unsigned rng_seed_size;
 };
 int platform_parse(const void *, struct platform *);
 int platform_alloc(const struct platform *, uint64_t, uint64_t, struct range, uint64_t *);
