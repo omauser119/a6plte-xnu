@@ -19,6 +19,10 @@ done
 for header in Availability.h AvailabilityInternal.h AvailabilityMacros.h AvailabilityVersions.h; do
     ln -sfn "$SDK/usr/include/$header" "build/kernel-headers/$header"
 done
+mkdir -p build/cxx-support
+for header in errno.h stdio.h stdlib.h; do
+    ln -sfn "$ROOT/xnu/libkern/libcxx_support/$header" "build/cxx-support/$header"
+done
 mkdir -p build/kernel-headers/skywalk
 for header in xnu/bsd/skywalk/*/os_*.h; do
     ln -sfn "$ROOT/$header" "build/kernel-headers/skywalk/$(basename "$header")"

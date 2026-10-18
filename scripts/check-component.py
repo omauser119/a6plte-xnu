@@ -23,6 +23,8 @@ else:
             sources.extend(re.findall(r'\$\(SOURCE_DIR\)/([^\s]+)', match[1]))
             if component != 'osfmk': # OSFMK generated interfaces are built in the MIG component.
                 sources.extend('build/xnu/'+component+'/'+name for name in re.findall(r'(?<!\S)\./([^\s]+)', match[1]))
+if component == 'libsa': sources.extend('libsa/'+name+'.c' for name in ('nonlto','lastkerneldataconst','lastkernelconstructor'))
+if component == 'libkern': sources.append('reference/libdispatch/src/firehose/firehose_buffer.c')
 if component == 'osfmk': sources.append('build/xnu/osfmk/version.c')
 if component == 'mig':
     sources.extend('build/mig-generated/'+name+'_mach_user.c' for name in ('gssd', 'lockd', 'kextd'))

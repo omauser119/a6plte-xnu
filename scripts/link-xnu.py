@@ -24,6 +24,8 @@ def resolve(name):
 flags=[]
 for name in ('LDFLAGS_KERNEL_GEN','LDFLAGS_KERNEL_GENARM64','LDFLAGS_KERNEL_SEGARM64'):
     flags += shlex.split(resolve(name))
+# XNU appends the final data/constructor sentinels after component objects.
+objects.sort(key=lambda path: ('lastkerneldataconst' in path or 'lastkernelconstructor' in path))
 filelist=root/'artifacts/xnu-objects.txt'
 filelist.write_text('\n'.join(objects)+'\n')
 output=root/'artifacts/kernel.a6plte'

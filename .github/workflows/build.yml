@@ -75,3 +75,5 @@ jobs:
             build/mig-generated/results.json
             artifacts/kernel.a6plte
             artifacts/link-command.txt
+            build/xnu/iokit/**/*.h
+            build/xnu/iokit/**/*.cpp
