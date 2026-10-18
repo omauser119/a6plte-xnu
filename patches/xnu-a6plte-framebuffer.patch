@@ -164,6 +164,213 @@ index 0000000..d983bb1
 +options   CONFIG_KERNEL_TAGGING		# <kernel_tagging>
 +
 +options A6PLTE # <a6plte>
+diff --git i/libkern/conf/files w/libkern/conf/files
+index c4684c2..a3d38b1 100644
+--- i/libkern/conf/files
++++ w/libkern/conf/files
+@@ -99,6 +99,7 @@ libkern/crypto/corecrypto_des.c			optional crypto
+ libkern/crypto/corecrypto_aes.c			optional crypto
+ libkern/crypto/corecrypto_aesxts.c		optional crypto
+ libkern/crypto/corecrypto_rand.c		optional crypto
++libkern/crypto/a6plte_kmem_rng.c		optional crypto
+ libkern/crypto/corecrypto_rsa.c		    optional crypto
+ libkern/crypto/corecrypto_chacha20poly1305.c	optional	crypto
+ 
+diff --git i/libkern/crypto/a6plte_kmem_rng.c w/libkern/crypto/a6plte_kmem_rng.c
+new file mode 100644
+index 0000000..ac446ff
+--- /dev/null
++++ w/libkern/crypto/a6plte_kmem_rng.c
+@@ -0,0 +1,78 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#if defined(A6PLTE)
++#include "a6plte_kmem_rng.h"
++
++/* Scalar ChaCha20 block generator for kmem allocation decisions only.
++ * Its final four words are a 128-bit block counter, initially containing
++ * a random 96-bit prefix. This is not an encryption or general RNG API. */
++static uint32_t load32(const uint8_t *p)
++{
++    return (uint32_t)p[0] | (uint32_t)p[1]<<8 |
++           (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24;
++}
++static uint32_t rotate(uint32_t v, unsigned n)
++{
++    return (v<<n) | (v>>(32-n));
++}
++static void quarter(uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d)
++{
++    *a+=*b; *d=rotate(*d^*a,16);
++    *c+=*d; *b=rotate(*b^*c,12);
++    *a+=*b; *d=rotate(*d^*a,8);
++    *c+=*d; *b=rotate(*b^*c,7);
++}
++static void refill(struct a6_kmem_rng *r)
++{
++    uint32_t x[16];
++    for(unsigned i=0;i<16;++i) x[i]=r->state[i];
++    for(unsigned round=0;round<10;++round) {
++        quarter(&x[0],&x[4],&x[8],&x[12]);
++        quarter(&x[1],&x[5],&x[9],&x[13]);
++        quarter(&x[2],&x[6],&x[10],&x[14]);
++        quarter(&x[3],&x[7],&x[11],&x[15]);
++        quarter(&x[0],&x[5],&x[10],&x[15]);
++        quarter(&x[1],&x[6],&x[11],&x[12]);
++        quarter(&x[2],&x[7],&x[8],&x[13]);
++        quarter(&x[3],&x[4],&x[9],&x[14]);
++    }
++    for(unsigned i=0;i<16;++i) {
++        uint32_t v=x[i]+r->state[i];
++        for(unsigned j=0;j<4;++j) r->block[4*i+j]=(uint8_t)(v>>(8*j));
++    }
++    for(unsigned i=12;i<16;++i) if(++r->state[i]) break;
++    r->used=0;
++}
++void a6_kmem_rng_init(struct a6_kmem_rng *r, const uint8_t seed[44])
++{
++    r->state[0]=0x61707865; r->state[1]=0x3320646e;
++    r->state[2]=0x79622d32; r->state[3]=0x6b206574;
++    for(unsigned i=0;i<8;++i) r->state[4+i]=load32(seed+4*i);
++    r->state[12]=0;
++    for(unsigned i=0;i<3;++i) r->state[13+i]=load32(seed+32+4*i);
++    for(unsigned i=0;i<64;++i) r->block[i]=0;
++    r->used=64;
++}
++void a6_kmem_rng_generate(struct a6_kmem_rng *r, void *buffer, size_t size)
++{
++    uint8_t *out=buffer;
++    while(size) {
++        if(r->used==64) refill(r);
++        size_t n=64-r->used;
++        if(n>size) n=size;
++        for(size_t i=0;i<n;++i) out[i]=r->block[r->used+i];
++        r->used+=(unsigned)n; out+=n; size-=n;
++    }
++}
++int a6_kmem_rng_uniform(struct a6_kmem_rng *r, uint64_t bound, uint64_t *out)
++{
++    if(!bound) return -1;
++    uint64_t threshold=(uint64_t)(-bound)%bound, value;
++    do {
++        uint8_t bytes[8];
++        a6_kmem_rng_generate(r,bytes,sizeof(bytes));
++        value=(uint64_t)load32(bytes) | (uint64_t)load32(bytes+4)<<32;
++    } while(value<threshold);
++    *out=value%bound;
++    return 0;
++}
++#endif
+diff --git i/libkern/crypto/a6plte_kmem_rng.h w/libkern/crypto/a6plte_kmem_rng.h
+new file mode 100644
+index 0000000..5339c83
+--- /dev/null
++++ w/libkern/crypto/a6plte_kmem_rng.h
+@@ -0,0 +1,17 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef A6PLTE_KMEM_RNG_H
++#define A6PLTE_KMEM_RNG_H
++#include <stdint.h>
++#include <stddef.h>
++
++/* Private per-CPU kmem state. The caller serializes access, as required by
++ * crypto_random_kmem_init's lock-free generation contract. */
++struct a6_kmem_rng {
++    uint32_t state[16];
++    uint8_t block[64];
++    unsigned used;
++};
++void a6_kmem_rng_init(struct a6_kmem_rng *, const uint8_t seed[44]);
++void a6_kmem_rng_generate(struct a6_kmem_rng *, void *, size_t);
++int a6_kmem_rng_uniform(struct a6_kmem_rng *, uint64_t bound, uint64_t *);
++#endif
+diff --git i/libkern/crypto/corecrypto_rand.c w/libkern/crypto/corecrypto_rand.c
+index d46815b..3624f27 100644
+--- i/libkern/crypto/corecrypto_rand.c
++++ w/libkern/crypto/corecrypto_rand.c
+@@ -30,12 +30,33 @@
+ #include <corecrypto/ccrng.h>
+ #include <libkern/crypto/rand.h>
+ 
++#if defined(A6PLTE)
++#include <sys/random.h>
++#include <kern/debug.h>
++#include "a6plte_kmem_rng.h"
++_Static_assert(sizeof(struct a6_kmem_rng) <= CRYPTO_RANDOM_MAX_CTX_SIZE,
++    "A6PLTE kmem random context exceeds XNU's ABI limit");
++#endif
++
+ int
+ cc_rand_generate(void *out, size_t outlen)
+ {
+ 	struct ccrng_state *rng_state = NULL;
+ 	int error = -1;
+ 
++#if defined(A6PLTE)
++	if (!g_crypto_funcs) {
++		uint8_t *bytes = out;
++		while (outlen) {
++			u_int n = outlen > UINT32_MAX ? UINT32_MAX : (u_int)outlen;
++			read_random(bytes, n);
++			bytes += n;
++			outlen -= n;
++		}
++		return 0;
++	}
++#endif
++
+ 	if (g_crypto_funcs) {
+ 		rng_state = g_crypto_funcs->ccrng_fn(&error);
+ 		if (rng_state != NULL) {
+@@ -58,7 +79,13 @@ crypto_random_generate(
+ 	void *random,
+ 	size_t random_size)
+ {
++#if defined(A6PLTE)
++	/* Kmem handles keep this board representation even if corecrypto is
++	 * registered later. Generation cannot acquire the global RNG's lock. */
++	a6_kmem_rng_generate(ctx, random, random_size);
++#else
+ 	g_crypto_funcs->random_generate_fn(ctx, random, random_size);
++#endif
+ }
+ 
+ void
+@@ -67,18 +94,35 @@ crypto_random_uniform(
+ 	uint64_t bound,
+ 	uint64_t *random)
+ {
++#if defined(A6PLTE)
++	if (a6_kmem_rng_uniform(ctx, bound, random)) {
++		panic("A6PLTE kmem random: zero bound");
++	}
++#else
+ 	g_crypto_funcs->random_uniform_fn(ctx, bound, random);
++#endif
+ }
+ 
+ size_t
+ crypto_random_kmem_ctx_size(void)
+ {
++#if defined(A6PLTE)
++	return sizeof(struct a6_kmem_rng);
++#else
+ 	return g_crypto_funcs->random_kmem_ctx_size_fn();
++#endif
+ }
+ 
+ void
+ crypto_random_kmem_init(
+ 	crypto_random_ctx_t ctx)
+ {
++#if defined(A6PLTE)
++	uint8_t seed[44];
++	read_random(seed, sizeof(seed));
++	a6_kmem_rng_init(ctx, seed);
++	cc_clear(sizeof(seed), seed);
++#else
+ 	g_crypto_funcs->random_kmem_init_fn(ctx);
++#endif
+ }
 diff --git i/makedefs/MakeInc.def w/makedefs/MakeInc.def
 index e37762b..d4c57c8 100644
 --- i/makedefs/MakeInc.def

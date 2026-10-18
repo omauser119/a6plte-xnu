@@ -16,10 +16,13 @@ virtual execution in `arm_init` and activation of the final VM mappings.
 Native XNU logs now confirm completion of VM bootstrap, initialization of
 scheduler structures, Firehose, OSLog, IPC and IOKit on the physical display.
 The RGB888 console update passed the previous graphics-console fault and reached
-`ulock_initialize` in the kernel bootstrap thread. That run stopped in
-`read_random` because no corecrypto kext had registered its PRNG callbacks.
-The current source keeps XNU's boot-seeded HMAC-DRBG available to bootstrap
-callers until corecrypto registration, with shared-state locking and reseeding.
+`ulock_initialize` in the kernel bootstrap thread. The bootstrap HMAC-DRBG update
+passed the `read_random` fault and reached creation of the swapout, swapfile
+creation and swapfile GC threads. The next hardware fault was in
+`crypto_random_kmem_ctx_size`, before a corecrypto provider was registered.
+The current source adds a per-CPU kmem generator using scalar ChaCha20 blocks,
+seeded by XNU's boot-seeded HMAC-DRBG, with lock-free generation and unbiased
+bounded selection. It does not register a full corecrypto provider.
 Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 
 ## Implemented
@@ -34,6 +37,8 @@ Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 - No-LSE commpage locks and exclusion of Apple-specific initialization.
 - Bootstrap random reads and writes through XNU's native HMAC-DRBG, without
   claiming a full corecrypto provider is registered.
+- Private kmem random contexts within XNU's 256-byte limit, with no locks during
+  generation; host tests include the RFC 8439 block vector and range rejection.
 - Pinned upstream patches, native config/MIG tools and component compilation probes.
 
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
