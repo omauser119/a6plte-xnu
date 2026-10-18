@@ -35,7 +35,9 @@ matching after machine lockdown. The next photographed panic is the fallback
 The source now adds a built-in `A6PLTEPlatformExpert` personality with an exact
 board-name match and a higher probe score than the fallback. It uses the native
 platform and power-domain setup, publishes CPU/SoC device-tree services, and
-keeps unavailable firmware NVRAM absent. Its hardware check is pending.
+keeps unavailable firmware NVRAM absent. It also finalizes discovery of the single
+boot CPU so `kperf` can leave `ml_wait_max_cpus()`.
+The image has been temporarily loaded; further hardware progress is pending.
 Native `startup_debug=1` tracing is enabled in the bridge's boot arguments.
 The random changes do not register a full corecrypto provider.
 Timer interrupts, sustained scheduling and userspace are not yet confirmed.
@@ -63,7 +65,7 @@ Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download the standalone trust-cache update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup6).
+[Download the IOKit platform-expert update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup7).
 
 ## GitHub Actions
 
@@ -74,8 +76,8 @@ framebuffer physical address 0x90001000. GIC integration is not hardware-validat
 - **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
 Artifacts include the linked XNU kernel, packaged boot image, lk2nd image and
-build diagnostics. All three jobs passed for the standalone trust-cache update
-([run 39161320768](https://github.com/omauser119/a6plte-xnu/actions/runs/39161320768), source `d3e8d10`).
+build diagnostics. All three jobs passed for the IOKit platform-expert update
+([run 39162856666](https://github.com/omauser119/a6plte-xnu/actions/runs/39162856666), source `06ae61c`).
 A successful build does not establish runtime progress on hardware. No workflow
 flashes a device.
 
