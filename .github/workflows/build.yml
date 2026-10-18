@@ -10,16 +10,14 @@ permissions:
   contents: read
 concurrency:
   group: bringup-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   framebuffer-and-lk2nd:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    env:
-      MKBOOTIMG_PYTHON: /usr/bin/python3
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y clang llvm lld device-tree-compiler mkbootimg gcc-arm-none-eabi libnewlib-arm-none-eabi ripgrep
+      - run: sudo apt-get update && sudo apt-get install -y clang llvm lld device-tree-compiler gcc-arm-none-eabi libnewlib-arm-none-eabi ripgrep
       - run: python3 scripts/fetch-sources.py
       - run: ./scripts/test.sh
       - run: ./scripts/build-smoke.sh

@@ -464,6 +464,20 @@ index 878b515..f90a83f 100644
 +osfmk/arm/arm_init.c optional a6plte
 +osfmk/arm64/arm_vm_init.c optional a6plte
 +osfmk/arm64/start.s optional a6plte
+diff --git i/osfmk/mach/vm_map.defs w/osfmk/mach/vm_map.defs
+index c941237..1607619 100644
+--- i/osfmk/mach/vm_map.defs
++++ w/osfmk/mach/vm_map.defs
+@@ -65,6 +65,9 @@ subsystem
+ #if	KERNEL_SERVER || KOBJECT_SERVER
+ 	KernelServer
+ #endif	/* KERNEL_SERVER || KOBJECT_SERVER */
++#if KERNEL_USER
++	KernelUser
++#endif
+ 	  vm_map 3800;
+ 
+ #if KERNEL_SERVER
 diff --git i/osfmk/vm/pmap_cs.h w/osfmk/vm/pmap_cs.h
 index aa02107..297a09f 100644
 --- i/osfmk/vm/pmap_cs.h

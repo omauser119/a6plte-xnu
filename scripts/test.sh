@@ -7,6 +7,7 @@ dtc -q -I dts -O dtb -o "$ROOT/artifacts/test.dtb" "$ROOT/artifacts/test.dts" 2>
 clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_console.c" "$ROOT/console/fb.c" "$ROOT/shim/fdt.c" -o "$ROOT/artifacts/test-console"
 "$ROOT/artifacts/test-console" "$ROOT/artifacts/test.dtb"
 python3 "$ROOT/tests/test_pack.py"
+python3 "$ROOT/tests/test_bootimg.py"
 clang -DA6PLTE=1 -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_xnu_early.c" "$ROOT/xnu/pexpert/arm/a6plte/early.c" "$ROOT/xnu/pexpert/arm/a6plte/fb.c" -o "$ROOT/artifacts/test-xnu-early"
 "$ROOT/artifacts/test-xnu-early"
 for source in early fb; do

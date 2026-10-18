@@ -42,7 +42,7 @@ python3 scripts/fetch-sources.py
 ./scripts/build-lk2nd.sh
 ```
 
-Linux dependencies: clang, llvm, lld, dtc, mkbootimg, GNU make, ARM bare-metal GCC,
+Linux dependencies: clang, llvm, lld, dtc, GNU make, ARM bare-metal GCC,
 newlib, ripgrep and Python 3. Build scripts accept `LLD` and `TOOLCHAIN_PREFIX`.
 
 XNU component checks additionally need bison, flex, tcsh and Apple SDK headers.
@@ -105,3 +105,5 @@ Upstream sources are fetched at fixed commits; this repository stores patches:
 Upstream licenses remain applicable to upstream code and patches. Copied font
 retains its BSD license. Original bridge/console files carry SPDX identifiers.
 No Apple SDK, device logs, credentials or prebuilt vendor toolchains are included.
+
+The boot image v0 writer is local and tested; it does not depend on Ubuntu mkbootimg/GKI packaging. CI auto-cancellation is disabled.

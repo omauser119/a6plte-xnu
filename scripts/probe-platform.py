@@ -7,7 +7,7 @@ source=sys.argv[1] if len(sys.argv)>1 else 'osfmk/arm64/a6plte_interrupts.c'
 generated=source.startswith('build/mig-generated/')
 component='osfmk' if generated else source.split('/')[0]
 source_path=(r if generated else x)/source
-flags=['clang','--target=arm64-apple-darwin','-mcpu=cortex-a53','-ffreestanding','-fno-builtin','-fno-stack-protector','-mkernel','-fno-strict-aliasing','-fno-common','-fblocks','-D__API_AVAILABLE_PLATFORM_bridgeos(x)=bridgeos,introduced=x','-D__API_AVAILABLE_PLATFORM_xros(x)=visionos,introduced=x','-std=gnu17','-O2','-DARM64_BOARD_CONFIG_A6PLTE=1','-DA6PLTE=1','-DVM_KERNEL_LINK_ADDRESS=0xfffffff007004000','-Darm64','-DARM64','-D__ARM64__','-DLP64','-DPAGE_SIZE_FIXED','-DKERNEL=1','-DKERNEL_PRIVATE=1','-DXNU_KERNEL_PRIVATE=1','-D__APPLE_API_PRIVATE=1','-D__APPLE_API_UNSTABLE=1','-DPRIVATE=1','-isysroot',os.environ.get('SDK',str(Path.home()/'.local/share/theos/sdks/iPhoneOS16.5.sdk'))]
+flags=['clang','--target=arm64-apple-darwin','-mcpu=cortex-a53','-ffreestanding','-fno-builtin','-fno-stack-protector','-mkernel','-fno-strict-aliasing','-fno-common','-fblocks','-D__API_AVAILABLE_PLATFORM_bridgeos(x)=bridgeos,introduced=x','-D__API_AVAILABLE_PLATFORM_xros(x)=visionos,introduced=x','-std=gnu17','-O2','-DCURRENT_MACHINE_CONFIG_LC=a6plte','-DXNU_TARGET_OS_OSX=1','-DXNU_TARGET_OS_IOS=0','-DARM64_BOARD_CONFIG_A6PLTE=1','-DA6PLTE=1','-DVM_KERNEL_LINK_ADDRESS=0xfffffff007004000','-Darm64','-DARM64','-D__ARM64__','-DLP64','-DPAGE_SIZE_FIXED','-DKERNEL=1','-DKERNEL_PRIVATE=1','-DXNU_KERNEL_PRIVATE=1','-D__APPLE_API_PRIVATE=1','-D__APPLE_API_UNSTABLE=1','-DPRIVATE=1','-isysroot',os.environ.get('SDK',str(Path.home()/'.local/share/theos/sdks/iPhoneOS16.5.sdk'))]
 flags+=['-D'+('PEXPERT' if component=='pexpert' else 'MACH')+'_KERNEL_PRIVATE=1']
 for path in [out/'osfmk',out/'pexpert',out/'bsd',r/'build/kernel-headers',x/'osfmk',x/'bsd',x/'pexpert',x/'iokit',x/'libkern',x/'libsa',x/'EXTERNAL_HEADERS',x]: flags+=['-I'+str(path)]
 for line in (out/'pexpert/config.DEVELOPMENT_ARM64').read_text().splitlines():
@@ -15,6 +15,8 @@ for line in (out/'pexpert/config.DEVELOPMENT_ARM64').read_text().splitlines():
     if p and p[0]=='options': flags+=['-D'+p[1]]
 flags+=['-include',str(out/component/'meta_features.h')]
 if component=='osfmk': flags+=['-DMACH_KERNEL=1']
+if source.startswith('osfmk/vm/') and source.endswith('.c'): flags+=['-DVM_UNSAFE_TYPES=1']
+if source.startswith('osfmk/corecrypto/'): flags+=['-I'+str(x/'EXTERNAL_HEADERS/corecrypto')]
 if generated: flags+=['-I'+str(r/'build/kernel-headers/mach'),'-I'+str(r/'build/kernel-headers/device'),'-I'+str(r/'build/kernel-headers/UserNotification')]
 assembly=source.endswith('/genassym.c')
 if assembly: flags+=['-fno-integrated-as']
