@@ -35,7 +35,7 @@ exports += [config/name for name in ('Unused.exports','Kasan_disabled.exports','
 aliases=root/'artifacts/all-alias.exp'
 subprocess.run(['sh',str(config/'generate_linker_aliases.sh'),str(aliases),*map(str,exports)],check=True)
 flags += ['-Wl,-alias_list,'+str(aliases)]
-filelist=root/'artifacts/xnu-objects.txt' 
+filelist=root/'artifacts/xnu-objects.txt'
 filelist.write_text('\n'.join(objects)+'\n')
 output=root/'artifacts/kernel.a6plte'
 output.unlink(missing_ok=True)

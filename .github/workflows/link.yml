@@ -1,0 +1,40 @@
+name: XNU relink
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Completed build run containing compiled XNU objects
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  relink:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify object provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN: ${{ inputs.build_run }}
+        run: |
+          build_sha=$(gh run view "$BUILD_RUN" --json headSha --jq .headSha)
+          git fetch --depth=1 origin "$build_sha"
+          git diff --exit-code "$build_sha" HEAD -- patches scripts ':!scripts/link-xnu.py' ':!scripts/build-xnu.sh'
+          gh run download "$BUILD_RUN" -n xnu-build-output
+          echo "SDK=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          echo "Reusing compiled objects from $build_sha" >> "$GITHUB_STEP_SUMMARY"
+      - run: python3 scripts/fetch-sources.py
+      - run: python3 scripts/link-xnu.py 2>&1 | tee link.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xnu-linked-output
+          path: |
+            link.log
+            artifacts/kernel.a6plte
+            artifacts/link-command.txt

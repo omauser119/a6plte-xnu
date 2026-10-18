@@ -1,10 +1,11 @@
 # XNU 12377 bring-up for Samsung Galaxy A6+ (SM-A605FN)
 
-**Experimental, incomplete port. No bootable XNU kernel yet. UART is not used.**
+**Experimental XNU 12377 port. ARM64 kernel and lk2nd boot image build successfully. UART is not used.**
 
-The only hardware-confirmed result is a temporary ARM64 framebuffer payload loaded
-through installed lk2nd 23.1: text and a continuously increasing display heartbeat.
-This payload is not XNU. The modified lk2nd image has not been tested on hardware.
+The framebuffer console has been confirmed on SM-A605FN through installed lk2nd
+23.1. The first linked XNU image has now been temporarily loaded with `fastboot boot`;
+screen output from XNU is awaiting confirmation. The modified lk2nd image has not
+been flashed or tested on hardware.
 
 ## Implemented
 
@@ -20,12 +21,15 @@ This payload is not XNU. The modified lk2nd image has not been tested on hardwar
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
+[Download the first linked kernel and lk2nd build](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup1).
+
 ## GitHub Actions
 
 `A6PLTE bring-up` runs on pushes, pull requests and manual dispatch:
 
 - **Linux:** host tests, framebuffer boot image and UART-disabled lk2nd image.
-- **macOS:** Apple Clang, native MIG, platform objects and broader XNU compilation.
+- **macOS:** Apple Clang, MIG/IIG generation, all configured kernel components and ARM64 executable linking.
+- **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
 Artifacts explicitly distinguish framebuffer/lk2nd images from XNU diagnostics.
 The XNU job is expected to expose remaining errors; a green platform check is not
@@ -56,7 +60,7 @@ python3 scripts/check-component.py mig
 ```
 
 On Linux `SDK` can point to a Theos iPhoneOS 16.5 SDK. Upstream Linux Clang lacks
-XNU typed-allocation builtins. `check-platform.sh` generates 72 MIG interfaces and
+XNU typed-allocation builtins. `check-platform.sh` generates private/exported MIG interfaces and
 checks 18 platform objects. Per-file diagnostics and JSON results are stored in
 `artifacts/`. These scripts do not link a kernel.
 
@@ -83,7 +87,7 @@ loading a full kernel, RAM and lk2nd download-buffer overlap must be checked.
 ## Remaining work
 
 Compiler/SDK compatibility, CoreEntitlements/TrustCache/corecrypto and other
-external dependencies, full linking, complete platform device tree, actual XNU
+external dependency/runtime compatibility, complete platform device tree, actual XNU
 boot and exception/timer validation. SMP, storage, rootfs and power management
 are not implemented. Compiled-file counts are not a measure of boot readiness.
 
@@ -127,11 +131,17 @@ The pipeline generates BSD syscalls, private and exported MIG headers, DriverKit
 interfaces with IIG, and version/assembly offsets. It compiles all configured
 components, including C++, then links `artifacts/kernel.a6plte` using XNU's ARM64
 segment layout. Compilation failures stop the link; unresolved symbols are not
-ignored. The final executable is still under development and has not booted on
-the phone.
+ignored. The executable is still under development. A successful build does not establish
+that the kernel reaches a working scheduler or userspace on the phone.
 
 The kernel Firehose implementation is built from Apple's
 [libdispatch](https://github.com/apple-oss-distributions/libdispatch) commit
 `2361ffb78a76f7ee488cd052eb0bc5c767118bf9`, under its upstream license.
 CI artifacts are named `a6plte-boot-images` and `xnu-build-output`; the latter
 contains diagnostics and intermediate objects when the full build fails.
+
+
+First complete build: [Actions 39140135502](https://github.com/omauser119/a6plte-xnu/actions/runs/39140135502),
+commit `3a1d1ff`. The executable is ARM64 `MH_EXECUTE`, with `NOUNDEFS` and no
+undefined symbols according to `llvm-nm`. The packaged image was independently
+unpacked and compared with the freshly packed executable before temporary boot.
