@@ -277,16 +277,20 @@ index 0000000..d983bb1
 +options A6PLTE # <a6plte>
 diff --git i/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
 new file mode 100644
-index 0000000..314cd95
+index 0000000..a7e3211
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,81 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if A6PLTE
 +
 +#include <IOKit/IODeviceTreeSupport.h>
 +#include <IOKit/IOLib.h>
 +#include <IOKit/IOPlatformExpert.h>
++#include <machine/machine_routines.h>
++#include <pexpert/arm64/board_config.h>
++
++static_assert(MAX_CPUS == 1, "A6PLTE platform expert currently supports the boot CPU only");
 +
 +/*
 + * The low-level PE code already owns the framebuffer, GICv2 and boot CPU.
@@ -312,6 +316,13 @@ index 0000000..314cd95
 +	if (!super::start(provider)) {
 +		return false;
 +	}
++
++	/*
++	 * arm_init already registered the single boot processor and the low-level
++	 * GIC path owns its interrupts. Complete the CPU-discovery contract normally
++	 * supplied by IOCPUInterruptController, so kperf's ml_wait_max_cpus can wake.
++	 */
++	ml_set_max_cpus(MAX_CPUS);
 +
 +	registerService();
 +	IOLog("A6PLTEPlatformExpert: SM-A605FN platform registered\n");
