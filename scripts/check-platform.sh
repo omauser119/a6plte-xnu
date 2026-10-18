@@ -7,7 +7,9 @@ cd "$ROOT"
 ./scripts/build-host-tools.sh
 ./scripts/build-mig.sh
 ./scripts/configure-xnu-linux.sh
-mkdir -p build/kernel-headers/{san,mach} artifacts
+mkdir -p build/kernel-headers/{san,mach,CoreEntitlements} artifacts
+cp -R reference/platform-headers/EXTERNAL_HEADERS/CoreEntitlements/V2 build/kernel-headers/CoreEntitlements/
+cp -R reference/platform-headers/EXTERNAL_HEADERS/TrustCache build/kernel-headers/
 ln -sfn "$ROOT/xnu/osfmk/libsa/string.h" build/kernel-headers/string.h
 ln -sfn "$ROOT/xnu/osfmk/libsa/types.h" build/kernel-headers/types.h
 ln -sfn "$ROOT/xnu/osfmk/libsa/stdlib.h" build/kernel-headers/stdlib.h

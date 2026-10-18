@@ -107,3 +107,14 @@ retains its BSD license. Original bridge/console files carry SPDX identifiers.
 No Apple SDK, device logs, credentials or prebuilt vendor toolchains are included.
 
 The boot image v0 writer is local and tested; it does not depend on Ubuntu mkbootimg/GKI packaging. CI auto-cancellation is disabled.
+
+## Supplemental declarations for the current OSFMK build
+
+`fetch-sources.py` also pins [theo-os/xnu](https://github.com/theo-os/xnu) at
+`54ea37c23af20f9d0354c0d758eb51dc68dbcd81` and stages only its CoreEntitlements/V2
+and TrustCache headers in `build/kernel-headers`. These are community-maintained
+supplemental declarations, not a matching Apple KDK. Their source commit describes
+an import from OpenDarwin platform-support work. No replacement trust decision or
+success-returning implementation is supplied. This addresses compilation for the
+current non-PPL/non-SPTM profile; it does not establish runtime compatibility with
+Apple private libraries, nor supply those libraries for final linking.

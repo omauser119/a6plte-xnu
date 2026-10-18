@@ -272,6 +272,71 @@ index b65f76c..d24dd17 100644
  
  #include <mach/machine.h>
  #include <mach/machine/sdt.h>
+diff --git i/osfmk/arm/pmap/pmap.c w/osfmk/arm/pmap/pmap.c
+index 19e7e67..03d86ba 100644
+--- i/osfmk/arm/pmap/pmap.c
++++ w/osfmk/arm/pmap/pmap.c
+@@ -84,8 +84,10 @@
+ 
+ #include <arm64/proc_reg.h>
+ #include <pexpert/arm64/boot.h>
++#if !defined(A6PLTE)
+ #include <arm64/ppl/sart.h>
+ #include <arm64/ppl/uat.h>
++#endif
+ 
+ #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
+ #include <arm64/amcc_rorgn.h>
+@@ -113,6 +115,8 @@
+ #include <IOKit/IOHibernatePrivate.h>
+ #endif /* HIBERNATION */
+ 
++MARK_AS_PMAP_TEXT static void pmap_phys_write_disable(vm_address_t va);
++
+ #define PMAP_L1_MAX_ENTRY (ARM_PTE_T1_REGION_MASK(TCR_EL1_BOOT) >> ARM_TT_L1_SHIFT)
+ #define PMAP_ROOT_ALLOC_SIZE ((PMAP_L1_MAX_ENTRY + 1) * sizeof(tt_entry_t))
+ 
+@@ -2334,7 +2338,9 @@ pmap_bootstrap(
+ 	/**
+ 	 * Bootstrap any necessary SART data structures and values needed from the device tree.
+ 	 */
++#if !defined(A6PLTE)
+ 	sart_bootstrap();
++#endif
+ 
+ 	/**
+ 	 * Don't make any assumptions about the alignment of avail_start before this
+@@ -4952,8 +4958,13 @@ pmap_page_protect_options_with_flush_range(
+ 			}
+ #endif
+ 			if (remove && (options & PMAP_OPTIONS_COMPRESSOR)) {
++#if defined(A6PLTE)
++				panic("pmap_page_protect: attempt to compress ppnum 0x%x with IOMMU PTE %p, pve_p=%p",
++				    ppnum, pte_p, pve_p);
++#else
+ 				panic("pmap_page_protect: attempt to compress ppnum 0x%x owned by iommu %p, pve_p=%p",
+ 				    ppnum, ptep_get_iommu(pte_p), pve_p);
++#endif
+ 			}
+ 			goto protect_skip_pve_pass1;
+ 		}
+@@ -12237,6 +12248,7 @@ pmap_unpin_kernel_pages(vm_offset_t kva __unused, size_t nbytes __unused)
+ #endif /* !XNU_MONITOR */
+ 
+ 
++#if PMAP_CS_INCLUDE_CODE_SIGNING || PMAP_CS_PPL_MONITOR
+ MARK_AS_PMAP_TEXT static inline void
+ pmap_cs_lockdown_pages(vm_address_t kva, vm_size_t size, bool ppl_writable)
+ {
+@@ -12257,6 +12269,8 @@ pmap_cs_unlockdown_pages(vm_address_t kva, vm_size_t size, bool ppl_writable)
+ #endif
+ }
+ 
++#endif
++
+ /**
+  * Perform basic validation checks on the destination only and
+  * corresponding offset/sizes prior to writing to a read only allocation.
 diff --git i/osfmk/arm64/a6plte_interrupts.c w/osfmk/arm64/a6plte_interrupts.c
 new file mode 100644
 index 0000000..8570b16
