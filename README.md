@@ -27,9 +27,10 @@ lockdown-mode setup and the `vnguard` security policy. The next photographed sto
 is `image4 interface not available` in trust-cache runtime initialization.
 The A6PLTE source now keeps that runtime absent when Image4/AMFI providers are
 missing: hash/UUID queries report no match, loading is unsupported, and the
-existing static-cache loader reports no capabilities. It supplies no successful
+static-cache capability query reports no capabilities. It supplies no successful
 trust decisions and does not change executable signature enforcement.
-This trust-cache change still requires a hardware check. The random changes do
+The trust-cache image has been temporarily loaded through lk2nd; its further
+runtime progress still requires a screen observation. The random changes do
 not register a full corecrypto provider.
 Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 
@@ -54,7 +55,7 @@ Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download the kmem random update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup5).
+[Download the standalone trust-cache update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup6).
 
 ## GitHub Actions
 
@@ -65,8 +66,8 @@ framebuffer physical address 0x90001000. GIC integration is not hardware-validat
 - **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
 Artifacts include the linked XNU kernel, packaged boot image, lk2nd image and
-build diagnostics. All three jobs passed for the kmem random update
-([run 39159683209](https://github.com/omauser119/a6plte-xnu/actions/runs/39159683209), source `fa4e0fe`).
+build diagnostics. All three jobs passed for the standalone trust-cache update
+([run 39161320768](https://github.com/omauser119/a6plte-xnu/actions/runs/39161320768), source `d3e8d10`).
 A successful build does not establish runtime progress on hardware. No workflow
 flashes a device.
 
