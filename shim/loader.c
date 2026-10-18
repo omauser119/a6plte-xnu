@@ -38,6 +38,16 @@ void xnu_load(struct platform *p,const void *dtb,struct range image) {
     struct a6_fb *fb=&p->fb;
 #define FAIL(s) do { a6_fb_puts(fb,"XNU LOAD STOP: " s "\n"); return; } while(0)
     if(!p->initrd_start || p->initrd_end<=p->initrd_start || p->initrd_end-p->initrd_start<64) FAIL("no kernel package");
+    /* A bootloader must not relocate the package into a firmware carveout.
+     * Check before the first load, since secure RAM may abort the access. */
+    for(unsigned i=0;i<p->nr_reserved;++i) {
+        const struct range *range=&p->reserved[i];
+        if(p->initrd_start<range->base+range->size && range->base<p->initrd_end) {
+            a6_fb_puts(fb,"PACKAGE PA: "); a6_fb_hex(fb,p->initrd_start);
+            a6_fb_puts(fb,"\nRESERVED PA: "); a6_fb_hex(fb,range->base); a6_fb_puts(fb,"\n");
+            FAIL("kernel package overlaps reserved RAM");
+        }
+    }
     a6_fb_puts(fb,"PACKAGE HEADER at "); a6_fb_hex(fb,p->initrd_start); a6_fb_puts(fb,"\n");
     struct package h; copy(&h,(const void *)(uintptr_t)p->initrd_start,sizeof(h));
     a6_fb_puts(fb,"PACKAGE HEADER READ\n");
