@@ -22,7 +22,15 @@ creation and swapfile GC threads. The next hardware fault was in
 `crypto_random_kmem_ctx_size`, before a corecrypto provider was registered.
 The current source adds a per-CPU kmem generator using scalar ChaCha20 blocks,
 seeded by XNU's boot-seeded HMAC-DRBG, with lock-free generation and unbiased
-bounded selection. It does not register a full corecrypto provider.
+bounded selection. On hardware, this passed kmem initialization and reached
+lockdown-mode setup and the `vnguard` security policy. The next photographed stop
+is `image4 interface not available` in trust-cache runtime initialization.
+The A6PLTE source now keeps that runtime absent when Image4/AMFI providers are
+missing: hash/UUID queries report no match, loading is unsupported, and the
+existing static-cache loader reports no capabilities. It supplies no successful
+trust decisions and does not change executable signature enforcement.
+This trust-cache change still requires a hardware check. The random changes do
+not register a full corecrypto provider.
 Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 
 ## Implemented
@@ -39,6 +47,8 @@ Timer interrupts, sustained scheduling and userspace are not yet confirmed.
   claiming a full corecrypto provider is registered.
 - Private kmem random contexts within XNU's 256-byte limit, with no locks during
   generation; host tests include the RFC 8439 block vector and range rejection.
+- Explicit unavailable trust-cache state for the standalone A6PLTE image when
+  Apple Image4/AMFI providers are absent; no NULL provider callbacks are invoked.
 - Pinned upstream patches, native config/MIG tools and component compilation probes.
 
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,

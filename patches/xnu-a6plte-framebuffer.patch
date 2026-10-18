@@ -23,6 +23,117 @@ index e67ea79..701a36e 100644
  #if DEVELOPMENT || DEBUG
  	int es = 1;
  #else
+diff --git i/bsd/kern/kern_trustcache.c w/bsd/kern/kern_trustcache.c
+index 4b1e8a9..706f289 100644
+--- i/bsd/kern/kern_trustcache.c
++++ w/bsd/kern/kern_trustcache.c
+@@ -567,6 +567,22 @@ trust_cache_runtime_init(void)
+ 	bool allow_engineering_caches = false;
+ 	bool allow_legacy_caches = false;
+ 
++#if A6PLTE
++	/*
++	 * The standalone Darwin image has no AppleImage4/AMFI provider. Keep the
++	 * runtime absent rather than constructing it around a NULL callback table.
++	 * Queries must report no match and loading must remain unsupported; this
++	 * does not grant trust or change the executable code-signing policy.
++	 * Both pointers are sealed by machine_lockdown() later in bootstrap.
++	 */
++	if ((img4if == NULL) || (amfi == NULL)) {
++		trust_cache_rt = NULL;
++		trust_cache_mut_rt = NULL;
++		printf("trust cache: Image4/AMFI provider absent; runtime unavailable\n");
++		return;
++	}
++#endif
++
+ #if CONFIG_SECOND_STATIC_TRUST_CACHE
+ 	allow_second_static_cache = true;
+ #endif
+@@ -809,6 +825,12 @@ check_trust_cache_runtime_for_uuid(
+ 		return KERN_INVALID_ARGUMENT;
+ 	}
+ 
++#if A6PLTE
++	if (trust_cache_rt == NULL) {
++		return KERN_NOT_FOUND;
++	}
++#endif
++
+ #if CONFIG_SPTM
+ 	ret = txm_check_trust_cache_runtime_for_uuid(check_uuid);
+ #elif PMAP_CS_PPL_MONITOR
+@@ -823,6 +845,12 @@ check_trust_cache_runtime_for_uuid(
+ kern_return_t
+ unload_trust_cache(uuid_t uuid)
+ {
++#if A6PLTE
++	if (trust_cache_rt == NULL) {
++		return KERN_NOT_SUPPORTED;
++	}
++#endif
++
+ 	kern_return_t ret = KERN_DENIED;
+ 	uuid_string_t uuid_string = {0};
+ 
+@@ -861,6 +889,12 @@ load_trust_cache(
+ 	const uint8_t *img4_object, const size_t img4_object_len,
+ 	const uint8_t *img4_ext_manifest, const size_t img4_ext_manifest_len)
+ {
++#if A6PLTE
++	if (trust_cache_rt == NULL) {
++		return KERN_NOT_SUPPORTED;
++	}
++#endif
++
+ 	TCType_t type = kTCTypeInvalid;
+ 	kern_return_t ret = KERN_DENIED;
+ 
+@@ -936,6 +970,12 @@ load_trust_cache_with_type(
+ 	 * the manifest embedded. In this case, we need to extract the different artifacts
+ 	 * out of the object.
+ 	 */
++#if A6PLTE
++	if (trust_cache_rt == NULL) {
++		return KERN_NOT_SUPPORTED;
++	}
++#endif
++
+ 	if (img4_ext_manifest_len != 0) {
+ 		img4_payload = img4_object;
+ 		img4_payload_len = img4_object_len;
+@@ -1049,6 +1089,12 @@ load_legacy_trust_cache(
+ 		panic("overflow on the module: %p | %lu", module_data, module_size);
+ 	}
+ 
++#if A6PLTE
++	if (trust_cache_rt == NULL) {
++		return KERN_NOT_SUPPORTED;
++	}
++#endif
++
+ #if CONFIG_SPTM
+ 	ret = txm_load_legacy_trust_cache(module_data, module_size);
+ #elif PMAP_CS_PPL_MONITOR
+@@ -1079,6 +1125,18 @@ query_trust_cache(
+ 		return KERN_INVALID_ARGUMENT;
+ 	}
+ 
++#if A6PLTE
++	if (query_type >= kTCQueryTypeTotal) {
++		return KERN_INVALID_ARGUMENT;
++	}
++	if (trust_cache_rt == NULL) {
++		if (query_token != NULL) {
++			memset(query_token, 0, sizeof(*query_token));
++		}
++		return KERN_NOT_FOUND;
++	}
++#endif
++
+ #if CONFIG_SPTM
+ 	ret = txm_query_trust_cache(query_type, cdhash, query_token);
+ #elif PMAP_CS_PPL_MONITOR
 diff --git i/config/MASTER.arm64.a6plte.MacOSX w/config/MASTER.arm64.a6plte.MacOSX
 new file mode 100644
 index 0000000..d983bb1
