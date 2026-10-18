@@ -8,12 +8,14 @@ XNU kernel have been confirmed on SM-A605FN. After temporary loading with
 `Framebuffer online. No UART.` The updated kernel has also reached
 `arm_vm_init: final TTBR1 active`, confirming the MMU transition,
 virtual execution in `arm_init` and activation of the final VM mappings.
-Native XNU logs now confirm completion of VM bootstrap and initialization of
-scheduler structures, Firehose, OSLog and IPC on the physical display. The latest
-hardware run stopped when the generic video console attempted SIMD writes to
-the packed RGB888 framebuffer. The current image routes screen transitions to
-the A6PLTE renderer; progress beyond that fault awaits hardware confirmation.
-Scheduler dispatch, timer interrupts and userspace are not yet confirmed.
+Native XNU logs now confirm completion of VM bootstrap, initialization of
+scheduler structures, Firehose, OSLog, IPC and IOKit on the physical display.
+The RGB888 console update passed the previous graphics-console fault and reached
+`ulock_initialize` in the kernel bootstrap thread. That run stopped in
+`read_random` because no corecrypto kext had registered its PRNG callbacks.
+The current source keeps XNU's boot-seeded HMAC-DRBG available to bootstrap
+callers until corecrypto registration, with shared-state locking and reseeding.
+Timer interrupts, sustained scheduling and userspace are not yet confirmed.
 
 ## Implemented
 
@@ -25,6 +27,8 @@ Scheduler dispatch, timer interrupts and userspace are not yet confirmed.
   and log replay when the framebuffer receives its final virtual mapping.
 - Initial Cortex-A53/A6PLTE profile, 4K pages, one CPU, GICv2 and virtual timer wiring.
 - No-LSE commpage locks and exclusion of Apple-specific initialization.
+- Bootstrap random reads and writes through XNU's native HMAC-DRBG, without
+  claiming a full corecrypto provider is registered.
 - Pinned upstream patches, native config/MIG tools and component compilation probes.
 
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
@@ -106,8 +110,8 @@ loading a full kernel, RAM and lk2nd download-buffer overlap must be checked.
 
 ## Remaining work
 
-Runtime compatibility of external dependencies, a complete platform device tree,
-and exception/timer validation remain in progress. SMP,
+Full corecrypto integration, runtime compatibility of external dependencies,
+a complete platform device tree, and exception/timer validation remain in progress. SMP,
 storage, rootfs and power management are not implemented. Compiled-file counts
 are not a measure of boot readiness.
 

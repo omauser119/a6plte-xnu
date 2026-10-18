@@ -1048,6 +1048,161 @@ index c941237..1607619 100644
  	  vm_map 3800;
  
  #if KERNEL_SERVER
+diff --git i/osfmk/prng/prng_random.c w/osfmk/prng/prng_random.c
+index 504b3fa..dff3c27 100644
+--- i/osfmk/prng/prng_random.c
++++ w/osfmk/prng/prng_random.c
+@@ -197,6 +197,22 @@ static struct {
+ 		     .strictFIPS = 0,
+ 	     }};
+ 
++#if defined(A6PLTE)
++/* A6PLTE boots a standalone kernel without an embedded corecrypto kext.
++ * Keep the native boot-seeded HMAC-DRBG available until that kext registers.
++ * Protect its shared state once startup can enter threaded execution. */
++static LCK_GRP_DECLARE(a6_boot_random_group, "a6plte-bootstrap-random");
++static LCK_SPIN_DECLARE(a6_boot_random_lock, &a6_boot_random_group);
++static SECURITY_READ_ONLY_LATE(bool) a6_boot_random_lock_ready;
++
++static void
++a6_boot_random_enable_lock(void)
++{
++	a6_boot_random_lock_ready = true;
++}
++STARTUP(LOCKS, STARTUP_RANK_LAST, a6_boot_random_enable_lock);
++#endif
++
+ __attribute__((noinline))
+ static void
+ early_random_init(void)
+@@ -292,6 +308,21 @@ read_erandom_generate(void * buf, size_t nbytes)
+ 	size_t n;
+ 	int rc;
+ 
++#if defined(A6PLTE)
++	bool locked = a6_boot_random_lock_ready;
++	if (locked) {
++		lck_spin_lock(&a6_boot_random_lock);
++	}
++	/* Registration may have finished while this caller waited for the lock. */
++	if (prng_ready) {
++		if (locked) {
++			lck_spin_unlock(&a6_boot_random_lock);
++		}
++		read_random_generate(buf, nbytes);
++		return;
++	}
++#endif
++
+ 	// The DBRG request size is limited, so we break the request into
+ 	// chunks.
+ 	while (nbytes > 0) {
+@@ -307,6 +338,11 @@ read_erandom_generate(void * buf, size_t nbytes)
+ 		buffer_bytes += n;
+ 		nbytes -= n;
+ 	}
++#if defined(A6PLTE)
++	if (locked) {
++		lck_spin_unlock(&a6_boot_random_lock);
++	}
++#endif
+ }
+ 
+ __static_testable __mockable void
+@@ -342,7 +378,9 @@ register_and_init_prng(struct cckprng_ctx *ctx, const struct cckprng_funcs *func
+ 	uint64_t nonce = ml_get_timebase();
+ 	prng_funcs.init_with_getentropy(prng_ctx, MAX_CPUS, sizeof(kprngseed), kprngseed, sizeof(nonce), &nonce, entropy_provide, NULL);
+ 	prng_funcs.initgen(prng_ctx, boot_cpu_id);
++#if !defined(A6PLTE)
+ 	prng_ready = 1;
++#endif
+ 
+ 	// Reseed with a key that has been securely combined with kernel-sourced platform randomness, where it was available.
+ 	// Otherwise this is just more randomness from the bootloader.
+@@ -351,7 +389,21 @@ register_and_init_prng(struct cckprng_ctx *ctx, const struct cckprng_funcs *func
+ 	cc_clear(sizeof(entropyseed), entropyseed);
+ 	cc_clear(sizeof(kprngseed), kprngseed);
+ 	cc_clear(sizeof(kprng_reseed), kprng_reseed);
++#if defined(A6PLTE)
++	/* Publish the full provider and retire the boot DRBG under the same lock
++	 * used by bootstrap readers. Never hold that lock across provider calls. */
++	bool locked = a6_boot_random_lock_ready;
++	if (locked) {
++		lck_spin_lock(&a6_boot_random_lock);
++	}
++	prng_ready = 1;
++#endif
+ 	cc_clear(sizeof(erandom), &erandom);
++#if defined(A6PLTE)
++	if (locked) {
++		lck_spin_unlock(&a6_boot_random_lock);
++	}
++#endif
+ }
+ 
+ void
+@@ -370,6 +422,12 @@ random_cpu_init(int cpu)
+ __mockable void
+ read_random(void * buffer, u_int numbytes)
+ {
++#if defined(A6PLTE)
++	if (!prng_ready) {
++		read_erandom_generate(buffer, numbytes);
++		return;
++	}
++#endif
+ 	prng_funcs.refresh(prng_ctx);
+ 	read_random_generate(buffer, numbytes);
+ }
+@@ -420,14 +478,48 @@ write_random(void * buffer, u_int numbytes)
+ 
+ 	if (numbytes > SHA512_DIGEST_LENGTH) {
+ 		/* hash the input to minimize the time we need to hold the lock */
++#if defined(A6PLTE)
++		/* The bootstrap provider does not install g_crypto_funcs. */
++		const struct ccdigest_info *di = &ccsha512_ltc_di;
++		ccdigest_di_decl(di, ctx);
++		ccdigest_init(di, ctx);
++		ccdigest_update(di, ctx, numbytes, buffer);
++		ccdigest_final(di, ctx, seed);
++		ccdigest_di_clear(di, ctx);
++#else
+ 		SHA512_CTX ctx;
+ 		SHA512_Init(&ctx);
+ 		SHA512_Update(&ctx, buffer, numbytes);
+ 		SHA512_Final(seed, &ctx);
++#endif
+ 	} else {
+ 		memcpy(seed, buffer, numbytes);
+ 	}
+ 
++#if defined(A6PLTE)
++	if (!prng_ready) {
++		bool locked = a6_boot_random_lock_ready;
++		if (locked) {
++			lck_spin_lock(&a6_boot_random_lock);
++		}
++		bool use_bootstrap = !prng_ready;
++		int rc = CCDRBG_STATUS_OK;
++		if (use_bootstrap) {
++			rc = ccdrbg_reseed(&erandom.drbg_info, (struct ccdrbg_state *)erandom.drbg_state,
++			    sizeof(seed), seed, 0, NULL);
++		}
++		if (locked) {
++			lck_spin_unlock(&a6_boot_random_lock);
++		}
++		if (use_bootstrap) {
++			cc_clear(sizeof(seed), seed);
++			if (rc != CCDRBG_STATUS_OK) {
++				panic("A6PLTE bootstrap ccdrbg_reseed error %d", rc);
++			}
++			return 0;
++		}
++	}
++#endif
+ 	prng_funcs.reseed(prng_ctx, sizeof(seed), seed);
+ 	cc_clear(sizeof(seed), seed);
+ 
 diff --git i/osfmk/vm/pmap_cs.h w/osfmk/vm/pmap_cs.h
 index aa02107..297a09f 100644
 --- i/osfmk/vm/pmap_cs.h
