@@ -19,8 +19,13 @@ done
 for header in Availability.h AvailabilityInternal.h AvailabilityMacros.h AvailabilityVersions.h; do
     ln -sfn "$SDK/usr/include/$header" "build/kernel-headers/$header"
 done
+mkdir -p build/kernel-headers/skywalk
+for header in xnu/bsd/skywalk/*/os_*.h; do
+    ln -sfn "$ROOT/$header" "build/kernel-headers/skywalk/$(basename "$header")"
+done
 ./scripts/generate-version.sh
 python3 scripts/generate-mach-interfaces.py
+python3 scripts/generate-bsd.py
 python3 scripts/probe-platform.py osfmk/arm64/genassym.c
 python3 - <<'PY'
 from pathlib import Path

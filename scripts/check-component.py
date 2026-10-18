@@ -21,12 +21,17 @@ else:
         match = re.search(r'^' + group + r'\s*=([^\n]*)', makefile, re.M)
         if match:
             sources.extend(re.findall(r'\$\(SOURCE_DIR\)/([^\s]+)', match[1]))
+            if component != 'osfmk': # OSFMK generated interfaces are built in the MIG component.
+                sources.extend('build/xnu/'+component+'/'+name for name in re.findall(r'(?<!\S)\./([^\s]+)', match[1]))
+if component == 'osfmk': sources.append('build/xnu/osfmk/version.c')
+if component == 'mig':
+    sources.extend('build/mig-generated/'+name+'_mach_user.c' for name in ('gssd', 'lockd', 'kextd'))
 sources = sorted(set(sources))
 out = root/'artifacts/components'/component
 out.mkdir(parents=True, exist_ok=True)
 def compile_one(source):
     key = source.replace('/', '__')
-    env = dict(os.environ, A6_PROBE_OUTPUT=str(out/key))
+    env = dict(os.environ, A6_PROBE_OUTPUT=str(out/key), A6_COMPONENT='osfmk' if component == 'mig' else component)
     result = subprocess.run([sys.executable, str(root/'scripts/probe-platform.py'), source],
                             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     errors = [s for s in result.stdout.splitlines() if 'error:' in s]

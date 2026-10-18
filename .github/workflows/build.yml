@@ -51,6 +51,8 @@ jobs:
       - name: Check generated MIG objects
         if: always() && hashFiles('build/mig-generated/results.json') != ''
         run: python3 scripts/check-component.py mig 2>&1 | tee mig.log
+      - name: Generate IOKit RPC interfaces
+        run: python3 scripts/generate-iokit.py 2>&1 | tee iig.log
       - name: Build remaining kernel components
         if: always() && hashFiles('build/xnu/bsd/Makefile') != ''
         run: |
@@ -59,6 +61,8 @@ jobs:
             python3 scripts/check-component.py "$component" 2>&1 | tee "$component.log" || failed=1
           done
           exit "$failed"
+      - name: Link XNU ARM64 executable
+        run: python3 scripts/link-xnu.py 2>&1 | tee link.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -69,3 +73,5 @@ jobs:
             artifacts/**/results.json
             artifacts/**/*.macho.o
             build/mig-generated/results.json
+            artifacts/kernel.a6plte
+            artifacts/link-command.txt

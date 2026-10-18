@@ -21,13 +21,17 @@ jobs={("mach",stem,server):kernel for (stem,server),kernel in jobs.items()}
 jobs["device","device",True]=True
 jobs["UserNotification","UNDRequest",False]=True
 jobs["UserNotification","UNDReply",True]=True
+for directory in ('gssd', 'lockd', 'kextd'):
+    jobs[directory, directory+'_mach', False]=True
 config_flags=[]
 for line in (r/'build/xnu/osfmk/config.DEVELOPMENT_ARM64').read_text().splitlines():
     fields=shlex.split(line,comments=True)
     if fields and fields[0]=='options': config_flags.append('-D'+fields[1])
 results=[]
-for (directory,stem,server),kernel in sorted(jobs.items()):
-    out=r/'build/kernel-headers'/directory
+variants=[(key, kernel, False) for key,kernel in sorted(jobs.items())]
+variants += [(key, False, True) for key,kernel in sorted(jobs.items()) if key[0]=='mach']
+for (directory,stem,server),kernel,exported in variants:
+    out=r/('build/export-headers' if exported else 'build/kernel-headers')/directory
     out.mkdir(parents=True,exist_ok=True)
     defs=x/'osfmk'/directory/f'{stem}.defs'
     server_stem=stem+('Server' if directory=='UserNotification' else '_server')
@@ -38,7 +42,7 @@ for (directory,stem,server),kernel in sorted(jobs.items()):
         flags+=['-DMACH_KERNEL_PRIVATE=1', '-DKERNEL_SERVER=1' if server else '-DKERNEL_USER=1']
         if not server: flags+=['-DEXC_SERVER_AUDITTOKEN=1','-DMACH_EXC_SERVER_AUDITTOKEN=1']
     pre=subprocess.run(flags+[str(defs)],capture_output=True,text=True)
-    label=stem+('_server' if server else '_user')
+    label=('export_' if exported else '')+stem+('_server' if server else '_user')
     log=pre.stderr
     status=pre.returncode
     if not status:
@@ -46,8 +50,8 @@ for (directory,stem,server),kernel in sorted(jobs.items()):
         if kernel: cmd+=['-mach_msg2'] if server else ['-maxonstack','1024']
         cmd+=['-header','/dev/null' if server else str(out/f'{stem}.h'),
               '-sheader',str(out/f'{server_stem}.h') if server else '/dev/null',
-              '-user','/dev/null' if server else str(source_out/f'{stem}_user.c'),
-              '-server',str(source_out/f'{server_stem}.c') if server else '/dev/null']
+              '-user','/dev/null' if server or exported else str(source_out/f'{stem}_user.c'),
+              '-server',str(source_out/f'{server_stem}.c') if server and not exported else '/dev/null']
         proc=subprocess.run(cmd,input=pre.stdout,capture_output=True,text=True)
         status=proc.returncode;log+=proc.stdout+proc.stderr
     (source_out/f'{label}.log').write_text(log)

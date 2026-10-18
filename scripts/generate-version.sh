@@ -12,3 +12,6 @@ printf '%s\n' "$A6_DARWIN_VERSION" > "$OBJROOT/xnuVersion"
 cp "$SRCROOT/libkern/libkern/version.h.template" "$ROOT/build/kernel-headers/libkern/version.h.pending"
 perl "$SRCROOT/config/newvers.pl" "$ROOT/build/kernel-headers/libkern/version.h.pending"
 mv "$ROOT/build/kernel-headers/libkern/version.h.pending" "$ROOT/build/kernel-headers/libkern/version.h"
+
+cp "$SRCROOT/config/version.c.template" "$OBJROOT/osfmk/version.c"
+perl "$SRCROOT/config/newvers.pl" "$OBJROOT/osfmk/version.c"
