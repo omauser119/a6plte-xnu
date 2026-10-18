@@ -15,4 +15,8 @@ llvm-objcopy -O binary "$OUT/fb-smoke.elf" "$OUT/fb-smoke.Image"
 sed 's/memory@10000000 {/memory {/' "$ROOT/reference/a6plte-r4.dts" > "$OUT/boot.dts"
 dtc -q -I dts -O dtb -o "$OUT/boot.dtb" "$OUT/boot.dts" 2>"$OUT/dtc.log"
 python3 "$ROOT/scripts/append-dtb.py" --fd "$OUT/fb-smoke.Image" --dtb "$OUT/boot.dtb" --output "$OUT/fb-smoke.kernel"
-mkbootimg --kernel "$OUT/fb-smoke.kernel" --output "$OUT/fb-smoke-boot.img" --pagesize 2048 --base 0x80000000 --kernel_offset 0x00080000 --tags_offset 0x01e00000 --board a6plte --cmdline 'a6plte-xnu lk2nd.pass-simplefb=autorefresh' --header_version 0
+bootimg=(mkbootimg)
+if [[ -n ${MKBOOTIMG_PYTHON:-} ]]; then
+    bootimg=("$MKBOOTIMG_PYTHON" "$(command -v mkbootimg)")
+fi
+"${bootimg[@]}" --kernel "$OUT/fb-smoke.kernel" --output "$OUT/fb-smoke-boot.img" --pagesize 2048 --base 0x80000000 --kernel_offset 0x00080000 --tags_offset 0x01e00000 --board a6plte --cmdline 'a6plte-xnu lk2nd.pass-simplefb=autorefresh' --header_version 0

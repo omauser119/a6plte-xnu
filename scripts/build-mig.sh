@@ -17,7 +17,7 @@ sed -i -e '/typedef long long *__int64_t;/d' -e '/typedef unsigned long long *__
 fi
 bison -d -b y "$SRC/parser.y"
 flex -o lexxer.yy.c "$SRC/lexxer.l"
-host_flags=()
+host_flags=(-O2)
 if [[ $(uname -s) != Darwin ]]; then
     host_flags=(-D__kernel_ptr_semantics= -D__private_extern__= -D__LITTLE_ENDIAN__ -D__arm64__=1 -Imach_shim -include sys/types.h -include bits/types/__mbstate_t.h)
 fi

@@ -12,6 +12,8 @@ jobs:
   framebuffer-and-lk2nd:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      MKBOOTIMG_PYTHON: /usr/bin/python3
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y clang llvm lld device-tree-compiler mkbootimg gcc-arm-none-eabi libnewlib-arm-none-eabi ripgrep
@@ -41,13 +43,13 @@ jobs:
           clang --version
       - run: python3 scripts/fetch-sources.py
       - name: Platform objects and MIG generation
-        run: ./scripts/check-platform.sh > platform.log 2>&1
+        run: ./scripts/check-platform.sh 2>&1 | tee platform.log
       - name: Check OSFMK objects
         if: success()
-        run: python3 scripts/check-component.py osfmk > osfmk.log 2>&1
+        run: python3 scripts/check-component.py osfmk 2>&1 | tee osfmk.log
       - name: Check generated MIG objects
         if: always() && hashFiles('build/mig-generated/results.json') != ''
-        run: python3 scripts/check-component.py mig > mig.log 2>&1
+        run: python3 scripts/check-component.py mig 2>&1 | tee mig.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
