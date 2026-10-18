@@ -1,4 +1,29 @@
-diff --git c/config/MASTER.arm64.a6plte.MacOSX w/config/MASTER.arm64.a6plte.MacOSX
+diff --git i/bsd/kern/kern_mib.c w/bsd/kern/kern_mib.c
+index e67ea79..701a36e 100644
+--- i/bsd/kern/kern_mib.c
++++ w/bsd/kern/kern_mib.c
+@@ -750,7 +750,9 @@ sysctl_load_devicetree_entries(void)
+ 		}
+ 	}
+ 
++#if !defined(A6PLTE)
+ 	eng_sample_dev_fused = !ml_device_is_prod_fused();
++#endif
+ }
+ STARTUP(SYSCTL, STARTUP_RANK_MIDDLE, sysctl_load_devicetree_entries);
+ 
+@@ -1090,6 +1092,10 @@ sysctl_hw_engineering_sample(__unused struct sysctl_oid *oidp,
+     __unused void *arg1, __unused int arg2,
+     struct sysctl_req *req)
+ {
++#if defined(A6PLTE)
++	/* Apple engineering-sample fuse semantics do not describe Qualcomm QFPROM. */
++	return ENOTSUP;
++#endif
+ #if DEVELOPMENT || DEBUG
+ 	int es = 1;
+ #else
+diff --git i/config/MASTER.arm64.a6plte.MacOSX w/config/MASTER.arm64.a6plte.MacOSX
 new file mode 100644
 index 0000000..de1eb44
 --- /dev/null
@@ -139,9 +164,9 @@ index 0000000..de1eb44
 +options   CONFIG_KERNEL_TAGGING		# <kernel_tagging>
 +
 +options A6PLTE # <a6plte>
-diff --git c/makedefs/MakeInc.def w/makedefs/MakeInc.def
+diff --git i/makedefs/MakeInc.def w/makedefs/MakeInc.def
 index e37762b..d4c57c8 100644
---- c/makedefs/MakeInc.def
+--- i/makedefs/MakeInc.def
 +++ w/makedefs/MakeInc.def
 @@ -29,7 +29,7 @@ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
  else ifneq ($(findstring _host,$(RC_ProjectName)),)
@@ -185,9 +210,9 @@ index e37762b..d4c57c8 100644
  
  
  ifeq ($(ARM64_LARGE_MEMORY),1)
-diff --git c/osfmk/arm/arm_init.c w/osfmk/arm/arm_init.c
+diff --git i/osfmk/arm/arm_init.c w/osfmk/arm/arm_init.c
 index 6690846..ce92ec2 100644
---- c/osfmk/arm/arm_init.c
+--- i/osfmk/arm/arm_init.c
 +++ w/osfmk/arm/arm_init.c
 @@ -356,6 +356,10 @@ arm_init(
  	DTEntry chosen = NULL;
@@ -214,9 +239,9 @@ index 6690846..ce92ec2 100644
  
  	if (debug_boot_arg) {
  		patch_low_glo();
-diff --git c/osfmk/arm/commpage/commpage_asm.s w/osfmk/arm/commpage/commpage_asm.s
+diff --git i/osfmk/arm/commpage/commpage_asm.s w/osfmk/arm/commpage/commpage_asm.s
 index 4a74130..14f1a6b 100644
---- c/osfmk/arm/commpage/commpage_asm.s
+--- i/osfmk/arm/commpage/commpage_asm.s
 +++ w/osfmk/arm/commpage/commpage_asm.s
 @@ -275,7 +275,19 @@ _pfz_trylock_and_enqueue:
  	mov		w11, #1			 // locked value = w11 = 1
@@ -258,9 +283,9 @@ index 4a74130..14f1a6b 100644
  	cbz		w10, Ltrylock_dequeue_success
  
  	mov		x0, #-1			// Failed
-diff --git c/osfmk/arm/machine_routines_common.c w/osfmk/arm/machine_routines_common.c
+diff --git i/osfmk/arm/machine_routines_common.c w/osfmk/arm/machine_routines_common.c
 index b65f76c..d24dd17 100644
---- c/osfmk/arm/machine_routines_common.c
+--- i/osfmk/arm/machine_routines_common.c
 +++ w/osfmk/arm/machine_routines_common.c
 @@ -51,7 +51,9 @@
  #include <machine/monotonic.h>
@@ -272,9 +297,9 @@ index b65f76c..d24dd17 100644
  
  #include <mach/machine.h>
  #include <mach/machine/sdt.h>
-diff --git c/osfmk/arm/pmap/pmap.c w/osfmk/arm/pmap/pmap.c
+diff --git i/osfmk/arm/pmap/pmap.c w/osfmk/arm/pmap/pmap.c
 index 19e7e67..03d86ba 100644
---- c/osfmk/arm/pmap/pmap.c
+--- i/osfmk/arm/pmap/pmap.c
 +++ w/osfmk/arm/pmap/pmap.c
 @@ -84,8 +84,10 @@
  
@@ -337,7 +362,20 @@ index 19e7e67..03d86ba 100644
  /**
   * Perform basic validation checks on the destination only and
   * corresponding offset/sizes prior to writing to a read only allocation.
-diff --git c/osfmk/arm64/a6plte_interrupts.c w/osfmk/arm64/a6plte_interrupts.c
+diff --git i/osfmk/arm/pmap/pmap.h w/osfmk/arm/pmap/pmap.h
+index f9e841f..2cea66d 100644
+--- i/osfmk/arm/pmap/pmap.h
++++ w/osfmk/arm/pmap/pmap.h
+@@ -773,7 +773,7 @@ _pmap_pending_preemption_real(void)
+ 	return !!(*((volatile ast_t*)ast_pending()) & AST_URGENT);
+ }
+ 
+-#if SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT)
++#if SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT) && !defined(A6PLTE)
+ bool pmap_pending_preemption(void); // more complicated, so externally defined
+ #else /* SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT) */
+ #define pmap_pending_preemption _pmap_pending_preemption_real
+diff --git i/osfmk/arm64/a6plte_interrupts.c w/osfmk/arm64/a6plte_interrupts.c
 new file mode 100644
 index 0000000..8570b16
 --- /dev/null
@@ -380,11 +418,33 @@ index 0000000..8570b16
 +    a6_gic_end(&gic,token);
 +}
 +#endif
-diff --git c/osfmk/arm64/caches_asm.s w/osfmk/arm64/caches_asm.s
-index 1588830..e7cf5e3 100644
---- c/osfmk/arm64/caches_asm.s
+diff --git i/osfmk/arm64/arm_vm_init.c w/osfmk/arm64/arm_vm_init.c
+index 756af52..79e8f3e 100644
+--- i/osfmk/arm64/arm_vm_init.c
++++ w/osfmk/arm64/arm_vm_init.c
+@@ -2164,7 +2164,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	arm_vm_physmap_init(args);
+ 	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
+ 
++#if !defined(A6PLTE)
+ 	ml_enable_monitor();
++#endif /* A6PLTE uses the Qualcomm EL3 monitor, not Apple's memory monitor. */
+ 
+ 	set_mmu_ttb(invalid_ttep & TTBR_BADDR_MASK);
+ 
+diff --git i/osfmk/arm64/caches_asm.s w/osfmk/arm64/caches_asm.s
+index 1588830..ff2b64e 100644
+--- i/osfmk/arm64/caches_asm.s
 +++ w/osfmk/arm64/caches_asm.s
-@@ -304,6 +304,14 @@ L_cpudr_loop:
+@@ -213,6 +213,7 @@ L_ipui_loop:
+ 	.globl EXT(CleanPoC_Dcache)
+ 	.globl EXT(clean_mmu_dcache)
+ LEXT(CleanPoC_Dcache)
++LEXT(clean_mmu_dcache)
+ 	ARM64_PROLOG
+ #if  defined(APPLE_ARM64_ARCH_FAMILY)
+ 	dsb		sy
+@@ -304,6 +305,14 @@ L_cpudr_loop:
   */
  	.text
  	.align 2
@@ -399,9 +459,9 @@ index 1588830..e7cf5e3 100644
  LEXT(CleanPoC_DcacheRegion_internal)
  	dsb		sy
  	CLEANPOC_DCACHEREGION
-diff --git c/osfmk/arm64/corecrypto/arm64_isa_compatibility.h w/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
+diff --git i/osfmk/arm64/corecrypto/arm64_isa_compatibility.h w/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
 index 8800687..cdfcbb0 100644
---- c/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
+--- i/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
 +++ w/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
 @@ -37,7 +37,7 @@
  // #include <Availability.h>
@@ -412,9 +472,9 @@ index 8800687..cdfcbb0 100644
  #define __USES_V_CRYPTO_INTRINSICS 1
  #else
  #define __USES_V_CRYPTO_INTRINSICS 0
-diff --git c/osfmk/arm64/pcb.c w/osfmk/arm64/pcb.c
+diff --git i/osfmk/arm64/pcb.c w/osfmk/arm64/pcb.c
 index 4538d50..818047a 100644
---- c/osfmk/arm64/pcb.c
+--- i/osfmk/arm64/pcb.c
 +++ w/osfmk/arm64/pcb.c
 @@ -71,7 +71,9 @@
  
@@ -426,9 +486,9 @@ index 4538d50..818047a 100644
  #include <pexpert/pexpert.h>
  
  // fixme: rdar://114299113 tracks resolving the supportlib issue with hwtrace features
-diff --git c/osfmk/arm64/proc_reg.h w/osfmk/arm64/proc_reg.h
+diff --git i/osfmk/arm64/proc_reg.h w/osfmk/arm64/proc_reg.h
 index f4d148b..a0b2687 100644
---- c/osfmk/arm64/proc_reg.h
+--- i/osfmk/arm64/proc_reg.h
 +++ w/osfmk/arm64/proc_reg.h
 @@ -243,6 +243,12 @@
  /* D-Cache, 128KB for Acc8 PCore, 8-way. 64KB for ECore, 8-way. */
@@ -443,9 +503,9 @@ index f4d148b..a0b2687 100644
  #elif defined (VMAPPLE)
  
  /* I-Cache. */
-diff --git c/osfmk/arm64/sleh.c w/osfmk/arm64/sleh.c
+diff --git i/osfmk/arm64/sleh.c w/osfmk/arm64/sleh.c
 index 0554aa8..4bb305b 100644
---- c/osfmk/arm64/sleh.c
+--- i/osfmk/arm64/sleh.c
 +++ w/osfmk/arm64/sleh.c
 @@ -55,8 +55,10 @@
  #include <machine/machine_cpc.h>
@@ -470,9 +530,9 @@ index 0554aa8..4bb305b 100644
  	PE_handle_ext_interrupt();
  #else
  	/* Run the registered interrupt handler. */
-diff --git c/osfmk/arm64/start.s w/osfmk/arm64/start.s
-index 6aa6fe4..6393992 100644
---- c/osfmk/arm64/start.s
+diff --git i/osfmk/arm64/start.s w/osfmk/arm64/start.s
+index 6aa6fe4..1dc77c6 100644
+--- i/osfmk/arm64/start.s
 +++ w/osfmk/arm64/start.s
 @@ -33,7 +33,9 @@
  #include <pexpert/arm64/board_config.h>
@@ -484,6 +544,16 @@ index 6aa6fe4..6393992 100644
  #include <arm64/exception_asm.h>
  
  #if __ARM_KERNEL_PROTECT__
+@@ -207,8 +209,8 @@ Lskip_cpu_reset_handler:
+ 	.align 3
+ 	.global EXT(LowResetVectorEnd)
+ LEXT(LowResetVectorEnd)
+-	.global	EXT(SleepToken)
+ #if WITH_CLASSIC_S2R
++	.global	EXT(SleepToken)
+ LEXT(SleepToken)
+ 	.space	(stSize_NUM),0
+ #endif
 @@ -467,6 +469,18 @@ start_cpu:
  	.globl EXT(start_first_cpu)
  LEXT(start_first_cpu)
@@ -517,9 +587,9 @@ index 6aa6fe4..6393992 100644
  
  #if HAS_CLUSTER && !NO_CPU_OVRD
  	// Unmask external IRQs if we're restarting from non-retention WFI
-diff --git c/osfmk/conf/files.arm64 w/osfmk/conf/files.arm64
+diff --git i/osfmk/conf/files.arm64 w/osfmk/conf/files.arm64
 index 878b515..f90a83f 100644
---- c/osfmk/conf/files.arm64
+--- i/osfmk/conf/files.arm64
 +++ w/osfmk/conf/files.arm64
 @@ -1,3 +1,4 @@
 +OPTIONS/a6plte optional a6plte
@@ -548,9 +618,9 @@ index 878b515..f90a83f 100644
 +osfmk/arm/arm_init.c optional a6plte
 +osfmk/arm64/arm_vm_init.c optional a6plte
 +osfmk/arm64/start.s optional a6plte
-diff --git c/osfmk/mach/vm_map.defs w/osfmk/mach/vm_map.defs
+diff --git i/osfmk/mach/vm_map.defs w/osfmk/mach/vm_map.defs
 index c941237..1607619 100644
---- c/osfmk/mach/vm_map.defs
+--- i/osfmk/mach/vm_map.defs
 +++ w/osfmk/mach/vm_map.defs
 @@ -65,6 +65,9 @@ subsystem
  #if	KERNEL_SERVER || KOBJECT_SERVER
@@ -562,9 +632,9 @@ index c941237..1607619 100644
  	  vm_map 3800;
  
  #if KERNEL_SERVER
-diff --git c/osfmk/vm/pmap_cs.h w/osfmk/vm/pmap_cs.h
+diff --git i/osfmk/vm/pmap_cs.h w/osfmk/vm/pmap_cs.h
 index aa02107..297a09f 100644
---- c/osfmk/vm/pmap_cs.h
+--- i/osfmk/vm/pmap_cs.h
 +++ w/osfmk/vm/pmap_cs.h
 @@ -79,7 +79,6 @@ pmap_ce_free_acceleration_buffer(
  #include <vm/pmap.h>
@@ -582,7 +652,7 @@ index aa02107..297a09f 100644
  
  /*
   * XNU_MONITOR and PMAP_CS are both defined for the same targets in board_config.h.
-diff --git c/pexpert/arm/a6plte/boot_abi.h w/pexpert/arm/a6plte/boot_abi.h
+diff --git i/pexpert/arm/a6plte/boot_abi.h w/pexpert/arm/a6plte/boot_abi.h
 new file mode 100644
 index 0000000..b06c269
 --- /dev/null
@@ -613,7 +683,7 @@ index 0000000..b06c269
 +_Static_assert(offsetof(struct a6_boot_args,boot_flags)==1136,"BootFlags ABI");
 +_Static_assert(sizeof(struct a6_boot_args)==1152,"boot_args ABI");
 +#endif
-diff --git c/pexpert/arm/a6plte/early.c w/pexpert/arm/a6plte/early.c
+diff --git i/pexpert/arm/a6plte/early.c w/pexpert/arm/a6plte/early.c
 new file mode 100644
 index 0000000..ff5aad3
 --- /dev/null
@@ -670,7 +740,7 @@ index 0000000..ff5aad3
 +    return 1;
 +}
 +#endif
-diff --git c/pexpert/arm/a6plte/early.h w/pexpert/arm/a6plte/early.h
+diff --git i/pexpert/arm/a6plte/early.h w/pexpert/arm/a6plte/early.h
 new file mode 100644
 index 0000000..8ce5ad2
 --- /dev/null
@@ -685,7 +755,7 @@ index 0000000..8ce5ad2
 +void a6_xnu_puts(const char *);
 +int a6_xnu_map_console(uintptr_t (*)(uintptr_t, uintptr_t));
 +#endif
-diff --git c/pexpert/arm/a6plte/fb.c w/pexpert/arm/a6plte/fb.c
+diff --git i/pexpert/arm/a6plte/fb.c w/pexpert/arm/a6plte/fb.c
 new file mode 100644
 index 0000000..a5af984
 --- /dev/null
@@ -761,7 +831,7 @@ index 0000000..a5af984
 +}
 +
 +#endif
-diff --git c/pexpert/arm/a6plte/fb.h w/pexpert/arm/a6plte/fb.h
+diff --git i/pexpert/arm/a6plte/fb.h w/pexpert/arm/a6plte/fb.h
 new file mode 100644
 index 0000000..2545a31
 --- /dev/null
@@ -784,7 +854,7 @@ index 0000000..2545a31
 +void a6_fb_hex(struct a6_fb *, uint64_t);
 +void a6_fb_clear(struct a6_fb *);
 +#endif
-diff --git c/pexpert/arm/a6plte/font5x12.h w/pexpert/arm/a6plte/font5x12.h
+diff --git i/pexpert/arm/a6plte/font5x12.h w/pexpert/arm/a6plte/font5x12.h
 new file mode 100644
 index 0000000..504e307
 --- /dev/null
@@ -916,7 +986,7 @@ index 0000000..504e307
 +    0x0004d640, 0x00000000,
 +    0x00000000, 0x00000000,
 +};
-diff --git c/pexpert/arm/a6plte/gic.c w/pexpert/arm/a6plte/gic.c
+diff --git i/pexpert/arm/a6plte/gic.c w/pexpert/arm/a6plte/gic.c
 new file mode 100644
 index 0000000..cfe3527
 --- /dev/null
@@ -969,7 +1039,7 @@ index 0000000..cfe3527
 +    g->barrier();
 +}
 +#endif
-diff --git c/pexpert/arm/a6plte/gic.h w/pexpert/arm/a6plte/gic.h
+diff --git i/pexpert/arm/a6plte/gic.h w/pexpert/arm/a6plte/gic.h
 new file mode 100644
 index 0000000..5f57270
 --- /dev/null
@@ -995,9 +1065,9 @@ index 0000000..5f57270
 +void a6_gic_end(struct a6_gic *,uint32_t);
 +void a6_gic_mask(struct a6_gic *,unsigned);
 +#endif
-diff --git c/pexpert/arm/pe_identify_machine.c w/pexpert/arm/pe_identify_machine.c
+diff --git i/pexpert/arm/pe_identify_machine.c w/pexpert/arm/pe_identify_machine.c
 index 937ce42..deffc98 100644
---- c/pexpert/arm/pe_identify_machine.c
+--- i/pexpert/arm/pe_identify_machine.c
 +++ w/pexpert/arm/pe_identify_machine.c
 @@ -233,6 +233,12 @@ pe_arm_init_interrupts(void *args)
  {
@@ -1012,9 +1082,9 @@ index 937ce42..deffc98 100644
  	/* Set up mappings for interrupt controller and possibly timers (if they haven't been set up already) */
  	if (args != NULL) {
  		if (!pe_arm_map_interrupt_controller()) {
-diff --git c/pexpert/arm/pe_kprintf.c w/pexpert/arm/pe_kprintf.c
+diff --git i/pexpert/arm/pe_kprintf.c w/pexpert/arm/pe_kprintf.c
 index 7a4bbd3..81aa07f 100644
---- c/pexpert/arm/pe_kprintf.c
+--- i/pexpert/arm/pe_kprintf.c
 +++ w/pexpert/arm/pe_kprintf.c
 @@ -41,6 +41,11 @@ PE_init_kprintf_config(void)
  		panic("Platform Expert not initialized");
@@ -1028,9 +1098,9 @@ index 7a4bbd3..81aa07f 100644
  	if (debug_boot_arg & (DB_KPRT | DB_PRT)) {
  		disable_serial_output = false;
  	}
-diff --git c/pexpert/arm/pe_serial.c w/pexpert/arm/pe_serial.c
+diff --git i/pexpert/arm/pe_serial.c w/pexpert/arm/pe_serial.c
 index 032d9e0..620f945 100644
---- c/pexpert/arm/pe_serial.c
+--- i/pexpert/arm/pe_serial.c
 +++ w/pexpert/arm/pe_serial.c
 @@ -35,6 +35,23 @@
  #include <machine/pal_hibernate.h>
@@ -1062,9 +1132,9 @@ index 032d9e0..620f945 100644
  }
 +
 +#endif /* A6PLTE */
-diff --git c/pexpert/conf/Makefile.template w/pexpert/conf/Makefile.template
+diff --git i/pexpert/conf/Makefile.template w/pexpert/conf/Makefile.template
 index 3711a92..5377b96 100644
---- c/pexpert/conf/Makefile.template
+--- i/pexpert/conf/Makefile.template
 +++ w/pexpert/conf/Makefile.template
 @@ -111,3 +111,7 @@ do_build_all:: do_all
  
@@ -1074,9 +1144,9 @@ index 3711a92..5377b96 100644
 +# Early physical console must not use canaries, tracing, or vector registers.
 +early.o_CFLAGS_ADD += -fno-stack-protector -fno-builtin -mgeneral-regs-only
 +fb.o_CFLAGS_ADD += -fno-stack-protector -fno-builtin -mgeneral-regs-only
-diff --git c/pexpert/conf/files.arm64 w/pexpert/conf/files.arm64
+diff --git i/pexpert/conf/files.arm64 w/pexpert/conf/files.arm64
 index 9191100..872a0d1 100644
---- c/pexpert/conf/files.arm64
+--- i/pexpert/conf/files.arm64
 +++ w/pexpert/conf/files.arm64
 @@ -9,3 +9,7 @@ pexpert/arm/pe_serial.c                standard
  pexpert/arm/hwtrace/hwtrace.c         standard
@@ -1086,7 +1156,7 @@ index 9191100..872a0d1 100644
 +pexpert/arm/a6plte/early.c              standard
 +pexpert/arm/a6plte/fb.c                 standard
 +pexpert/arm/a6plte/gic.c               standard
-diff --git c/pexpert/pexpert/arm64/A6PLTE.h w/pexpert/pexpert/arm64/A6PLTE.h
+diff --git i/pexpert/pexpert/arm64/A6PLTE.h w/pexpert/pexpert/arm64/A6PLTE.h
 new file mode 100644
 index 0000000..8f22a22
 --- /dev/null
@@ -1115,9 +1185,9 @@ index 0000000..8f22a22
 +#define PLATFORM_PANIC_LOG_DISABLED 1
 +/* Intentionally absent: Apple PAC/AIC/CTRR/SPTM, PAN, LSE, 16K pages, SME. */
 +#endif
-diff --git c/pexpert/pexpert/arm64/Makefile w/pexpert/pexpert/arm64/Makefile
+diff --git i/pexpert/pexpert/arm64/Makefile w/pexpert/pexpert/arm64/Makefile
 index 75938b5..d1a33e6 100644
---- c/pexpert/pexpert/arm64/Makefile
+--- i/pexpert/pexpert/arm64/Makefile
 +++ w/pexpert/pexpert/arm64/Makefile
 @@ -33,6 +33,7 @@ PRIVATE_KERNELFILES = \
  	H15.h \
@@ -1127,9 +1197,9 @@ index 75938b5..d1a33e6 100644
  	VMAPPLE.h
  
  
-diff --git c/pexpert/pexpert/arm64/board_config.h w/pexpert/pexpert/arm64/board_config.h
+diff --git i/pexpert/pexpert/arm64/board_config.h w/pexpert/pexpert/arm64/board_config.h
 index 5a6cd33..576e7cd 100644
---- c/pexpert/pexpert/arm64/board_config.h
+--- i/pexpert/pexpert/arm64/board_config.h
 +++ w/pexpert/pexpert/arm64/board_config.h
 @@ -49,6 +49,10 @@
   * across all clusters.

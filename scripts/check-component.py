@@ -9,12 +9,14 @@ if component not in ('osfmk', 'pexpert', 'mig', 'bsd', 'libkern', 'iokit', 'libs
     raise SystemExit('Unsupported XNU component')
 sources = []
 if component == 'mig':
-    makefile=(root/'xnu/osfmk/mach/Makefile').read_text().replace('\\\n', ' ')
-    for group in ('MIG_KUSRC','MIG_KSSRC'):
-        match=re.search(r'^'+group+r'\s*=([^\n]*)',makefile,re.M)
-        sources.extend('build/mig-generated/'+name for name in match[1].split())
-    sources.extend('build/mig-generated/'+name for name in
-                   ('device_server.c','UNDRequest_user.c','UNDReplyServer.c'))
+    makefile=(root/'build/xnu/osfmk/Makefile').read_text().replace('\\\n', ' ')
+    match=re.search(r'^CFILES\s*=([^\n]*)',makefile,re.M)
+    for path in re.findall(r'(?<!\S)\./([^\s]+)', match[1]):
+        name=Path(path).name
+        if name in ('gssd_mach.c','lockd_mach.c','kextd_mach.c','UNDRequest.c'):
+            name=name.removesuffix('.c')+'_user.c'
+        sources.append('build/mig-generated/'+name)
+
 else:
     makefile = (root/'build/xnu'/component/'Makefile').read_text().replace('\\\n', ' ')
     for group in ('CFILES', 'CXXFILES', 'SFILES'):
@@ -26,8 +28,6 @@ else:
 if component == 'libsa': sources.extend('libsa/'+name+'.c' for name in ('nonlto','lastkerneldataconst','lastkernelconstructor'))
 if component == 'libkern': sources.append('reference/libdispatch/src/firehose/firehose_buffer.c')
 if component == 'osfmk': sources.append('build/xnu/osfmk/version.c')
-if component == 'mig':
-    sources.extend('build/mig-generated/'+name+'_mach_user.c' for name in ('gssd', 'lockd', 'kextd'))
 sources = sorted(set(sources))
 out = root/'artifacts/components'/component
 out.mkdir(parents=True, exist_ok=True)
