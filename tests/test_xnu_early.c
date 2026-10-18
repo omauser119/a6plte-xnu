@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 static uintptr_t pa;
 static uintptr_t map(uintptr_t p,uintptr_t n) { assert(p==pa && n==3240*2220); return p; }
 int main(void) {
@@ -17,5 +18,11 @@ int main(void) {
     unsigned long n3=0;for(unsigned i=0;i<3240*2220;++i)n3+=b[i];assert(n3==n2);
     assert(a6_xnu_map_console(map));
     a6_xnu_puts("test mapped console output\n");
+    /* Real XNU assert metadata has unaligned 64-bit pointers at +4 and +12. */
+    unsigned char descriptor[20];
+    uint32_t info=2129u<<8;
+    uintptr_t file=(uintptr_t)"pmap.c",expression=(uintptr_t)"err == kSuccess";
+    memcpy(descriptor,&info,4); memcpy(descriptor+4,&file,8); memcpy(descriptor+12,&expression,8);
+    a6_xnu_early_fault(0,0xf200bffc,0,0,1,(uintptr_t)descriptor);
     free(b); puts("PASS: XNU bootstrap output, safe deferred transition, mapped framebuffer");
 }

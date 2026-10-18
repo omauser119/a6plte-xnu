@@ -27,13 +27,15 @@ static void node(struct adt *a,unsigned props,unsigned kids,const char *name) { 
 static unsigned make_adt(void *buf,unsigned cap,uint64_t dest,uint64_t arena,uint64_t span,uint32_t freq,
                          const uint8_t *seed,unsigned seed_size) {
     struct adt a={buf,0,cap,0}; uint32_t one=1,zero32=0; uint64_t r[3]={0,0x01000000,0x10000000};
-    node(&a,2,3,"device-tree"); str(&a,"compatible","samsung,a6plte"); str(&a,"model","SM-A605FN");
+    node(&a,2,4,"device-tree"); str(&a,"compatible","samsung,a6plte"); str(&a,"model","SM-A605FN");
     node(&a,5,1,"chosen"); prop(&a,"debug-enabled",&one,4); prop(&a,"dram-base",&dest,8); prop(&a,"dram-size",&arena,8); str(&a,"firmware-version","lk2nd-a6plte-xnu-experimental");
     prop(&a,"random-seed",seed,seed_size);
     node(&a,1,0,"memory-map"); uint64_t kr[2]={dest,span}; prop(&a,"Kernel",kr,sizeof(kr));
     node(&a,0,1,"cpus");
     node(&a,6,0,"cpu0"); str(&a,"device_type","cpu"); str(&a,"state","running"); prop(&a,"reg",&zero32,4); prop(&a,"cpu-id",&zero32,4); prop(&a,"timebase-frequency",&freq,4); str(&a,"compatible","arm,cortex-a53");
     node(&a,2,0,"arm-io"); str(&a,"device_type","msm8953"); prop(&a,"ranges",r,sizeof(r));
+    /* pmap_compute_max_asids() requires this node; absent properties select XNU defaults. */
+    node(&a,0,0,"defaults");
     return a.failed?0:a.used;
 }
 void xnu_load(struct platform *p,const void *dtb,struct range image) {

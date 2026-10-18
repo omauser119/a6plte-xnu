@@ -635,7 +635,7 @@ index 0554aa8..4bb305b 100644
  #else
  	/* Run the registered interrupt handler. */
 diff --git i/osfmk/arm64/start.s w/osfmk/arm64/start.s
-index 6aa6fe4..33c3cb2 100644
+index 6aa6fe4..94980ee 100644
 --- i/osfmk/arm64/start.s
 +++ w/osfmk/arm64/start.s
 @@ -33,7 +33,9 @@
@@ -687,7 +687,7 @@ index 6aa6fe4..33c3cb2 100644
  LEXT(SleepToken)
  	.space	(stSize_NUM),0
  #endif
-@@ -242,6 +266,37 @@ LEXT(_start)
+@@ -242,6 +266,38 @@ LEXT(_start)
  	.align 12, 0
  	.global	EXT(LowExceptionVectorBase)
  LEXT(LowExceptionVectorBase)
@@ -714,10 +714,11 @@ index 6aa6fe4..33c3cb2 100644
 +	mrs x2, ELR_EL1
 +	mrs x3, FAR_EL1
 +	mrs x4, SCTLR_EL1
-+	adrp x5, EXT(a6_xnu_early_stack)@page
-+	add x5, x5, EXT(a6_xnu_early_stack)@pageoff
-+	add x5, x5, #4, lsl #12
-+	mov sp, x5
++	mov x5, x8 // XNU assert BRK carries its descriptor in x8.
++	adrp x6, EXT(a6_xnu_early_stack)@page
++	add x6, x6, EXT(a6_xnu_early_stack)@pageoff
++	add x6, x6, #4, lsl #12
++	mov sp, x6
 +	bl EXT(a6_xnu_early_fault)
 +1:	wfe
 +	b 1b
@@ -725,7 +726,7 @@ index 6aa6fe4..33c3cb2 100644
  	/* EL1 SP 0 */
  	b		.
  	.align	7
-@@ -277,6 +332,7 @@ LEXT(LowExceptionVectorBase)
+@@ -277,6 +333,7 @@ LEXT(LowExceptionVectorBase)
  	b		.
  	.align	7
  	b		.
@@ -733,7 +734,7 @@ index 6aa6fe4..33c3cb2 100644
  	.align 12, 0
  
  #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
-@@ -291,6 +347,28 @@ LEXT(bootstrap_instructions)
+@@ -291,6 +348,28 @@ LEXT(bootstrap_instructions)
  #endif /* defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR) */
  	.align 2
  	.globl EXT(resume_idle_cpu)
@@ -762,7 +763,7 @@ index 6aa6fe4..33c3cb2 100644
  LEXT(resume_idle_cpu)
  	adrp	lr, EXT(arm_init_idle_cpu)@page
  	add		lr, lr, EXT(arm_init_idle_cpu)@pageoff
-@@ -393,13 +471,14 @@ start_cpu:
+@@ -393,13 +472,14 @@ start_cpu:
   *   arg5 - Scratch register
   *   arg6 - Scratch register
   *   arg7 - Scratch register
@@ -778,7 +779,7 @@ index 6aa6fe4..33c3cb2 100644
  	orr		$5, $5, #(ARM_TTE_BOOT_BLOCK_UPPER)
  	and		$6, $1, #(ARM_TTE_BLOCK_L2_MASK)	// Get address bits of block mapping
  	orr		$6, $5, $6
-@@ -467,8 +546,18 @@ start_cpu:
+@@ -467,8 +547,18 @@ start_cpu:
  	.globl EXT(start_first_cpu)
  LEXT(start_first_cpu)
  
@@ -799,7 +800,7 @@ index 6aa6fe4..33c3cb2 100644
  	msr		DAIFSet, #(DAIFSC_ALL)				// Disable all interrupts
  
  	mov		x20, x0
-@@ -479,6 +568,12 @@ LEXT(start_first_cpu)
+@@ -479,6 +569,12 @@ LEXT(start_first_cpu)
  	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
  	MSR_VBAR_EL1_X0
  
@@ -812,7 +813,7 @@ index 6aa6fe4..33c3cb2 100644
  
  	// Get the kernel memory parameters from the boot args
  	ldr		x22, [x20, BA_VIRT_BASE]			// Get the kernel virt base
-@@ -536,7 +631,11 @@ LEXT(start_first_cpu)
+@@ -536,7 +632,11 @@ LEXT(start_first_cpu)
  	mov		x0, #(ARM_TTE_EMPTY)				// Load invalid entry template
  	mov		x1, x25								// Start at V=P pagetable root
  	mov		x2, #(TTE_PGENTRIES)				// Load number of entries per page
@@ -824,7 +825,7 @@ index 6aa6fe4..33c3cb2 100644
  
  Linvalidate_bootstrap:							// do {
  	str		x0, [x1], #(1 << TTE_SHIFT)			//   Invalidate and advance
-@@ -613,6 +712,7 @@ Lkernelcache_base_found:
+@@ -613,6 +713,7 @@ Lkernelcache_base_found:
  	 * x5 - total number of L2 entries to allocate
  	 */
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
@@ -832,7 +833,7 @@ index 6aa6fe4..33c3cb2 100644
  	/* create_bootstrap_mapping(vbase, pbase, num_ents, L1 table, freeptr) */
  	create_bootstrap_mapping x0,  x4,  x5, x1, x2, x6, x10, x11, x12, x13
  
-@@ -620,6 +720,30 @@ Lkernelcache_base_found:
+@@ -620,6 +721,30 @@ Lkernelcache_base_found:
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
  	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
  
@@ -863,7 +864,7 @@ index 6aa6fe4..33c3cb2 100644
  	/* Ensure TTEs are visible */
  	dsb		ish
  
-@@ -727,6 +851,11 @@ common_start:
+@@ -727,6 +852,11 @@ common_start:
  1:
  
  	// Set up the exception vectors
@@ -875,7 +876,7 @@ index 6aa6fe4..33c3cb2 100644
  #if __ARM_KERNEL_PROTECT__
  	/* If this is not the first reset of the boot CPU, the alternate mapping
  	 * for the exception vectors will be set up, so use it.  Otherwise, we
-@@ -740,6 +869,7 @@ common_start:
+@@ -740,6 +870,7 @@ common_start:
  	add		x0, x0, EXT(ExceptionVectorsBase)@pageoff
  	add		x0, x0, x22									// Convert exception vector address to KVA
  	sub		x0, x0, x23
@@ -883,7 +884,7 @@ index 6aa6fe4..33c3cb2 100644
  1:
  	MSR_VBAR_EL1_X0
  
-@@ -770,6 +900,9 @@ common_start:
+@@ -770,6 +901,9 @@ common_start:
  	msr		CPACR_EL1, x0
  #endif
  
@@ -893,7 +894,7 @@ index 6aa6fe4..33c3cb2 100644
  	// Clear thread pointer
  	msr		TPIDR_EL1, xzr						// Set thread register
  
-@@ -781,10 +914,11 @@ common_start:
+@@ -781,10 +915,11 @@ common_start:
  	// Initialization common to all non-virtual Apple targets
  #endif  // APPLE_ARM64_ARCH_FAMILY
  
@@ -907,7 +908,7 @@ index 6aa6fe4..33c3cb2 100644
  
  #if HAS_CLUSTER && !NO_CPU_OVRD
  	// Unmask external IRQs if we're restarting from non-retention WFI
-@@ -796,6 +930,15 @@ common_start:
+@@ -796,6 +931,15 @@ common_start:
  	// If x21 != 0, we're doing a warm reset, so we need to trampoline to the kernel pmap.
  	cbnz	x21, Ltrampoline
  
@@ -954,6 +955,22 @@ index 878b515..f90a83f 100644
 +osfmk/arm/arm_init.c optional a6plte
 +osfmk/arm64/arm_vm_init.c optional a6plte
 +osfmk/arm64/start.s optional a6plte
+diff --git i/osfmk/console/serial_console.c w/osfmk/console/serial_console.c
+index 7784e72..9aafe75 100644
+--- i/osfmk/console/serial_console.c
++++ w/osfmk/console/serial_console.c
+@@ -130,7 +130,10 @@ SECURITY_READ_ONLY_EARLY(struct console_ops) cons_ops[] = {
+ 
+ SECURITY_READ_ONLY_EARLY(uint32_t) nconsops = (sizeof cons_ops / sizeof cons_ops[0]);
+ 
+-#if __x86_64__
++#if defined(A6PLTE)
++/* This board's serial console ABI is implemented entirely by the framebuffer. */
++SECURITY_READ_ONLY_LATE(uint32_t) cons_ops_index = SERIAL_CONS_OPS;
++#elif __x86_64__
+ uint32_t cons_ops_index = VC_CONS_OPS;
+ #else
+ SECURITY_READ_ONLY_LATE(uint32_t) cons_ops_index = VC_CONS_OPS;
 diff --git i/osfmk/kern/debug.c w/osfmk/kern/debug.c
 index 48f9405..8e7ad1e 100644
 --- i/osfmk/kern/debug.c
@@ -971,6 +988,28 @@ index 48f9405..8e7ad1e 100644
  		paniclog_append_noflush("panic: %s\n", buf);
  		paniclog_append_noflush("Kernel panicked very early before serial init, spinning forever...\n");
  		panic_spin_forever();
+diff --git i/osfmk/kern/printf.c w/osfmk/kern/printf.c
+index 2fc6931..c3a04a3 100644
+--- i/osfmk/kern/printf.c
++++ w/osfmk/kern/printf.c
+@@ -877,6 +877,17 @@ static int
+ vprintf_internal(const char *fmt, va_list ap_in, void *caller)
+ {
+ 	if (fmt) {
++#if defined(A6PLTE)
++		/* The normal log/console infrastructure is not ready during VM setup. */
++		if (PE_kputc == NULL) {
++			extern void a6_xnu_putc(char);
++			va_list early_ap;
++			va_copy(early_ap, ap_in);
++			_doprnt_log(fmt, &early_ap, a6_xnu_putc, 16);
++			va_end(early_ap);
++			return 0;
++		}
++#endif
+ 		struct console_printbuf_state info_data;
+ 
+ 		va_list ap;
 diff --git i/osfmk/mach/vm_map.defs w/osfmk/mach/vm_map.defs
 index c941237..1607619 100644
 --- i/osfmk/mach/vm_map.defs
@@ -1038,10 +1077,10 @@ index 0000000..b06c269
 +#endif
 diff --git i/pexpert/arm/a6plte/early.c w/pexpert/arm/a6plte/early.c
 new file mode 100644
-index 0000000..38cf31f
+index 0000000..b6278a2
 --- /dev/null
 +++ w/pexpert/arm/a6plte/early.c
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,98 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if defined(A6PLTE)
 +#include "fb.h"
@@ -1081,7 +1120,7 @@ index 0000000..38cf31f
 +    a6_xnu_puts("XNU 12377 / SM-A605FN\nstart_first_cpu: MMU OFF\nFramebuffer online. No UART.\n");
 +}
 +void a6_xnu_suspend_console(void) {
-+    /* Called immediately before arm_vm_init retires the bootstrap mappings. */
++    /* Stop physical stores before a caller removes the identity mapping. */
 +    state=DEFERRED;
 +    screen.base=0;
 +}
@@ -1090,8 +1129,13 @@ index 0000000..38cf31f
 +    if(stage==2) a6_xnu_puts("start: bootstrap page tables ready\n");
 +    if(stage==3) a6_xnu_puts("start: MMU enabled\n");
 +}
++static void decimal(unsigned v) {
++    char digits[10]; unsigned n=0;
++    do { digits[n++]=(char)('0'+v%10); v/=10; } while(v);
++    while(n) a6_fb_putc(&screen,digits[--n]);
++}
 +void a6_xnu_early_fault(uint64_t vector, uint64_t esr, uint64_t elr,
-+                       uint64_t far, uint64_t sctlr) {
++                       uint64_t far, uint64_t sctlr, uint64_t descriptor) {
 +    a6_xnu_puts("\nXNU EARLY EL1 EXCEPTION\nVECTOR: ");
 +    if(state==DEFERRED) return;
 +    a6_fb_hex(&screen,vector);
@@ -1099,6 +1143,23 @@ index 0000000..38cf31f
 +    a6_fb_puts(&screen,"\nELR: "); a6_fb_hex(&screen,elr);
 +    a6_fb_puts(&screen,"\nFAR: "); a6_fb_hex(&screen,far);
 +    a6_fb_puts(&screen,"\nSCTLR: "); a6_fb_hex(&screen,sctlr);
++    if((sctlr&1) && (esr>>26)==0x3c && (esr&0xffff)==0xbffc && descriptor) {
++        /* rel/xnu-12377 mach_assert_hdr is packed to four-byte alignment. */
++        struct __attribute__((packed)) desc { uint32_t info; uint64_t file, text[3]; };
++        const struct desc *d=(const void *)(uintptr_t)descriptor;
++        unsigned kind=d->info&255;
++        if(kind<=3) {
++            a6_fb_puts(&screen,"\nXNU ASSERT: ");
++            a6_fb_puts(&screen,(const char *)(uintptr_t)d->file);
++            a6_fb_putc(&screen,':'); decimal(d->info>>8);
++            a6_fb_puts(&screen,"\n");
++            a6_fb_puts(&screen,(const char *)(uintptr_t)d->text[0]);
++            if(kind) {
++                a6_fb_putc(&screen,' '); a6_fb_puts(&screen,(const char *)(uintptr_t)d->text[1]);
++                a6_fb_putc(&screen,' '); a6_fb_puts(&screen,(const char *)(uintptr_t)d->text[2]);
++            }
++        }
++    }
 +    a6_fb_puts(&screen,"\nCPU halted for diagnosis.\n");
 +}
 +int a6_xnu_map_console(uintptr_t (*map)(uintptr_t,uintptr_t)) {
@@ -1120,7 +1181,7 @@ index 0000000..38cf31f
 +#endif
 diff --git i/pexpert/arm/a6plte/early.h w/pexpert/arm/a6plte/early.h
 new file mode 100644
-index 0000000..c08e503
+index 0000000..1727b0b
 --- /dev/null
 +++ w/pexpert/arm/a6plte/early.h
 @@ -0,0 +1,13 @@
@@ -1134,7 +1195,7 @@ index 0000000..c08e503
 +void a6_xnu_puts(const char *);
 +void a6_xnu_suspend_console(void);
 +void a6_xnu_stage(unsigned);
-+void a6_xnu_early_fault(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
++void a6_xnu_early_fault(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 +int a6_xnu_map_console(uintptr_t (*)(uintptr_t, uintptr_t));
 +#endif
 diff --git i/pexpert/arm/a6plte/fb.c w/pexpert/arm/a6plte/fb.c
@@ -1565,6 +1626,20 @@ index 9191100..872a0d1 100644
 +pexpert/arm/a6plte/early.c              standard
 +pexpert/arm/a6plte/fb.c                 standard
 +pexpert/arm/a6plte/gic.c               standard
+diff --git i/pexpert/gen/pe_gen.c w/pexpert/gen/pe_gen.c
+index 6740cb0..1016e61 100644
+--- i/pexpert/gen/pe_gen.c
++++ w/pexpert/gen/pe_gen.c
+@@ -125,6 +125,9 @@ typedef void (*PE_putc_t)(char);
+ 
+ #if XNU_TARGET_OS_OSX
+ PE_putc_t PE_putc;
++#elif defined(A6PLTE)
++extern void a6_xnu_putc(char);
++SECURITY_READ_ONLY_LATE(PE_putc_t) PE_putc = a6_xnu_putc;
+ #else
+ SECURITY_READ_ONLY_LATE(PE_putc_t) PE_putc;
+ #endif
 diff --git i/pexpert/pexpert/arm64/A6PLTE.h w/pexpert/pexpert/arm64/A6PLTE.h
 new file mode 100644
 index 0000000..8f22a22

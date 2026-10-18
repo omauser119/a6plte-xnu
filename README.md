@@ -6,8 +6,9 @@ The modified lk2nd menu and the first framebuffer output from the actual linked
 XNU kernel have been confirmed on SM-A605FN. After temporary loading with
 `fastboot boot`, XNU prints `start_first_cpu: MMU OFF` and
 `Framebuffer online. No UART.` The updated kernel has also reached
-`arm_vm_init: switching to final page tables`, confirming the MMU transition,
-virtual execution in `arm_init` and construction of the final VM mappings.
+`arm_vm_init: final TTBR1 active`, confirming the MMU transition,
+virtual execution in `arm_init` and activation of the final VM mappings.
+Native XNU cache and processor-initialization messages are visible on the display.
 Completion of VM initialization, a working scheduler and userspace
 are not yet confirmed.
 
@@ -17,7 +18,7 @@ are not yet confirmed.
 - ARM64 boot bridge: FDT parsing, reserved RAM handling, experimental Mach-O loader,
   XNU boot arguments and minimal Apple device tree, including boot entropy.
 - XNU framebuffer identity mapping across MMU setup and final page-table
-  construction, early `kprintf` and panic output, bootstrap exception reports,
+  construction, early `printf`/`kprintf` and panic output, bootstrap exception reports,
   and log replay when the framebuffer receives its final virtual mapping.
 - Initial Cortex-A53/A6PLTE profile, 4K pages, one CPU, GICv2 and virtual timer wiring.
 - No-LSE commpage locks and exclusion of Apple-specific initialization.
