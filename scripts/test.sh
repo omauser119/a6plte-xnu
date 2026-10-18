@@ -12,7 +12,7 @@ python3 "$ROOT/tests/test_crc32.py"
 clang -DA6PLTE=1 -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_xnu_early.c" "$ROOT/xnu/pexpert/arm/a6plte/early.c" "$ROOT/xnu/pexpert/arm/a6plte/fb.c" -o "$ROOT/artifacts/test-xnu-early"
 "$ROOT/artifacts/test-xnu-early"
 for source in early fb; do
-    clang --target=arm64-apple-darwin -mcpu=cortex-a53 -ffreestanding -fno-builtin -fno-stack-protector -mgeneral-regs-only -O2 -DA6PLTE=1 -Wall -Wextra -Werror -c "$ROOT/xnu/pexpert/arm/a6plte/$source.c" -o "$ROOT/artifacts/xnu-$source.macho.o"
+    clang --target=arm64-apple-darwin -mcpu=cortex-a53 -ffreestanding -fno-builtin -fno-stack-protector -mgeneral-regs-only -mstrict-align -O2 -DA6PLTE=1 -Wall -Wextra -Werror -c "$ROOT/xnu/pexpert/arm/a6plte/$source.c" -o "$ROOT/artifacts/xnu-$source.macho.o"
 done
 clang -DA6PLTE=1 -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_gic.c" "$ROOT/xnu/pexpert/arm/a6plte/gic.c" -o "$ROOT/artifacts/test-gic"
 "$ROOT/artifacts/test-gic"

@@ -171,3 +171,11 @@ EL1 exception vectors before reading the kernel package. An early synchronous
 fault prints ESR/ELR/FAR on the framebuffer. CRC integrity remains mandatory and
 uses an incremental nibble-table implementation checked against zlib. The kernel
 package has been detected on the phone; reaching XNU entry is still unconfirmed.
+
+
+A photographed EL1 exception identified an unaligned `LDURH` in the bridge's
+Apple-device-tree property-name copy: ESR `0x96000021`, bridge-relative ELR
+`0x3c20`, FAR `0x4008425d`. MMU-off code now uses `-mstrict-align`, including
+XNU's early framebuffer units. The loader also preserves the Mach-O virtual
+base's low 21 bits in its physical placement, as required by XNU's initial L2
+block mappings; this kernel needs a `0x4000` offset within the allocated block.

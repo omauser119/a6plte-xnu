@@ -5,7 +5,7 @@ OUT="$ROOT/artifacts"
 LLD=${LLD:-$(command -v ld.lld || true)}
 LLD=${LLD:-$HOME/a6plte-uefi/toolchain/ld.lld}
 mkdir -p "$OUT"
-flags=(--target=aarch64-none-elf -mcpu=cortex-a53 -mgeneral-regs-only -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -O2 -g -Wall -Wextra -Werror)
+flags=(--target=aarch64-none-elf -mcpu=cortex-a53 -mstrict-align -mgeneral-regs-only -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -O2 -g -Wall -Wextra -Werror)
 for src in console/fb.c shim/fdt.c shim/crc32.c shim/loader.c shim/main.c shim/start.S; do
     clang "${flags[@]}" -c "$ROOT/$src" -o "$OUT/$(basename "${src%.*}").o"
 done

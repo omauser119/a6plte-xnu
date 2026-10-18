@@ -70,20 +70,25 @@ void xnu_load(struct platform *p,const void *dtb,struct range image) {
     uint64_t el,sctlr; __asm__ volatile("mrs %0, CurrentEL":"=r"(el)); __asm__ volatile("mrs %0,sctlr_el1":"=r"(sctlr));
     if(el!=4 || (sctlr&5)) FAIL("EL1 with MMU and D-cache off required");
     /* Only donate a verified contiguous free window, never all RAM across firmware carveouts. */
-    uint64_t dest,arena=128*1024*1024;
+    uint64_t allocation,arena=128*1024*1024;
     if(p->nr_reserved>=96) FAIL("reservation table full");
     const uint8_t *d=dtb; uint32_t dtlen=(uint32_t)d[4]<<24|(uint32_t)d[5]<<16|(uint32_t)d[6]<<8|d[7];
     p->reserved[p->nr_reserved++]=(struct range){(uintptr_t)dtb,dtlen};
-    if(platform_alloc(p,arena,0x200000,image,&dest)) FAIL("no safe 128 MiB RAM window");
+    if(platform_alloc(p,arena,0x200000,image,&allocation)) FAIL("no safe 128 MiB RAM window");
+    /* XNU's initial L2 block mappings require matching PA/VA low 21 bits.
+     * Its Mach header is at ...007004000, not a 2 MiB boundary. */
+    uint64_t padding=h.virt&0x1fffff;
+    uint64_t dest=allocation+padding,donated=arena-padding;
+    if(((dest^h.virt)&0x1fffff) || h.span+0x14000>donated) FAIL("invalid bootstrap memory placement");
     a6_fb_puts(fb,"Loading Mach-O at "); a6_fb_hex(fb,dest); a6_fb_puts(fb,"\n");
     copy((void *)(uintptr_t)dest,src,h.bytes);
     a6_fb_puts(fb,"KERNEL COPY COMPLETE\n");
     uint64_t args_pa=dest+h.span, tree_pa=args_pa+0x4000;
     struct a6_boot_args *args=(void *)(uintptr_t)args_pa; zero(args,sizeof(*args));
     uint64_t freq; __asm__ volatile("mrs %0,cntfrq_el0":"=r"(freq));
-    unsigned tree_size=make_adt((void *)(uintptr_t)tree_pa,0x10000,dest,arena,h.span,(uint32_t)freq);
+    unsigned tree_size=make_adt((void *)(uintptr_t)tree_pa,0x10000,dest,donated,h.span,(uint32_t)freq);
     if(!tree_size) FAIL("Apple DT overflow");
-    args->revision=2; args->version=2; args->virt_base=h.virt; args->phys_base=dest; args->mem_size=arena; args->mem_size_actual=arena;
+    args->revision=2; args->version=2; args->virt_base=h.virt; args->phys_base=dest; args->mem_size=donated; args->mem_size_actual=donated;
     args->top_of_kernel_data=(tree_pa+tree_size+0x3fff)&~0x3fffULL;
     args->video=(struct a6_boot_video){(uintptr_t)fb->base,0,fb->stride,fb->width,fb->height,fb->format==A6_RGB888?24:fb->format==A6_XRGB8888?32:16};
     /* XNU consumes a virtual DT pointer after its bootstrap identity -> KVA transition. */
