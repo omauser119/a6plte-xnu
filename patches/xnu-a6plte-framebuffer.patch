@@ -25,7 +25,7 @@ index e67ea79..701a36e 100644
  #else
 diff --git i/config/MASTER.arm64.a6plte.MacOSX w/config/MASTER.arm64.a6plte.MacOSX
 new file mode 100644
-index 0000000..de1eb44
+index 0000000..d983bb1
 --- /dev/null
 +++ w/config/MASTER.arm64.a6plte.MacOSX
 @@ -0,0 +1,135 @@
@@ -95,7 +95,7 @@ index 0000000..de1eb44
 +#else /*!SOC_IS_VIRTUALIZED*/
 +#  CPU_COUNTERS_BASE = [    ]
 +#endif /*SOC_IS_VIRTUALIZED*/
-+#  PERF_DBG_BASE =  [ config_dtrace mach_kdp config_serial_kdp kdp_interactive_debugging config_kdp_coredump_encryption CPU_COUNTERS_BASE kperf ]
++#  PERF_DBG_BASE =  [ config_dtrace mach_kdp kdp_interactive_debugging config_kdp_coredump_encryption CPU_COUNTERS_BASE kperf ]
 +#  PERF_DBG_RELEASE=[ PERF_DBG_BASE ist_kdebug ]
 +#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
 +#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
@@ -1525,6 +1525,40 @@ index 937ce42..deffc98 100644
  	/* Set up mappings for interrupt controller and possibly timers (if they haven't been set up already) */
  	if (args != NULL) {
  		if (!pe_arm_map_interrupt_controller()) {
+diff --git i/pexpert/arm/pe_init.c w/pexpert/arm/pe_init.c
+index db1c4a0..9602448 100644
+--- i/pexpert/arm/pe_init.c
++++ w/pexpert/arm/pe_init.c
+@@ -218,6 +218,21 @@ check_for_panic_log(void)
+ int
+ PE_initialize_console(PE_Video * info, int op)
+ {
++#if defined(A6PLTE)
++	/* The RGB888 boot display is owned by the A6PLTE renderer. The generic
++	 * graphics console clears rows with SIMD stores requiring 16-byte alignment,
++	 * which this display's 3240-byte stride cannot provide on Device memory. */
++	extern int a6_xnu_map_console(uintptr_t (*)(uintptr_t, uintptr_t));
++	extern int disableConsoleOutput;
++	(void)info;
++	(void)op;
++	if (!a6_xnu_map_console(ml_io_map)) {
++		return -1;
++	}
++	(void)switch_to_serial_console(); /* framebuffer ABI, no UART implementation */
++	disableConsoleOutput = FALSE;
++	return 0;
++#else
+ 	static int last_console = -1;
+ 
+ 	if (info && (info != &PE_state.video)) {
+@@ -266,6 +281,7 @@ PE_initialize_console(PE_Video * info, int op)
+ 	}
+ 
+ 	return 0;
++#endif /* A6PLTE */
+ }
+ 
+ void
 diff --git i/pexpert/arm/pe_kprintf.c w/pexpert/arm/pe_kprintf.c
 index 7a4bbd3..a7e8dae 100644
 --- i/pexpert/arm/pe_kprintf.c
@@ -1627,19 +1661,38 @@ index 9191100..872a0d1 100644
 +pexpert/arm/a6plte/fb.c                 standard
 +pexpert/arm/a6plte/gic.c               standard
 diff --git i/pexpert/gen/pe_gen.c w/pexpert/gen/pe_gen.c
-index 6740cb0..1016e61 100644
+index 6740cb0..a4f9b49 100644
 --- i/pexpert/gen/pe_gen.c
 +++ w/pexpert/gen/pe_gen.c
-@@ -125,6 +125,9 @@ typedef void (*PE_putc_t)(char);
+@@ -123,7 +123,10 @@ extern void vcattach(void);
+ /* Globals */
+ typedef void (*PE_putc_t)(char);
  
- #if XNU_TARGET_OS_OSX
- PE_putc_t PE_putc;
-+#elif defined(A6PLTE)
+-#if XNU_TARGET_OS_OSX
++#if defined(A6PLTE)
 +extern void a6_xnu_putc(char);
-+SECURITY_READ_ONLY_LATE(PE_putc_t) PE_putc = a6_xnu_putc;
++PE_putc_t PE_putc = a6_xnu_putc;
++#elif XNU_TARGET_OS_OSX
+ PE_putc_t PE_putc;
  #else
  SECURITY_READ_ONLY_LATE(PE_putc_t) PE_putc;
- #endif
+@@ -134,11 +137,16 @@ extern void console_write_char(char);
+ void
+ PE_init_printf(boolean_t vm_initialized)
+ {
++#if defined(A6PLTE)
++	(void)vm_initialized;
++	PE_putc = console_write_char;
++#else
+ 	if (!vm_initialized) {
+ 		PE_putc = console_write_char;
+ 	} else {
+ 		vcattach();
+ 	}
++#endif
+ }
+ 
+ __mockable uint32_t
 diff --git i/pexpert/pexpert/arm64/A6PLTE.h w/pexpert/pexpert/arm64/A6PLTE.h
 new file mode 100644
 index 0000000..8f22a22

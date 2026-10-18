@@ -8,9 +8,11 @@ XNU kernel have been confirmed on SM-A605FN. After temporary loading with
 `Framebuffer online. No UART.` The updated kernel has also reached
 `arm_vm_init: final TTBR1 active`, confirming the MMU transition,
 virtual execution in `arm_init` and activation of the final VM mappings.
-Native XNU cache and processor-initialization messages are visible on the display.
-Completion of VM initialization, a working scheduler and userspace
-are not yet confirmed.
+Native XNU logs now confirm completion of VM bootstrap and initialization of
+scheduler structures, Firehose, OSLog and IPC on the physical display. The latest
+hardware run stopped when the generic video console attempted SIMD writes to
+the packed RGB888 framebuffer. The A6PLTE renderer must retain display ownership.
+Scheduler dispatch, timer interrupts and userspace are not yet confirmed.
 
 ## Implemented
 
@@ -103,8 +105,8 @@ loading a full kernel, RAM and lk2nd download-buffer overlap must be checked.
 
 ## Remaining work
 
-Completion of VM bootstrap, runtime compatibility of external dependencies, a complete
-platform device tree, and exception/timer validation remain in progress. SMP,
+Runtime compatibility of external dependencies, a complete platform device tree,
+and exception/timer validation remain in progress. SMP,
 storage, rootfs and power management are not implemented. Compiled-file counts
 are not a measure of boot readiness.
 
