@@ -4,8 +4,9 @@
 
 The framebuffer console has been confirmed on SM-A605FN through installed lk2nd
 23.1. The first linked XNU image has now been temporarily loaded with `fastboot boot`;
-screen output from XNU is awaiting confirmation. The modified lk2nd image has not
-been flashed or tested on hardware.
+screen output from XNU is awaiting confirmation. The modified lk2nd image was
+flashed successfully through the lk2nd fastboot interface; its first startup is
+still being checked.
 
 ## Implemented
 
@@ -76,7 +77,16 @@ fastboot boot artifacts/fb-smoke-boot.img
 ```
 
 No USB driver runs in this payload; return to lk2nd by hardware reboot.
-There is no installation/flashing procedure for the unvalidated modified lk2nd.
+The modified bootloader was written from the running lk2nd interface with:
+
+```sh
+fastboot flash lk2nd artifacts/lk2nd-a6plte-xnu.img
+```
+
+On this SM-A605FN, `fastboot reboot bootloader` entered Samsung Odin mode.
+Use a hardware restart and press Volume Down after the screen/vibration to return
+to lk2nd fastboot. The `lk2nd` target updates the bootloader's 512 KiB region;
+`boot` is the separate boot-image area exposed by lk2nd.
 
 `package-boot.sh /path/to/kernel` requires an actual linked ARM64_ALL Mach-O
 MH_EXECUTE with LC_UNIXTHREAD. It rejects ARM64e, IMG4 and filesets. The bridge
