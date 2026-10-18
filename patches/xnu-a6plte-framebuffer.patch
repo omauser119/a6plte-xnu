@@ -211,21 +211,23 @@ index e37762b..d4c57c8 100644
  
  ifeq ($(ARM64_LARGE_MEMORY),1)
 diff --git i/osfmk/arm/arm_init.c w/osfmk/arm/arm_init.c
-index 6690846..ce92ec2 100644
+index 6690846..3c9da1b 100644
 --- i/osfmk/arm/arm_init.c
 +++ w/osfmk/arm/arm_init.c
-@@ -356,6 +356,10 @@ arm_init(
+@@ -356,6 +356,12 @@ arm_init(
  	DTEntry chosen = NULL;
  	unsigned int dt_entry_size = 0;
  
 +#if defined(A6PLTE)
 +	extern void a6_xnu_puts(const char *);
 +	a6_xnu_puts("arm_init: virtual execution entered\n");
++	kprintf("XNU arm_init: BootArgs=%p phys=%llx virt=%llx mem=%llu\n",
++	    args, args->physBase, args->virtBase, args->memSize);
 +#endif
  	arm_slide_rebase_and_sign_image();
  
  	arm_static_if_init(args);
-@@ -569,7 +573,13 @@ arm_init(
+@@ -569,7 +575,13 @@ arm_init(
  	gDramSize = *dram_size;
  	pmap_first_pnum = (ppnum_t)atop(gDramBase);
  
@@ -419,11 +421,19 @@ index 0000000..8570b16
 +}
 +#endif
 diff --git i/osfmk/arm64/arm_vm_init.c w/osfmk/arm64/arm_vm_init.c
-index 756af52..79e8f3e 100644
+index 756af52..66fa2cd 100644
 --- i/osfmk/arm64/arm_vm_init.c
 +++ w/osfmk/arm64/arm_vm_init.c
-@@ -2164,7 +2164,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2162,9 +2162,17 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ #endif /* KASAN */
+ 
  	arm_vm_physmap_init(args);
++#if defined(A6PLTE)
++	extern void a6_xnu_puts(const char *);
++	extern void a6_xnu_suspend_console(void);
++	a6_xnu_puts("arm_vm_init: switching to final page tables\n");
++	a6_xnu_suspend_console();
++#endif
  	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
  
 +#if !defined(A6PLTE)
@@ -531,7 +541,7 @@ index 0554aa8..4bb305b 100644
  #else
  	/* Run the registered interrupt handler. */
 diff --git i/osfmk/arm64/start.s w/osfmk/arm64/start.s
-index 6aa6fe4..1dc77c6 100644
+index 6aa6fe4..baf32b2 100644
 --- i/osfmk/arm64/start.s
 +++ w/osfmk/arm64/start.s
 @@ -33,7 +33,9 @@
@@ -544,7 +554,36 @@ index 6aa6fe4..1dc77c6 100644
  #include <arm64/exception_asm.h>
  
  #if __ARM_KERNEL_PROTECT__
-@@ -207,8 +209,8 @@ Lskip_cpu_reset_handler:
+@@ -88,6 +90,28 @@
+ #endif /* defined(KERNEL_INTEGRITY_KTRR) */
+ .endmacro
+ 
++#if defined(A6PLTE)
++/* No virtual stack is usable until the bootstrap mappings are active. */
++.macro A6_BOOT_STAGE
++	mov x28, sp
++	mov x27, lr
++	adrp x1, EXT(a6_xnu_early_stack)@page
++	add x1, x1, EXT(a6_xnu_early_stack)@pageoff
++	add x1, x1, #4, lsl #12
++	mov sp, x1
++	mov x0, #$0
++	bl EXT(a6_xnu_stage)
++	mov lr, x27
++	mov sp, x28
++.endmacro
++
++.macro A6_EARLY_VECTOR
++	mov x0, #$0
++	b La6_early_exception
++	.align 7
++.endmacro
++#endif
++
+ /*
+  * Checks the reset handler for global and CPU-specific reset-assist functions,
+  * then jumps to the reset handler with boot args and cpu data. This is copied
+@@ -207,8 +231,8 @@ Lskip_cpu_reset_handler:
  	.align 3
  	.global EXT(LowResetVectorEnd)
  LEXT(LowResetVectorEnd)
@@ -554,10 +593,67 @@ index 6aa6fe4..1dc77c6 100644
  LEXT(SleepToken)
  	.space	(stSize_NUM),0
  #endif
-@@ -467,6 +469,18 @@ start_cpu:
+@@ -242,6 +266,37 @@ LEXT(_start)
+ 	.align 12, 0
+ 	.global	EXT(LowExceptionVectorBase)
+ LEXT(LowExceptionVectorBase)
++#if defined(A6PLTE)
++	A6_EARLY_VECTOR 0
++	A6_EARLY_VECTOR 1
++	A6_EARLY_VECTOR 2
++	A6_EARLY_VECTOR 3
++	A6_EARLY_VECTOR 4
++	A6_EARLY_VECTOR 5
++	A6_EARLY_VECTOR 6
++	A6_EARLY_VECTOR 7
++	A6_EARLY_VECTOR 8
++	A6_EARLY_VECTOR 9
++	A6_EARLY_VECTOR 10
++	A6_EARLY_VECTOR 11
++	A6_EARLY_VECTOR 12
++	A6_EARLY_VECTOR 13
++	A6_EARLY_VECTOR 14
++	A6_EARLY_VECTOR 15
++La6_early_exception:
++	msr DAIFSet, #15
++	mrs x1, ESR_EL1
++	mrs x2, ELR_EL1
++	mrs x3, FAR_EL1
++	mrs x4, SCTLR_EL1
++	adrp x5, EXT(a6_xnu_early_stack)@page
++	add x5, x5, EXT(a6_xnu_early_stack)@pageoff
++	add x5, x5, #4, lsl #12
++	mov sp, x5
++	bl EXT(a6_xnu_early_fault)
++1:	wfe
++	b 1b
++#else
+ 	/* EL1 SP 0 */
+ 	b		.
+ 	.align	7
+@@ -277,6 +332,7 @@ LEXT(LowExceptionVectorBase)
+ 	b		.
+ 	.align	7
+ 	b		.
++#endif /* A6PLTE */
+ 	.align 12, 0
+ 
+ #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
+@@ -399,7 +455,7 @@ start_cpu:
+ 	lsr		$4, $4, #(ARM_TTE_BLOCK_L2_SHIFT)	// Get index in L2 table for block entry
+ 	lsl		$4, $4, #(TTE_SHIFT)				// Convert index into pointer offset
+ 	add		$4, $2, $4							// Get L2 entry pointer
+-	mov		$5, #(ARM_TTE_BOOT_BLOCK_LOWER)		// Get L2 block entry template
++	mov		$5, x8							// L2 attributes supplied by the mapping caller
+ 	orr		$5, $5, #(ARM_TTE_BOOT_BLOCK_UPPER)
+ 	and		$6, $1, #(ARM_TTE_BLOCK_L2_MASK)	// Get address bits of block mapping
+ 	orr		$6, $5, $6
+@@ -467,8 +523,18 @@ start_cpu:
  	.globl EXT(start_first_cpu)
  LEXT(start_first_cpu)
  
+-	// Unlock the core for debugging
+-	msr		OSLAR_EL1, xzr
 +#if defined(A6PLTE)
 +	// Physical, temporary stack: emit the first real XNU marker before MMU setup.
 +	msr DAIFSet, #15
@@ -570,10 +666,104 @@ index 6aa6fe4..1dc77c6 100644
 +	mov x0, x20
 +#endif
 +
- 	// Unlock the core for debugging
- 	msr		OSLAR_EL1, xzr
  	msr		DAIFSet, #(DAIFSC_ALL)				// Disable all interrupts
-@@ -781,10 +795,11 @@ common_start:
+ 
+ 	mov		x20, x0
+@@ -479,6 +545,12 @@ LEXT(start_first_cpu)
+ 	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
+ 	MSR_VBAR_EL1_X0
+ 
++#if defined(A6PLTE)
++	isb
++	A6_BOOT_STAGE 1
++#endif
++	// Unlock the core only after installing the early exception reporter.
++	msr		OSLAR_EL1, xzr
+ 
+ 	// Get the kernel memory parameters from the boot args
+ 	ldr		x22, [x20, BA_VIRT_BASE]			// Get the kernel virt base
+@@ -536,7 +608,11 @@ LEXT(start_first_cpu)
+ 	mov		x0, #(ARM_TTE_EMPTY)				// Load invalid entry template
+ 	mov		x1, x25								// Start at V=P pagetable root
+ 	mov		x2, #(TTE_PGENTRIES)				// Load number of entries per page
++#if defined(A6PLTE)
++	lsl		x2, x2, #3							// Clear all 8 pages, including the framebuffer L2.
++#else
+ 	lsl		x2, x2, #2							// Shift by 2 for num entries on 4 pages
++#endif
+ 
+ Linvalidate_bootstrap:							// do {
+ 	str		x0, [x1], #(1 << TTE_SHIFT)			//   Invalidate and advance
+@@ -613,6 +689,7 @@ Lkernelcache_base_found:
+ 	 * x5 - total number of L2 entries to allocate
+ 	 */
+ 	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
++	mov x8, #(ARM_TTE_BOOT_BLOCK_LOWER)
+ 	/* create_bootstrap_mapping(vbase, pbase, num_ents, L1 table, freeptr) */
+ 	create_bootstrap_mapping x0,  x4,  x5, x1, x2, x6, x10, x11, x12, x13
+ 
+@@ -620,6 +697,30 @@ Lkernelcache_base_found:
+ 	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
+ 	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
+ 
++#if defined(A6PLTE)
++	/* Keep the boot framebuffer accessible through TTBR0 until arm_vm_init.
++	 * Device attributes avoid stale cached pixels and need no UART hardware.
++	 * The SM-A605FN framebuffer occupies a separate L1 entry from kernel RAM.
++	 */
++	adrp x6, EXT(a6_xnu_bootstrap_video)@page
++	add x6, x6, EXT(a6_xnu_bootstrap_video)@pageoff
++	ldp x0, x5, [x6]
++	cbz x5, La6_no_boot_video
++	and x4, x0, #(ARM_TTE_BLOCK_L2_MASK)
++	sub x6, x0, x4
++	add x5, x5, x6
++	mov x6, #(ARM_TT_L2_SIZE)
++	add x5, x5, x6
++	sub x5, x5, #1
++	lsr x5, x5, #(ARM_TT_L2_SHIFT)
++	mov x0, x4
++#define A6_FB_BOOT_ATTRIBUTES (ARM_TTE_TYPE_BLOCK | ARM_TTE_VALID | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_DISABLE) | ARM_TTE_BLOCK_AF)
++	mov x8, #(A6_FB_BOOT_ATTRIBUTES)
++	create_bootstrap_mapping x0, x4, x5, x1, x2, x6, x10, x11, x12, x13
++La6_no_boot_video:
++	A6_BOOT_STAGE 2
++#endif
++
+ 	/* Ensure TTEs are visible */
+ 	dsb		ish
+ 
+@@ -727,6 +828,11 @@ common_start:
+ 1:
+ 
+ 	// Set up the exception vectors
++#if defined(A6PLTE)
++	/* Use the physical reporter across the MMU transition, then its KVA alias. */
++	adrp x0, EXT(LowExceptionVectorBase)@page
++	add x0, x0, EXT(LowExceptionVectorBase)@pageoff
++#else
+ #if __ARM_KERNEL_PROTECT__
+ 	/* If this is not the first reset of the boot CPU, the alternate mapping
+ 	 * for the exception vectors will be set up, so use it.  Otherwise, we
+@@ -740,6 +846,7 @@ common_start:
+ 	add		x0, x0, EXT(ExceptionVectorsBase)@pageoff
+ 	add		x0, x0, x22									// Convert exception vector address to KVA
+ 	sub		x0, x0, x23
++#endif /* A6PLTE */
+ 1:
+ 	MSR_VBAR_EL1_X0
+ 
+@@ -770,6 +877,9 @@ common_start:
+ 	msr		CPACR_EL1, x0
+ #endif
+ 
++#if defined(A6PLTE)
++	A6_BOOT_STAGE 3
++#endif
+ 	// Clear thread pointer
+ 	msr		TPIDR_EL1, xzr						// Set thread register
+ 
+@@ -781,10 +891,11 @@ common_start:
  	// Initialization common to all non-virtual Apple targets
  #endif  // APPLE_ARM64_ARCH_FAMILY
  
@@ -587,6 +777,22 @@ index 6aa6fe4..1dc77c6 100644
  
  #if HAS_CLUSTER && !NO_CPU_OVRD
  	// Unmask external IRQs if we're restarting from non-retention WFI
+@@ -796,6 +907,15 @@ common_start:
+ 	// If x21 != 0, we're doing a warm reset, so we need to trampoline to the kernel pmap.
+ 	cbnz	x21, Ltrampoline
+ 
++#if defined(A6PLTE)
++	adrp x0, EXT(LowExceptionVectorBase)@page
++	add x0, x0, EXT(LowExceptionVectorBase)@pageoff
++	add x0, x0, x22
++	sub x0, x0, x23
++	MSR_VBAR_EL1_X0
++	isb
++#endif
++
+ 	// Set KVA of boot args as first arg
+ 	add		x0, x20, x22
+ 	sub		x0, x0, x23
 diff --git i/osfmk/conf/files.arm64 w/osfmk/conf/files.arm64
 index 878b515..f90a83f 100644
 --- i/osfmk/conf/files.arm64
@@ -685,10 +891,10 @@ index 0000000..b06c269
 +#endif
 diff --git i/pexpert/arm/a6plte/early.c w/pexpert/arm/a6plte/early.c
 new file mode 100644
-index 0000000..ff5aad3
+index 0000000..38cf31f
 --- /dev/null
 +++ w/pexpert/arm/a6plte/early.c
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,76 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if defined(A6PLTE)
 +#include "fb.h"
@@ -696,14 +902,18 @@ index 0000000..ff5aad3
 +#include "early.h"
 +/* Called before XNU establishes any virtual mappings, on the boot CPU only. */
 +unsigned char a6_xnu_early_stack[16384] __attribute__((aligned(16)));
++/* Physical framebuffer range consumed by start.s before enabling translation. */
++uint64_t a6_xnu_bootstrap_video[2];
 +static struct a6_fb screen;
 +static struct a6_boot_video video;
 +static char pending[32768];
 +static unsigned written;
-+static int mapped;
++enum { DEFERRED, BOOTSTRAP, MAPPED };
++static int state;
 +void a6_xnu_putc(char c) {
-+    if(mapped) a6_fb_putc(&screen,c);
-+    else { pending[written%sizeof(pending)]=c; ++written; }
++    pending[written%sizeof(pending)]=c;
++    ++written;
++    if(state!=DEFERRED) a6_fb_putc(&screen,c);
 +}
 +void a6_xnu_puts(const char *s) { while(*s) a6_xnu_putc(*s++); }
 +void a6_xnu_early_entry(const void *ptr) {
@@ -712,26 +922,47 @@ index 0000000..ff5aad3
 +    unsigned fmt=depth==24?A6_RGB888:depth==32?A6_XRGB8888:depth==16?A6_RGB565:0;
 +    /* A6PLTE bridge uses unrotated packed RGB888; accept the other explicit depths too. */
 +    if(args->revision!=2 || args->version!=2 || args->video.depth!=depth ||
-+       args->video.width>8192 || args->video.height>8192 || args->video.stride>65536) return;
++       args->video.width>8192 || args->video.height>8192 || args->video.stride>65536 ||
++       args->video.stride*args->video.height>32*1024*1024) return;
 +    video=args->video;
 +    if(a6_fb_init(&screen,video.base,video.stride*video.height,
 +                  (uint32_t)video.width,(uint32_t)video.height,(uint32_t)video.stride,fmt)) return;
++    a6_xnu_bootstrap_video[0]=video.base;
++    a6_xnu_bootstrap_video[1]=video.stride*video.height;
++    state=BOOTSTRAP; written=0;
 +    a6_fb_clear(&screen);
-+    a6_fb_puts(&screen,"XNU 12377 / SM-A605FN\nstart_first_cpu: MMU OFF\nFramebuffer online. No UART.\n");
-+    /* Never dereference the physical framebuffer after the MMU transition. */
++    a6_xnu_puts("XNU 12377 / SM-A605FN\nstart_first_cpu: MMU OFF\nFramebuffer online. No UART.\n");
++}
++void a6_xnu_suspend_console(void) {
++    /* Called immediately before arm_vm_init retires the bootstrap mappings. */
++    state=DEFERRED;
 +    screen.base=0;
-+    mapped=0; written=0;
-+    a6_xnu_puts("XNU start_first_cpu reached\n");
++}
++void a6_xnu_stage(unsigned stage) {
++    if(stage==1) a6_xnu_puts("start: exception vectors installed\n");
++    if(stage==2) a6_xnu_puts("start: bootstrap page tables ready\n");
++    if(stage==3) a6_xnu_puts("start: MMU enabled\n");
++}
++void a6_xnu_early_fault(uint64_t vector, uint64_t esr, uint64_t elr,
++                       uint64_t far, uint64_t sctlr) {
++    a6_xnu_puts("\nXNU EARLY EL1 EXCEPTION\nVECTOR: ");
++    if(state==DEFERRED) return;
++    a6_fb_hex(&screen,vector);
++    a6_fb_puts(&screen,"\nESR: "); a6_fb_hex(&screen,esr);
++    a6_fb_puts(&screen,"\nELR: "); a6_fb_hex(&screen,elr);
++    a6_fb_puts(&screen,"\nFAR: "); a6_fb_hex(&screen,far);
++    a6_fb_puts(&screen,"\nSCTLR: "); a6_fb_hex(&screen,sctlr);
++    a6_fb_puts(&screen,"\nCPU halted for diagnosis.\n");
 +}
 +int a6_xnu_map_console(uintptr_t (*map)(uintptr_t,uintptr_t)) {
-+    if(mapped) return 1;
++    if(state==MAPPED) return 1;
 +    unsigned depth=video.depth&255;
 +    unsigned fmt=depth==24?A6_RGB888:depth==32?A6_XRGB8888:depth==16?A6_RGB565:0;
 +    if(!video.base || !video.stride || !video.height || !fmt) return 0;
 +    uintptr_t va=map(video.base,video.stride*video.height);
 +    if(!va || a6_fb_init(&screen,va,video.stride*video.height,(uint32_t)video.width,
 +                        (uint32_t)video.height,(uint32_t)video.stride,fmt)) return 0;
-+    mapped=1;
++    state=MAPPED;
 +    a6_fb_clear(&screen);
 +    a6_fb_puts(&screen,"XNU / framebuffer mapped after arm_vm_init\n");
 +    unsigned count=written>sizeof(pending)?sizeof(pending):written;
@@ -742,17 +973,21 @@ index 0000000..ff5aad3
 +#endif
 diff --git i/pexpert/arm/a6plte/early.h w/pexpert/arm/a6plte/early.h
 new file mode 100644
-index 0000000..8ce5ad2
+index 0000000..c08e503
 --- /dev/null
 +++ w/pexpert/arm/a6plte/early.h
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,13 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#ifndef A6_EARLY_H
 +#define A6_EARLY_H
 +#include <stdint.h>
++#include <stdint.h>
 +void a6_xnu_early_entry(const void *);
 +void a6_xnu_putc(char);
 +void a6_xnu_puts(const char *);
++void a6_xnu_suspend_console(void);
++void a6_xnu_stage(unsigned);
++void a6_xnu_early_fault(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 +int a6_xnu_map_console(uintptr_t (*)(uintptr_t, uintptr_t));
 +#endif
 diff --git i/pexpert/arm/a6plte/fb.c w/pexpert/arm/a6plte/fb.c
@@ -1083,10 +1318,20 @@ index 937ce42..deffc98 100644
  	if (args != NULL) {
  		if (!pe_arm_map_interrupt_controller()) {
 diff --git i/pexpert/arm/pe_kprintf.c w/pexpert/arm/pe_kprintf.c
-index 7a4bbd3..81aa07f 100644
+index 7a4bbd3..a7e8dae 100644
 --- i/pexpert/arm/pe_kprintf.c
 +++ w/pexpert/arm/pe_kprintf.c
-@@ -41,6 +41,11 @@ PE_init_kprintf_config(void)
+@@ -12,6 +12,9 @@
+ #include <kern/simple_lock.h>
+ #include <os/log_private.h>
+ #include <libkern/section_keywords.h>
++#if defined(A6PLTE)
++#include "a6plte/early.h"
++#endif
+ 
+ /* Globals */
+ typedef void (*PE_kputc_t)(char);
+@@ -41,6 +44,11 @@ PE_init_kprintf_config(void)
  		panic("Platform Expert not initialized");
  	}
  
@@ -1098,6 +1343,23 @@ index 7a4bbd3..81aa07f 100644
  	if (debug_boot_arg & (DB_KPRT | DB_PRT)) {
  		disable_serial_output = false;
  	}
+@@ -105,6 +113,16 @@ kprintf(const char *fmt, ...)
+ 	boolean_t       state;
+ 	void           *caller = __builtin_return_address(0);
+ 
++#if defined(A6PLTE)
++	/* Boot CPU only: output before locks, thread state and STARTUP(KPRINTF). */
++	if (PE_kputc == NULL) {
++		va_start(listp, fmt);
++		_doprnt_log(fmt, &listp, a6_xnu_putc, 16);
++		va_end(listp);
++		return;
++	}
++#endif
++
+ 	if (!disable_serial_output && !disable_kprintf_output) {
+ 		va_start(listp, fmt);
+ 		va_copy(listp2, listp);
 diff --git i/pexpert/arm/pe_serial.c w/pexpert/arm/pe_serial.c
 index 032d9e0..620f945 100644
 --- i/pexpert/arm/pe_serial.c

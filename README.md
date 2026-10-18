@@ -2,21 +2,21 @@
 
 **Experimental XNU 12377 port. ARM64 kernel and lk2nd boot image build successfully. UART is not used.**
 
-The framebuffer console has been confirmed on SM-A605FN through installed lk2nd
-23.1. The first linked XNU image has now been temporarily loaded with `fastboot boot`;
-screen output from XNU is awaiting confirmation. The modified lk2nd image was
-flashed successfully through the lk2nd fastboot interface. After a hardware
-restart, fastboot reported `next-dd6c1db-20260908-dirty`, confirming startup of
-the modified build. Temporary XNU boot through that build also completed the
-fastboot transfer/boot commands; XNU screen output still needs confirmation.
+The modified lk2nd menu and the first framebuffer output from the actual linked
+XNU kernel have been confirmed on SM-A605FN. After temporary loading with
+`fastboot boot`, XNU prints `start_first_cpu: MMU OFF` and
+`Framebuffer online. No UART.` The next milestone is completing the MMU
+transition and `arm_vm_init`; a working scheduler and userspace are not yet
+confirmed.
 
 ## Implemented
 
 - RGB888/RGB565/XRGB8888 framebuffer console, scrolling and bounded geometry.
 - ARM64 boot bridge: FDT parsing, reserved RAM handling, experimental Mach-O loader,
   XNU boot arguments and minimal Apple device tree.
-- XNU early physical framebuffer marker, deferred logs across MMU setup, framebuffer
-  remapping and replacement of UART console ABI with screen output.
+- XNU framebuffer identity mapping across initial MMU setup, early `kprintf`
+  output, bootstrap exception reports, buffered logs while final page tables
+  replace the bootstrap mappings, and framebuffer remapping afterward.
 - Initial Cortex-A53/A6PLTE profile, 4K pages, one CPU, GICv2 and virtual timer wiring.
 - No-LSE commpage locks and exclusion of Apple-specific initialization.
 - Pinned upstream patches, native config/MIG tools and component compilation probes.
@@ -34,9 +34,11 @@ framebuffer physical address 0x90001000. GIC integration is not hardware-validat
 - **macOS:** Apple Clang, MIG/IIG generation, all configured kernel components and ARM64 executable linking.
 - **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
-Artifacts explicitly distinguish framebuffer/lk2nd images from XNU diagnostics.
-The XNU job is expected to expose remaining errors; a green platform check is not
-proof of a linked or bootable kernel. No workflow flashes a device.
+Artifacts include the linked XNU kernel, packaged boot image, lk2nd image and
+build diagnostics. All three jobs passed for the bootstrap-alignment update
+([run 39151178306](https://github.com/omauser119/a6plte-xnu/actions/runs/39151178306)).
+A successful build does not establish runtime progress on hardware. No workflow
+flashes a device.
 
 ## Reproduce
 
@@ -98,10 +100,10 @@ loading a full kernel, RAM and lk2nd download-buffer overlap must be checked.
 
 ## Remaining work
 
-Compiler/SDK compatibility, CoreEntitlements/TrustCache/corecrypto and other
-external dependency/runtime compatibility, complete platform device tree, actual XNU
-boot and exception/timer validation. SMP, storage, rootfs and power management
-are not implemented. Compiled-file counts are not a measure of boot readiness.
+MMU and VM bootstrap, runtime compatibility of external dependencies, a complete
+platform device tree, and exception/timer validation remain in progress. SMP,
+storage, rootfs and power management are not implemented. Compiled-file counts
+are not a measure of boot readiness.
 
 ## Sources and licensing
 
@@ -170,7 +172,8 @@ The boot bridge now prints package-header/CRC/copy/entry milestones and installs
 EL1 exception vectors before reading the kernel package. An early synchronous
 fault prints ESR/ELR/FAR on the framebuffer. CRC integrity remains mandatory and
 uses an incremental nibble-table implementation checked against zlib. The kernel
-package has been detected on the phone; reaching XNU entry is still unconfirmed.
+package CRC, kernel copy and the first XNU framebuffer marker have been
+confirmed on the phone.
 
 
 A photographed EL1 exception identified an unaligned `LDURH` in the bridge's
