@@ -5,8 +5,10 @@
 The framebuffer console has been confirmed on SM-A605FN through installed lk2nd
 23.1. The first linked XNU image has now been temporarily loaded with `fastboot boot`;
 screen output from XNU is awaiting confirmation. The modified lk2nd image was
-flashed successfully through the lk2nd fastboot interface; its first startup is
-still being checked.
+flashed successfully through the lk2nd fastboot interface. After a hardware
+restart, fastboot reported `next-dd6c1db-20260908-dirty`, confirming startup of
+the modified build. Temporary XNU boot through that build also completed the
+fastboot transfer/boot commands; XNU screen output still needs confirmation.
 
 ## Implemented
 
