@@ -37,6 +37,31 @@ index b44a5c2..2ec4725 100644
  
  	arch_disable_cache(UCACHE);
  
+diff --git i/dev/fbcon/fbcon.c w/dev/fbcon/fbcon.c
+index 64362c5..b2023c2 100644
+--- i/dev/fbcon/fbcon.c
++++ w/dev/fbcon/fbcon.c
+@@ -230,15 +230,15 @@ void fbcon_flush(void)
+ 	if (!config)
+ 		return;
+ 
++	total_x = config->width;
++	total_y = config->height;
++	bytes_per_bpp = ((config->bpp) / 8);
++	/* Publish framebuffer writes before starting the display DMA. */
++	arch_clean_invalidate_cache_range((addr_t) config->base, (total_x * total_y * bytes_per_bpp));
+ 	if (config->update_start)
+ 		config->update_start();
+ 	if (config->update_done)
+ 		while (!config->update_done());
+-
+-	total_x = config->width;
+-	total_y = config->height;
+-	bytes_per_bpp = ((config->bpp) / 8);
+-	arch_clean_invalidate_cache_range((addr_t) config->base, (total_x * total_y * bytes_per_bpp));
+ }
+ 
+ static void fbcon_scroll_up(void)
 diff --git i/lk2nd/display/cont-splash/refresh.c w/lk2nd/display/cont-splash/refresh.c
 index c7e4424..bd1ba77 100644
 --- i/lk2nd/display/cont-splash/refresh.c
@@ -52,6 +77,23 @@ index c7e4424..bd1ba77 100644
  		pp0_base = REG_MDP(0x71000);
  	else if (mdss_mdp_rev >= MDSS_MDP_HW_REV_102)
  		pp0_base = REG_MDP(0x12D00);
+diff --git i/lk2nd/display/cont-splash/target_display.c w/lk2nd/display/cont-splash/target_display.c
+index 0db087c..2492f98 100644
+--- i/lk2nd/display/cont-splash/target_display.c
++++ w/lk2nd/display/cont-splash/target_display.c
+@@ -59,6 +59,12 @@ static bool mdp_setup_cont_splash(void)
+ 		return false;
+ 
+ 	fbcon_setup(&fb);
++#if LK2ND_A6PLTE_XNU
++	/* The command-mode Samsung panel needs autonomous refresh for both the
++	 * fastboot menu and the MMU-off framebuffer console after handoff. */
++	mdp_enable_autorefresh(&fb);
++	dprintf(INFO, "A6PLTE: continuous display refresh enabled\n");
++#endif
+ 	return true;
+ }
+ 
 diff --git i/platform/msm_shared/dev_tree.c w/platform/msm_shared/dev_tree.c
 index 86757c0..a160425 100644
 --- i/platform/msm_shared/dev_tree.c
@@ -103,13 +145,14 @@ index 86757c0..a160425 100644
  		dprintf(CRITICAL, "Could not find memory node.\n");
 diff --git i/project/lk2nd-msm8953-a6plte-xnu.mk w/project/lk2nd-msm8953-a6plte-xnu.mk
 new file mode 100644
-index 0000000..5bf8338
+index 0000000..5c56e88
 --- /dev/null
 +++ w/project/lk2nd-msm8953-a6plte-xnu.mk
-@@ -0,0 +1,7 @@
+@@ -0,0 +1,8 @@
 +# SPDX-License-Identifier: BSD-2-Clause
 +TARGET := msm8953
-+DEBUG_FBCON := 1
++DEBUG_FBCON := 0
++DEFINES += LK2ND_A6PLTE_XNU=1
 +include lk2nd/project/lk2nd.mk
 +# No UART or DCC initialization or output in this build.
 +DEFINES := $(filter-out WITH_DEBUG_UART=% WITH_DEBUG_DCC=% WITH_DEBUG_JTAG=%, $(DEFINES))

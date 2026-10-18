@@ -157,3 +157,11 @@ First complete build: [Actions 39140135502](https://github.com/omauser119/a6plte
 commit `3a1d1ff`. The executable is ARM64 `MH_EXECUTE`, with `NOUNDEFS` and no
 undefined symbols according to `llvm-nm`. The packaged image was independently
 unpacked and compared with the freshly packed executable before temporary boot.
+
+
+The display follow-up enables A6PLTE hardware auto-refresh during lk2nd display
+initialization, keeps debug output in the USB-readable log buffer instead of
+overwriting the menu, and cleans framebuffer cache lines before triggering DMA.
+The corrected image was built locally with ARM bare-metal GCC, with UART/DCC/JTAG
+still disabled, and `fastboot flash lk2nd` completed successfully. Physical-panel
+visibility is being checked separately from framebuffer contents read over USB.
