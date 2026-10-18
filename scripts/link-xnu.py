@@ -31,6 +31,6 @@ filelist.write_text('\n'.join(objects)+'\n')
 output=root/'artifacts/kernel.a6plte'
 output.unlink(missing_ok=True)
 cmd=['clang++','--target=arm64-apple-darwin','-mcpu=cortex-a53','-isysroot',os.environ['SDK'],*flags,
-     '-Wl,-filelist,'+str(filelist),'-o',str(output)]
+     '-Wl,-filelist,'+str(filelist),'-lcc_kext','-o',str(output)]
 (root/'artifacts/link-command.txt').write_text(shlex.join(cmd)+'\n')
 subprocess.run(cmd,check=True)

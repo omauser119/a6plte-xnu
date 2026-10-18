@@ -20,8 +20,7 @@ done
 for header in Availability.h AvailabilityInternal.h AvailabilityMacros.h AvailabilityVersions.h; do
     ln -sfn "$SDK/usr/include/$header" "build/kernel-headers/$header"
 done
-mkdir -p build/cxx-support build/cxx-compiler
-ln -sfn "$(clang -print-resource-dir)/include/stdatomic.h" build/cxx-compiler/stdatomic.h
+mkdir -p build/cxx-support
 for header in errno.h stdio.h stdlib.h; do
     ln -sfn "$ROOT/xnu/libkern/libcxx_support/$header" "build/cxx-support/$header"
 done

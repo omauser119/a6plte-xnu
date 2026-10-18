@@ -17,3 +17,8 @@ for relative in re.findall(r'(?<!\S)\./([^\s]+\.iig\.cpp)',match[1]):
     header=impl.with_name(impl.name.replace('.iig.cpp','.h'))
     subprocess.run([iig,'--def',str(definition),'--header',str(header),'--impl',str(impl),
                     '--framework-name','DriverKit','--',*flags],check=True)
+    # IIG references generated interfaces through the declared framework name,
+    # including interfaces whose definitions live under Tests/.
+    exported=out/'DriverKit'/header.name
+    if exported != header:
+        exported.write_bytes(header.read_bytes())

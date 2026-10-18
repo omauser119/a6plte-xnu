@@ -112,9 +112,26 @@ The boot image v0 writer is local and tested; it does not depend on Ubuntu mkboo
 
 `fetch-sources.py` also pins [theo-os/xnu](https://github.com/theo-os/xnu) at
 `54ea37c23af20f9d0354c0d758eb51dc68dbcd81` and stages only its CoreEntitlements/V2
-and TrustCache headers in `build/kernel-headers`. These are community-maintained
+TrustCache and CodeSignature headers in `build/kernel-headers`. These are community-maintained
 supplemental declarations, not a matching Apple KDK. Their source commit describes
 an import from OpenDarwin platform-support work. No replacement trust decision or
 success-returning implementation is supplied. This addresses compilation for the
 current non-PPL/non-SPTM profile; it does not establish runtime compatibility with
 Apple private libraries, nor supply those libraries for final linking.
+
+
+## Complete kernel build pipeline
+
+On macOS with Xcode, run `scripts/build-xnu.sh` after fetching the pinned sources.
+The pipeline generates BSD syscalls, private and exported MIG headers, DriverKit
+interfaces with IIG, and version/assembly offsets. It compiles all configured
+components, including C++, then links `artifacts/kernel.a6plte` using XNU's ARM64
+segment layout. Compilation failures stop the link; unresolved symbols are not
+ignored. The final executable is still under development and has not booted on
+the phone.
+
+The kernel Firehose implementation is built from Apple's
+[libdispatch](https://github.com/apple-oss-distributions/libdispatch) commit
+`2361ffb78a76f7ee488cd052eb0bc5c767118bf9`, under its upstream license.
+CI artifacts are named `a6plte-boot-images` and `xnu-build-output`; the latter
+contains diagnostics and intermediate objects when the full build fails.

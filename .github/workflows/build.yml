@@ -77,3 +77,19 @@ jobs:
             artifacts/link-command.txt
             build/xnu/iokit/**/*.h
             build/xnu/iokit/**/*.cpp
+
+  package-xnu:
+    needs: xnu-apple-clang
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang llvm lld device-tree-compiler
+      - uses: actions/download-artifact@v4
+        with:
+          name: xnu-build-output
+      - name: Package linked kernel for lk2nd
+        run: ./scripts/package-boot.sh artifacts/kernel.a6plte
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xnu-boot-image
+          path: artifacts/xnu-boot.img

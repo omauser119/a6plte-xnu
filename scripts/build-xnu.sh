@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
+# Build the complete configured A6PLTE kernel with Apple's compiler and IIG.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-if ! command -v xcrun >/dev/null || ! command -v xcodebuild >/dev/null; then
-    echo 'Stock XNU build expects Darwin/Xcode tools. Full Linux kernel linking and dependencies are not complete. Use scripts/check-platform.sh for real platform object compilation.' >&2
-    echo 'The A6PLTE platform port is incomplete; installing the SDK alone does not finish it.' >&2
+cd "$ROOT"
+if ! command -v xcrun >/dev/null; then
+    echo 'Full XNU compilation requires Apple clang and IIG; use the macOS Actions job.' >&2
     exit 2
 fi
-make -C "$ROOT/xnu" ARCH_CONFIGS=ARM64 MACHINE_CONFIGS=A6PLTE KERNEL_CONFIGS=DEVELOPMENT BTI_BUILD=0 "$@"
+export SDK=${SDK:-$(xcrun --sdk macosx --show-sdk-path)}
+./scripts/check-platform.sh
+python3 scripts/generate-iokit.py
+failed=0
+for component in osfmk mig pexpert bsd libkern iokit libsa security san; do
+    python3 scripts/check-component.py "$component" || failed=1
+done
+if [ "$failed" != 0 ]; then exit 1; fi
+python3 scripts/link-xnu.py
