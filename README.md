@@ -11,7 +11,8 @@ virtual execution in `arm_init` and activation of the final VM mappings.
 Native XNU logs now confirm completion of VM bootstrap and initialization of
 scheduler structures, Firehose, OSLog and IPC on the physical display. The latest
 hardware run stopped when the generic video console attempted SIMD writes to
-the packed RGB888 framebuffer. The A6PLTE renderer must retain display ownership.
+the packed RGB888 framebuffer. The current image routes screen transitions to
+the A6PLTE renderer; progress beyond that fault awaits hardware confirmation.
 Scheduler dispatch, timer interrupts and userspace are not yet confirmed.
 
 ## Implemented
@@ -29,7 +30,7 @@ Scheduler dispatch, timer interrupts and userspace are not yet confirmed.
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download the display and bootstrap-alignment update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup2).
+[Download the RGB888 console update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup3).
 
 ## GitHub Actions
 
@@ -40,8 +41,8 @@ framebuffer physical address 0x90001000. GIC integration is not hardware-validat
 - **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
 Artifacts include the linked XNU kernel, packaged boot image, lk2nd image and
-build diagnostics. All three jobs passed for the bootstrap-alignment update
-([run 39151178306](https://github.com/omauser119/a6plte-xnu/actions/runs/39151178306)).
+build diagnostics. All three jobs passed for the RGB888 console update
+([run 39155881013](https://github.com/omauser119/a6plte-xnu/actions/runs/39155881013), source `c29dd20`).
 A successful build does not establish runtime progress on hardware. No workflow
 flashes a device.
 
