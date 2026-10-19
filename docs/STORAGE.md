@@ -96,3 +96,13 @@ Preparation does not format userdata, replace those files or write another
 partition. A read-only fetch of the current first 4 KiB found no HFS+/HFSX
 signature at byte 1024; mounting the prepared volume and running launchd are
 still hardware checks. Raw partition contents stay in private artifacts.
+
+The candidate from source `d65d1fb` is available in the `xnu-boot-image`
+artifact of [Actions run 39278476097](https://github.com/omauser119/a6plte-xnu/actions/runs/39278476097).
+The downloaded `xnu-userdata-boot.img` is 20,875,264 bytes, SHA-256
+`cda18b60930bf040621b36d5e4a9bbe7376e22a336f2529b3f0cd54d8df4d9eb`.
+`check-userdata-boot.py` passed on both the locally packaged image and the
+downloaded CI image: complete CRC, expected kernel payload and native root
+symbols, explicit launchd selection, no embedded rootfs or USB enable argument.
+The CI image is saved locally as `build/userdata-d65d1fb/xnu-userdata-boot.img`.
+This candidate has not been booted on the phone; the **«паста»** gate still applies.
