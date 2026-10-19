@@ -1,13 +1,16 @@
 diff --git i/bsd/conf/files.arm64 w/bsd/conf/files.arm64
-index a77bd10..ec534ab 100644
+index a77bd10..21ebe09 100644
 --- i/bsd/conf/files.arm64
 +++ w/bsd/conf/files.arm64
-@@ -1,4 +1,8 @@
+@@ -1,4 +1,11 @@
  bsd/dev/arm64/conf.c		standard
 +bsd/dev/a6plte/gpt.c              optional a6plte
 +bsd/dev/a6plte/sdhci.c            optional a6plte
 +bsd/dev/a6plte/userdata.c         optional a6plte
 +bsd/dev/a6plte/services.c         optional a6plte
++bsd/dev/a6plte/usb_ecm.c          optional a6plte
++bsd/dev/a6plte/usb_dwc3.c         optional a6plte
++bsd/dev/a6plte/usb.c              optional a6plte
  bsd/dev/arm/cons.c		standard
  bsd/dev/arm/km.c		standard
  bsd/dev/arm/kern_machdep.c	standard
@@ -312,6 +315,651 @@ index 0000000..752cd70
 +uintptr_t a6_emmc_map_sdhci(void);
 +void a6_userdata_init(void);
 +#endif
+diff --git i/bsd/dev/a6plte/usb.c w/bsd/dev/a6plte/usb.c
+new file mode 100644
+index 0000000..8091a9a
+--- /dev/null
++++ w/bsd/dev/a6plte/usb.c
+@@ -0,0 +1,151 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* Native XNU Ethernet interface for the inherited MSM8953 USB2/DWC3 gadget. */
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/sockio.h>
++#include <sys/kpi_mbuf.h>
++#include <sys/sysctl.h>
++#include <net/if.h>
++#include <net/if_types.h>
++#include <net/if_ether.h>
++#include <net/ethernet.h>
++#include <net/kpi_interface.h>
++#include <net/bpf.h>
++#include <kern/locks.h>
++#include <kern/thread.h>
++#include <kern/clock.h>
++#include <kern/sched_prim.h>
++#include "usb_dwc3.h"
++/* Same kernel KPI declaration used by BSD's pktsched_netem.c. */
++extern kern_return_t thread_terminate(thread_t);
++
++extern uintptr_t a6_usb_map_dwc3(void);
++extern uint64_t a6_usb_physical(uintptr_t address);
++static uintptr_t mmio;
++static struct a6_usb_dma dma;
++static struct a6_dwc3 device;
++static ifnet_t network;
++static unsigned link_up,usb_status;
++static const uint8_t address[6]={2,0x53,0x4d,0x41,0x36,2};
++static LCK_GRP_DECLARE(usb_group,"A6PLTE USB Ethernet");
++static LCK_MTX_DECLARE(queue_lock,&usb_group);
++static struct { uint16_t length;uint8_t packet[1514]; } queue[16];
++static unsigned head,tail,count;
++
++static uint32_t read_reg(__unused void *cookie,unsigned r) {
++    uint32_t v=*(volatile uint32_t *)(mmio+r);__asm__ volatile("dsb sy" ::: "memory");return v;
++}
++static void write_reg(__unused void *cookie,unsigned r,uint32_t v) {
++    *(volatile uint32_t *)(mmio+r)=v;__asm__ volatile("dsb sy" ::: "memory");
++}
++static uint64_t ticks(__unused void *cookie) { uint64_t t;__asm__ volatile("mrs %0,cntpct_el0":"=r"(t));return t; }
++static uint64_t physical(__unused void *cookie,const void *p) { return a6_usb_physical((uintptr_t)p); }
++static void synchronize(__unused void *cookie,void *buffer,unsigned bytes,unsigned direction) {
++    uintptr_t p=(uintptr_t)buffer&~(uintptr_t)63,end=((uintptr_t)buffer+bytes+63)&~(uintptr_t)63;
++    __asm__ volatile("dsb sy" ::: "memory");
++    for (;p<end;p+=64) {
++        if (direction==A6_DMA_TO_DEVICE) __asm__ volatile("dc cvac,%0" :: "r"(p):"memory");
++        else if (direction==A6_DMA_PREPARE_RECEIVE) __asm__ volatile("dc civac,%0" :: "r"(p):"memory");
++        else __asm__ volatile("dc ivac,%0" :: "r"(p):"memory");
++    }
++    __asm__ volatile("dsb sy" ::: "memory");
++}
++static void receive_packet(__unused void *cookie,const uint8_t *packet,unsigned length) {
++    mbuf_t m=NULL;
++    if (!network || length<ETHER_HDR_LEN || length>1514 || !(ifnet_flags(network)&IFF_UP)) return;
++    if (mbuf_gethdr(MBUF_DONTWAIT,MBUF_TYPE_DATA,&m)) return;
++    if (mbuf_copyback(m,0,length,packet,MBUF_DONTWAIT)) { mbuf_freem(m);return; }
++    mbuf_pkthdr_setrcvif(m,network);mbuf_pkthdr_setheader(m,mbuf_data(m));mbuf_adj(m,ETHER_HDR_LEN);
++    struct ifnet_stat_increment_param stats={.packets_in=1,.bytes_in=length};
++    ifnet_input(network,m,&stats); /* Native DLIL consumes the packet, including errors. */
++}
++static void link_changed(__unused void *cookie,int up) {
++    __atomic_store_n(&link_up,up!=0,__ATOMIC_RELEASE);
++    __atomic_store_n(&usb_status,up?3u:(device.online?1u:0u),__ATOMIC_RELEASE);
++    if (network) ifnet_set_flags(network,up?IFF_RUNNING:0,IFF_RUNNING);
++    if (!up) { lck_mtx_lock(&queue_lock);head=tail=count=0;lck_mtx_unlock(&queue_lock); }
++}
++static void report(__unused void *cookie,unsigned code,uint32_t a,uint32_t b) {
++    switch (code) {
++    case A6_USB_REPORT_START:__atomic_store_n(&usb_status,1,__ATOMIC_RELEASE);printf("A6PLTE USB: DWC3 %x running, EP0 ready; CDC-ECM\n",a);break;
++    case A6_USB_REPORT_CONNECT:printf("A6PLTE USB: connected, speed=%u bulk=%u\n",a,b);break;
++    case A6_USB_REPORT_CONFIG:printf("A6PLTE USB: configuration %u\n",a);break;
++    case A6_USB_REPORT_LINK:printf("A6PLTE USB: Ethernet link %s\n",a?"up":"down");break;
++    case A6_USB_REPORT_ERROR:printf("A6PLTE USB: stopped at register %x value %x\n",a,b);break;
++    default:break;
++    }
++}
++static const struct a6_usb_ops operations={read_reg,write_reg,ticks,physical,synchronize,receive_packet,link_changed,report};
++static errno_t output(__unused ifnet_t interface,mbuf_t m) {
++    int error=0;
++    while (m) {
++        mbuf_t next=mbuf_nextpkt(m);mbuf_setnextpkt(m,NULL);
++        size_t length=mbuf_pkthdr_len(m);
++        lck_mtx_lock(&queue_lock);
++        if (!__atomic_load_n(&link_up,__ATOMIC_ACQUIRE)) error=ENETDOWN;
++        else if (length<14 || length>1514) error=EMSGSIZE;
++        else if (count==16) error=ENOBUFS;
++        else if (!mbuf_copydata(m,0,length,queue[head].packet)) {
++            queue[head].length=(uint16_t)length;head=(head+1)%16;++count;
++        } else error=EINVAL;
++        lck_mtx_unlock(&queue_lock);mbuf_freem(m);m=next;
++    }
++    return error;
++}
++static errno_t interface_ioctl(ifnet_t interface,unsigned long cmd,void *data) {
++    struct ifreq *request=data;
++    switch (cmd) {
++    case SIOCSIFADDR: return ifnet_set_flags(interface,IFF_UP,IFF_UP);
++    case SIOCSIFFLAGS:return ifnet_set_flags(interface,__atomic_load_n(&link_up,__ATOMIC_ACQUIRE)?IFF_RUNNING:0,IFF_RUNNING);
++    case SIOCSIFMTU:
++        if (request->ifr_mtu<576 || request->ifr_mtu>1500) return EINVAL;
++        return ifnet_set_mtu(interface,request->ifr_mtu);
++    case SIOCADDMULTI:case SIOCDELMULTI:return 0;
++    default:return EOPNOTSUPP;
++    }
++}
++static void worker(__unused void *parameter,__unused wait_result_t result) {
++    thread_set_thread_name(current_thread(),"A6PLTE USB ECM");
++    while (device.online) {
++        a6_dwc3_poll(&device);
++        if (!device.tx_pending && __atomic_load_n(&link_up,__ATOMIC_ACQUIRE)) {
++            uint8_t packet[1514];unsigned length=0;
++            lck_mtx_lock(&queue_lock);
++            if (count) { length=queue[tail].length;bcopy(queue[tail].packet,packet,length);tail=(tail+1)%16;--count; }
++            lck_mtx_unlock(&queue_lock);
++            if (length && !a6_dwc3_send(&device,packet,length)) ifnet_stat_increment_out(network,1,length,0);
++        }
++        uint64_t deadline;clock_interval_to_deadline(1,NSEC_PER_MSEC,&deadline);
++        assert_wait_deadline((event_t)&device,THREAD_UNINT,deadline);thread_block(THREAD_CONTINUE_NULL);
++    }
++    thread_terminate(current_thread());
++}
++static int status_sysctl(__unused struct sysctl_oid *oidp,__unused void *arg1,__unused int arg2,struct sysctl_req *request) {
++    int value=(int)__atomic_load_n(&usb_status,__ATOMIC_ACQUIRE);
++    return sysctl_handle_int(oidp,&value,0,request);
++}
++SYSCTL_PROC(_kern,OID_AUTO,a6plte_usb,CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED,NULL,0,status_sysctl,"I","A6 USB: 0 offline, 1 EP0 running, 3 Ethernet alternate setting active");
++void a6_usb_init(void) {
++    mmio=a6_usb_map_dwc3();
++    if (!mmio) { printf("A6PLTE USB: MMIO mapping failed\n");return; }
++    struct ifnet_init_eparams p={.ver=IFNET_INIT_CURRENT_VERSION,.len=sizeof(p),
++        .flags=IFNET_INIT_LEGACY | IFNET_INIT_NX_NOAUTO,.name="en",.unit=0,
++        .family=IFNET_FAMILY_ETHERNET,.type=IFT_ETHER,.output=output,.demux=ether_demux,
++        .add_proto=ether_add_proto,.del_proto=ether_del_proto,.check_multi=ether_check_multi,
++        .framer_extended=ether_frameout_extended,.ioctl=interface_ioctl,
++        .broadcast_addr=etherbroadcastaddr,.broadcast_len=ETHER_ADDR_LEN};
++    int error=ifnet_allocate_extended(&p,&network);
++    if (error) { printf("A6PLTE USB: ifnet allocate error %d\n",error);return; }
++    ifnet_set_addrlen(network,ETHER_ADDR_LEN);ifnet_set_mtu(network,1500);ifnet_set_offload(network,0);
++    ifnet_set_flags(network,IFF_BROADCAST | IFF_MULTICAST | IFF_SIMPLEX,0xffff);
++    error=ifnet_attach(network,NULL);
++    if (error) { ifnet_release(network);network=NULL;printf("A6PLTE USB: ifnet attach error %d\n",error);return; }
++    ifnet_set_lladdr(network,address,sizeof(address));bpfattach(network,DLT_EN10MB,ETHER_HDR_LEN);
++    uint64_t frequency;__asm__ volatile("mrs %0,cntfrq_el0":"=r"(frequency));
++    device=(struct a6_dwc3){.ops=&operations,.dma=&dma,.frequency=frequency};
++    if (a6_dwc3_start(&device)) return;
++    thread_t thread=THREAD_NULL;
++    if (kernel_thread_start(worker,NULL,&thread)!=KERN_SUCCESS) { a6_dwc3_stop(&device);return; }
++    thread_deallocate(thread);
++    printf("A6PLTE USB: native en0 ready, polled DMA, no UART\n");
++}
+diff --git i/bsd/dev/a6plte/usb_dwc3.c w/bsd/dev/a6plte/usb_dwc3.c
+new file mode 100644
+index 0000000..012bf9f
+--- /dev/null
++++ w/bsd/dev/a6plte/usb_dwc3.c
+@@ -0,0 +1,300 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* DWC3 USB2 device mode. Original bounded polling/DMA core for the A6 port.
++ * Register/command sequence reference: lk2nd usb30_dwc*.c, Linux Foundation BSD.
++ * No PHY, clock, voltage or wrapper reinitialization: lk2nd keeps them trained. */
++#include "usb_dwc3.h"
++enum { GCTL=0xc110,ID=0xc120,HWPARAMS3=0xc14c,USB2PHY=0xc200,TXFIFO2=0xc308,
++    EVENT_LO=0xc400,EVENT_HI=0xc404,EVENT_SIZE=0xc408,EVENT_COUNT=0xc40c,
++    DCFG=0xc700,DCTL=0xc704,DEVTEN=0xc708,DSTS=0xc70c,ENABLE_EP=0xc720,
++    EP_PARAM2=0xc800,EP_PARAM1=0xc804,EP_PARAM0=0xc808,EP_CMD=0xc80c };
++enum { CONTROL_SETUP,CONTROL_DATA,CONTROL_WAIT_STATUS,CONTROL_STATUS };
++static uint32_t rd(struct a6_dwc3 *d,unsigned r) { return d->ops->read(d->cookie,r); }
++static void wr(struct a6_dwc3 *d,unsigned r,uint32_t v) { d->ops->write(d->cookie,r,v); }
++static void report(struct a6_dwc3 *d,unsigned code,uint32_t a,uint32_t b) {
++    if (d->ops->report) d->ops->report(d->cookie,code,a,b);
++}
++static int fail(struct a6_dwc3 *d,unsigned r,uint32_t v) {
++    d->last_register=r;d->last_value=v;++d->errors;d->online=0;
++    wr(d,DEVTEN,0);wr(d,DCTL,rd(d,DCTL)&~(1u<<31));
++    if (d->ops->link) d->ops->link(d->cookie,0);
++    report(d,A6_USB_REPORT_ERROR,r,v);return -1;
++}
++static int wait_bits(struct a6_dwc3 *d,unsigned r,uint32_t mask,uint32_t value) {
++    uint64_t start=d->ops->ticks(d->cookie);
++    for (unsigned attempts=0;attempts<1000000;++attempts) {
++        uint32_t v=rd(d,r);
++        if ((v&mask)==value) return 0;
++        if (d->ops->ticks(d->cookie)-start>d->frequency/5) return fail(d,r,v);
++    }
++    return fail(d,r,rd(d,r));
++}
++static int command(struct a6_dwc3 *d,unsigned ep,uint32_t cmd,uint32_t p0,uint32_t p1,uint32_t p2) {
++    unsigned r=EP_CMD+16*ep;
++    if (ep>=6 || !d->online || wait_bits(d,r,1u<<10,0)) return -1;
++    wr(d,EP_PARAM2+16*ep,p2);wr(d,EP_PARAM1+16*ep,p1);wr(d,EP_PARAM0+16*ep,p0);
++    /* Synchronous CMDACT completion: no command IOC and no IRQ dependency. */
++    wr(d,r,cmd | (1u<<10));
++    if (wait_bits(d,r,1u<<10,0)) return -1;
++    uint32_t result=rd(d,r);
++    if (result&0xf000) return fail(d,r,result);
++    if ((cmd&15)==6) {
++        d->resource[ep]=(uint8_t)((result>>16)&127);
++        if (!d->resource[ep]) return fail(d,r,result);
++    }
++    return 0;
++}
++static int end_transfer(struct a6_dwc3 *d,unsigned ep) {
++    if (d->active[ep]) {
++        if (command(d,ep,8u | (1u<<11) | (uint32_t)d->resource[ep]<<16,0,0,0)) return -1;
++        d->active[ep]=0;d->resource[ep]=0;
++    }
++    return 0;
++}
++static int configure_ep(struct a6_dwc3 *d,unsigned ep,unsigned type,unsigned max_packet,unsigned modify) {
++    unsigned fifo=(ep&1)?ep/2:0;
++    uint32_t p0=(modify?2u<<30:0) | fifo<<17 | max_packet<<3 | type<<1;
++    uint32_t p1=ep<<25 | (1u<<10) | (1u<<8);
++    if (type==3) p1|=(d->ecm.high_speed?7u:15u)<<16;
++    if (command(d,ep,1,p0,p1,0)) return -1;
++    if (!modify && command(d,ep,2,1,0,0)) return -1;
++    return 0;
++}
++static int transfer(struct a6_dwc3 *d,unsigned ep,void *buffer,unsigned bytes,unsigned type) {
++    if (ep>=6 || d->active[ep] || bytes>2048 || !d->online) return -1;
++    struct a6_usb_trb *t=&d->dma->trb[ep];
++    uint64_t bp=d->ops->physical(d->cookie,buffer),tp=d->ops->physical(d->cookie,t);
++    if (!bp || !tp || (tp&15)) return fail(d,EP_CMD+16*ep,0);
++    if (bytes) d->ops->sync(d->cookie,buffer,bytes,(ep&1)?A6_DMA_TO_DEVICE:A6_DMA_PREPARE_RECEIVE);
++    t->low=(uint32_t)bp;t->high=(uint32_t)(bp>>32);t->size=bytes;
++    t->control=(type<<4) | 1u | 2u | (1u<<10) | (1u<<11);
++    d->ops->sync(d->cookie,t,sizeof(*t),A6_DMA_TO_DEVICE);
++    d->queued[ep]=(uint16_t)bytes;
++    if (command(d,ep,6,(uint32_t)(tp>>32),(uint32_t)tp,0)) return -1;
++    d->active[ep]=1;return 0;
++}
++static int setup(struct a6_dwc3 *d) {
++    d->control_state=CONTROL_SETUP;d->control_zlp=0;d->control_aborted=0;
++    return transfer(d,0,d->dma->setup,8,2);
++}
++static int stall_setup(struct a6_dwc3 *d) {
++    if (end_transfer(d,0) || end_transfer(d,1) || command(d,0,4,0,0,0)) return -1;
++    /* A fresh SETUP token clears the protocol stall in hardware. */
++    return setup(d);
++}
++static int status(struct a6_dwc3 *d) {
++    unsigned ep=d->control_three_stage?!d->control_in:1;
++    d->control_state=CONTROL_STATUS;
++    /* DWC3's SET_ADDRESS programming point, as in the working lk2nd driver. */
++    if (!d->control_aborted && d->reply.change==A6_USB_ADDRESS)
++        wr(d,DCFG,(rd(d,DCFG)&~0x3f8u) | (uint32_t)d->reply.next.address<<3);
++    return transfer(d,ep,d->dma->control,0,d->control_three_stage?4:3);
++}
++static int receive_arm(struct a6_dwc3 *d) {
++    if (a6_ecm_link(&d->ecm) && !(d->ecm.halted&2) && !d->active[4])
++        return transfer(d,4,d->dma->rx,sizeof(d->dma->rx),1);
++    return 0;
++}
++static int notify(struct a6_dwc3 *d) {
++    if (!d->notify_pending || d->active[3] || !d->ecm.configuration || (d->ecm.halted&1)) return 0;
++    unsigned n=a6_ecm_notification(d->dma->notification,sizeof(d->dma->notification),d->notify_speed,a6_ecm_link(&d->ecm));
++    d->notify_submitted=d->notify_generation;
++    return transfer(d,3,d->dma->notification,n,1);
++}
++static int noncontrol_stop(struct a6_dwc3 *d) {
++    for (unsigned ep=3;ep<6;++ep) if (end_transfer(d,ep)) return -1;
++    d->tx_pending=0;d->tx_zlp=0;d->notify_pending=0;d->notify_speed=0;
++    wr(d,ENABLE_EP,3);return 0;
++}
++static int apply_reply(struct a6_dwc3 *d) {
++    int old_link=a6_ecm_link(&d->ecm);
++    d->ecm=d->reply.next;
++    switch (d->reply.change) {
++    case A6_USB_ADDRESS:
++        wr(d,DCFG,(rd(d,DCFG)&~0x3f8u) | (uint32_t)d->ecm.address<<3);break;
++    case A6_USB_CONFIGURATION:
++        if (noncontrol_stop(d)) return -1;
++        if (d->ecm.configuration) {
++            if (configure_ep(d,1,0,64,1) || command(d,0,9u | 2u<<16,0,0,0) ||
++                configure_ep(d,3,3,16,0) || configure_ep(d,4,2,d->bulk_packet,0) || configure_ep(d,5,2,d->bulk_packet,0)) return -1;
++            wr(d,ENABLE_EP,3 | (1u<<3));
++        }
++        report(d,A6_USB_REPORT_CONFIG,d->ecm.configuration,0);break;
++    case A6_USB_INTERFACE:
++        if (d->reply.endpoint==1) {
++            if (end_transfer(d,4) || end_transfer(d,5)) return -1;
++            if (command(d,4,5,0,0,0) || command(d,5,5,0,0,0)) return -1;
++            d->tx_pending=0;d->tx_zlp=0;
++            wr(d,ENABLE_EP,3 | (1u<<3) | (d->ecm.alternate?((1u<<4)|(1u<<5)):0));
++        }
++        break;
++    case A6_USB_HALT: case A6_USB_CLEAR_HALT: {
++        unsigned ep=((d->reply.endpoint&15u)<<1) | (d->reply.endpoint>>7);
++        if (ep>=6 || end_transfer(d,ep) || command(d,ep,d->reply.change==A6_USB_HALT?4:5,0,0,0)) return -1;
++        if (ep==5) { d->tx_pending=0;d->tx_zlp=0; }
++        if (ep==3 && d->reply.change==A6_USB_CLEAR_HALT) d->notify_pending=1;
++        break;
++    }
++    default:break;
++    }
++    int link=a6_ecm_link(&d->ecm);
++    if (link!=old_link) {
++        d->notify_pending=1;d->notify_speed=0;++d->notify_generation;
++        if (d->ops->link) d->ops->link(d->cookie,link);
++        report(d,A6_USB_REPORT_LINK,(uint32_t)link,0);
++    }
++    if (receive_arm(d) || notify(d)) return -1;
++    return 0;
++}
++static int control_complete(struct a6_dwc3 *d,unsigned ep,unsigned trb_status,unsigned remaining) {
++    if (d->control_state==CONTROL_SETUP && ep==0) {
++        if (trb_status || remaining) return setup(d);
++        d->ops->sync(d->cookie,d->dma->setup,64,A6_DMA_FROM_DEVICE);
++        if (a6_ecm_setup(&d->ecm,d->dma->setup,&d->reply)) return stall_setup(d);
++        d->control_in=(d->dma->setup[0]&0x80)!=0;
++        unsigned requested=d->dma->setup[6] | (unsigned)d->dma->setup[7]<<8;
++        d->control_three_stage=requested!=0;
++        if (!requested) { d->control_state=CONTROL_WAIT_STATUS;return 0; }
++        if (!d->control_in) return stall_setup(d);
++        for (unsigned i=0;i<d->reply.length;++i) d->dma->control[i]=d->reply.data[i];
++        d->control_zlp=d->reply.length<requested && d->reply.length%64==0;
++        d->control_state=CONTROL_DATA;
++        return transfer(d,1,d->dma->control,d->reply.length,5);
++    }
++    if (d->control_state==CONTROL_DATA && ep==1) {
++        /* SETUP_PENDING needs a dummy status stage before accepting new setup. */
++        if (trb_status==2) { d->control_aborted=1;d->control_zlp=0;return status(d); }
++        if (trb_status || remaining) return stall_setup(d);
++        if (d->control_zlp) { d->control_zlp=0;return transfer(d,1,d->dma->control,0,5); }
++        d->control_state=CONTROL_WAIT_STATUS;return 0;
++    }
++    if (d->control_state==CONTROL_STATUS) {
++        if (!d->control_aborted && !trb_status && !remaining && apply_reply(d)) return -1;
++        return setup(d);
++    }
++    return stall_setup(d);
++}
++static int complete(struct a6_dwc3 *d,unsigned ep) {
++    if (ep>=6 || !d->active[ep]) return 0;
++    struct a6_usb_trb *t=&d->dma->trb[ep];
++    d->ops->sync(d->cookie,t,sizeof(*t),A6_DMA_FROM_DEVICE);
++    unsigned remaining=t->size&0xffffff,condition=t->size>>28;
++    if (remaining>d->queued[ep]) return fail(d,EP_CMD+16*ep,t->size);
++    unsigned length=d->queued[ep]-remaining;
++    d->active[ep]=0;d->resource[ep]=0;
++    if (ep<=1) return control_complete(d,ep,condition,remaining);
++    if (ep==3) {
++        if (d->notify_submitted!=d->notify_generation) d->notify_speed=0;
++        else if (!condition && !remaining && !d->notify_speed && a6_ecm_link(&d->ecm)) d->notify_speed=1;
++        else { d->notify_speed=0;d->notify_pending=0; }
++        return notify(d);
++    }
++    if (ep==4) {
++        if (!condition && length>=14 && length<=1514) {
++            d->ops->sync(d->cookie,d->dma->rx,length,A6_DMA_FROM_DEVICE);
++            ++d->rx_packets;
++            if (d->ops->receive) d->ops->receive(d->cookie,d->dma->rx,length);
++        }
++        return receive_arm(d);
++    }
++    if (ep==5) {
++        if (!condition && !remaining && d->tx_zlp==1) { d->tx_zlp=2;return transfer(d,5,d->dma->tx,0,1); }
++        if (!condition && !remaining) ++d->tx_packets;
++        d->tx_pending=0;d->tx_zlp=0;
++    }
++    return 0;
++}
++static int device_event(struct a6_dwc3 *d,unsigned id) {
++    if (id==0 || id==1) {
++        if (noncontrol_stop(d)) return -1;
++        d->ecm=(struct a6_ecm){.high_speed=d->ecm.high_speed};
++        wr(d,DCFG,rd(d,DCFG)&~0x3f8u);
++        if (d->ops->link) d->ops->link(d->cookie,0);
++        report(d,A6_USB_REPORT_RESET,id,0);
++        if (d->control_state==CONTROL_SETUP && d->active[0]) return 0;
++        if (end_transfer(d,0) || end_transfer(d,1)) return -1;
++        return setup(d);
++    }
++    if (id==2) {
++        unsigned speed=rd(d,DSTS)&7;
++        if (speed!=0 && speed!=1 && speed!=3) return fail(d,DSTS,rd(d,DSTS));
++        d->ecm.high_speed=speed==0;d->bulk_packet=d->ecm.high_speed?512:64;
++        if (configure_ep(d,0,0,64,1) || configure_ep(d,1,0,64,1)) return -1;
++        report(d,A6_USB_REPORT_CONNECT,speed,d->bulk_packet);
++    }
++    if (id==9 || id==11) return fail(d,EVENT_COUNT,id);
++    return 0;
++}
++void a6_dwc3_poll(struct a6_dwc3 *d) {
++    for (unsigned budget=0;d->online && budget<256;++budget) {
++        unsigned count=rd(d,EVENT_COUNT)&0xffff;
++        if (!count) break;
++        if (count>sizeof(d->dma->events) || count%4) { fail(d,EVENT_COUNT,count);break; }
++        d->ops->sync(d->cookie,(uint8_t *)d->dma->events+(d->event_offset&~63u),64,A6_DMA_FROM_DEVICE);
++        uint32_t event=d->dma->events[d->event_offset/4];
++        unsigned bytes=((event&1) && ((event>>8)&15)==12)?12:4;
++        if (count<bytes) break;
++        d->event_offset=(uint16_t)((d->event_offset+bytes)%sizeof(d->dma->events));
++        /* ACK before a command can generate additional events. */
++        wr(d,EVENT_COUNT,bytes);++d->events;
++        if (event&1) { if (device_event(d,(event>>8)&15)) break; }
++        else {
++            unsigned ep=(event>>1)&31,id=(event>>6)&15,status_bits=(event>>12)&15;
++            if (ep>=6) { fail(d,EVENT_COUNT,event);break; }
++            if (id==1) { if (complete(d,ep)) break; }
++            else if (id==3 && ep<=1) {
++                if (d->control_state==CONTROL_WAIT_STATUS && (status_bits&3)==2) {
++                    unsigned expected=d->control_three_stage?!d->control_in:1;
++                    if (ep!=expected) { if (stall_setup(d)) break; }
++                    else if (status(d)) break;
++                } else if (d->control_state==CONTROL_SETUP && !d->active[0]) { if (setup(d)) break; }
++            }
++        }
++    }
++}
++int a6_dwc3_send(struct a6_dwc3 *d,const uint8_t *packet,unsigned length) {
++    if (!d->online || !a6_ecm_link(&d->ecm) || (d->ecm.halted&4) || d->tx_pending || !packet || length<14 || length>1514) return -1;
++    for (unsigned i=0;i<length;++i) d->dma->tx[i]=packet[i];
++    d->tx_pending=1;d->tx_zlp=length%d->bulk_packet==0;
++    if (transfer(d,5,d->dma->tx,length,1)) { d->tx_pending=0;return -1; }
++    return 0;
++}
++int a6_dwc3_start(struct a6_dwc3 *d) {
++    if (!d || !d->ops || !d->ops->read || !d->ops->write || !d->ops->ticks || !d->ops->physical ||
++        !d->ops->sync || !d->dma || !d->frequency || d->online || ((uintptr_t)d->dma&4095)) return -1;
++    uint32_t id=rd(d,ID);
++    if ((id>>16)!=0x5533 || ((rd(d,HWPARAMS3)>>12)&63)<6 || !(rd(d,TXFIFO2)&0xffff)) return fail(d,ID,id);
++    d->online=1;
++    wr(d,DCTL,rd(d,DCTL)&~(1u<<31));
++    if (wait_bits(d,DSTS,1u<<22,1u<<22)) return -1;
++    wr(d,USB2PHY,rd(d,USB2PHY)&~((1u<<6)|(1u<<8)));
++    wr(d,DCTL,1u<<30);
++    if (wait_bits(d,DCTL,1u<<30,0)) return -1;
++    for (unsigned ep=0;ep<6;++ep) { d->active[ep]=0;d->resource[ep]=0;d->queued[ep]=0; }
++    d->tx_pending=d->tx_zlp=d->notify_pending=d->notify_speed=0;
++    /* Keep the inherited QUSB2 PHY and clocks, replace all old DMA ownership. */
++    wr(d,GCTL,(rd(d,GCTL)&~(0x3000u | 0x800u | 0x100u)) | 0x2000u);
++    wr(d,DCFG,16u<<17);wr(d,DEVTEN,0);wr(d,ENABLE_EP,0);
++    for (unsigned i=0;i<2;++i) {
++        wr(d,EVENT_SIZE+16*i,1u<<31);
++        unsigned pending=rd(d,EVENT_COUNT+16*i)&0xffff;if (pending) wr(d,EVENT_COUNT+16*i,pending);
++    }
++    d->ops->sync(d->cookie,d->dma,sizeof(*d->dma),A6_DMA_PREPARE_RECEIVE);
++    uint64_t physical=d->ops->physical(d->cookie,d->dma->events);
++    if (!physical || (physical&4095)) return fail(d,EVENT_LO,(uint32_t)physical);
++    wr(d,EVENT_LO,(uint32_t)physical);wr(d,EVENT_HI,(uint32_t)(physical>>32));
++    wr(d,EVENT_SIZE,(1u<<31) | sizeof(d->dma->events));
++    d->ecm=(struct a6_ecm){.high_speed=1};d->bulk_packet=512;d->event_offset=0;
++    if (command(d,0,9,0,0,0) || configure_ep(d,0,0,64,0) || configure_ep(d,1,0,64,0)) return -1;
++    wr(d,ENABLE_EP,3);
++    if (setup(d)) return -1;
++    wr(d,DEVTEN,(1u<<0)|(1u<<1)|(1u<<2)|(1u<<9)|(1u<<11));
++    wr(d,DCTL,rd(d,DCTL) | (1u<<31));
++    if (wait_bits(d,DSTS,1u<<22,0)) return -1;
++    report(d,A6_USB_REPORT_START,id,0);return 0;
++}
++void a6_dwc3_stop(struct a6_dwc3 *d) {
++    if (!d || !d->ops) return;
++    wr(d,DEVTEN,0);wr(d,DCTL,rd(d,DCTL)&~(1u<<31));d->online=0;
++    if (d->ops->link) d->ops->link(d->cookie,0);
++    report(d,A6_USB_REPORT_STOP,0,0);
++}
+diff --git i/bsd/dev/a6plte/usb_dwc3.h w/bsd/dev/a6plte/usb_dwc3.h
+new file mode 100644
+index 0000000..53d56c1
+--- /dev/null
++++ w/bsd/dev/a6plte/usb_dwc3.h
+@@ -0,0 +1,37 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef A6_USB_DWC3_H
++#define A6_USB_DWC3_H
++#include "usb_ecm.h"
++struct a6_usb_trb { uint32_t low,high,size,control;uint8_t padding[48]; } __attribute__((aligned(64)));
++struct a6_usb_dma {
++    uint32_t events[1024];
++    struct a6_usb_trb trb[6];
++    uint8_t setup[64],control[512],notification[64],rx[2048],tx[2048];
++} __attribute__((aligned(4096)));
++enum { A6_DMA_TO_DEVICE, A6_DMA_FROM_DEVICE, A6_DMA_PREPARE_RECEIVE };
++enum { A6_USB_REPORT_START=1,A6_USB_REPORT_CONNECT,A6_USB_REPORT_CONFIG,A6_USB_REPORT_LINK,
++    A6_USB_REPORT_RESET,A6_USB_REPORT_STOP,A6_USB_REPORT_ERROR };
++struct a6_usb_ops {
++    uint32_t (*read)(void *,unsigned);
++    void (*write)(void *,unsigned,uint32_t);
++    uint64_t (*ticks)(void *);
++    uint64_t (*physical)(void *,const void *);
++    void (*sync)(void *,void *,unsigned,unsigned);
++    void (*receive)(void *,const uint8_t *,unsigned);
++    void (*link)(void *,int);
++    void (*report)(void *,unsigned,uint32_t,uint32_t);
++};
++struct a6_dwc3 {
++    const struct a6_usb_ops *ops;void *cookie;struct a6_usb_dma *dma;uint64_t frequency;
++    struct a6_ecm ecm;struct a6_usb_reply reply;
++    uint32_t last_register,last_value,events,rx_packets,tx_packets,errors;
++    uint16_t queued[6],event_offset,bulk_packet;
++    uint8_t active[6],resource[6],online,control_state,control_in,control_three_stage;
++    uint8_t control_zlp,control_aborted,tx_pending,tx_zlp,notify_pending,notify_speed;
++    uint8_t notify_generation,notify_submitted;
++};
++int a6_dwc3_start(struct a6_dwc3 *);
++void a6_dwc3_poll(struct a6_dwc3 *);
++int a6_dwc3_send(struct a6_dwc3 *,const uint8_t *,unsigned);
++void a6_dwc3_stop(struct a6_dwc3 *);
++#endif
+diff --git i/bsd/dev/a6plte/usb_ecm.c w/bsd/dev/a6plte/usb_ecm.c
+new file mode 100644
+index 0000000..168237b
+--- /dev/null
++++ w/bsd/dev/a6plte/usb_ecm.c
+@@ -0,0 +1,105 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* USB 2.0 CDC-ECM descriptors/control protocol, independent of controller DMA. */
++#include "usb_ecm.h"
++static uint16_t le16(const uint8_t *p) { return (uint16_t)(p[0] | (uint16_t)p[1]<<8); }
++static void copy(uint8_t *d,const uint8_t *s,unsigned n) { while (n--) *d++=*s++; }
++static const uint8_t device[]={18,1,0,2,2,0,0,64,0x09,0x12,0x05,0xa6,1,0,1,2,0,1};
++/* VID/PID 1209:a605 is a development identity, not a claimed allocation. */
++static const uint8_t qualifier[]={10,6,0,2,2,0,0,64,1,0};
++static const uint8_t configuration[]={
++    9,2,80,0,2,1,0,0x80,250,
++    9,4,0,0,1,2,6,0,0,
++    5,0x24,0,0x10,1,
++    5,0x24,6,0,1,
++    13,0x24,0x0f,4,0,0,0,0,0xea,5,0,0,0, /* max frame 1514 */
++    7,5,0x81,3,16,0,8,
++    9,4,1,0,0,0x0a,0,0,0,
++    9,4,1,1,2,0x0a,0,0,0,
++    7,5,0x02,2,0,2,0,
++    7,5,0x82,2,0,2,0
++};
++static int endpoint_bit(const struct a6_ecm *s,uint16_t ep) {
++    if (ep==0 || ep==0x80) return 0;
++    if (!s->configuration) return -1;
++    if (ep==0x81) return 1;
++    if (s->alternate && ep==2) return 2;
++    if (s->alternate && ep==0x82) return 4;
++    return -1;
++}
++int a6_ecm_link(const struct a6_ecm *s) { return s && s->configuration==1 && s->alternate==1; }
++int a6_ecm_setup(const struct a6_ecm *s,const uint8_t p[8],struct a6_usb_reply *r) {
++    if (!s || !p || !r) return -1;
++    *r=(struct a6_usb_reply){.next=*s};
++    unsigned type=p[0],request=p[1],value=le16(p+2),index=le16(p+4),length=le16(p+6);
++    if (type==0x80 && request==6) {
++        unsigned descriptor=value>>8,number=value&255,n=0;
++        if (descriptor==1 && !number && !index) { copy(r->data,device,sizeof(device));n=sizeof(device); }
++        else if (descriptor==6 && !number && !index) { copy(r->data,qualifier,sizeof(qualifier));n=sizeof(qualifier); }
++        else if ((descriptor==2 || descriptor==7) && !number && !index) {
++            copy(r->data,configuration,sizeof(configuration));n=sizeof(configuration);r->data[1]=(uint8_t)descriptor;
++            int high=descriptor==2?s->high_speed:!s->high_speed;
++            if (!high) { r->data[47]=16;r->data[70]=64;r->data[71]=0;r->data[77]=64;r->data[78]=0; }
++        } else if (descriptor==3) {
++            if (!number && !index) { r->data[0]=4;r->data[1]=3;r->data[2]=9;r->data[3]=4;n=4; }
++            else if (index==0x409 || index==0) {
++                const char *text=number==1?"A6PLTE":number==2?"Darwin USB Ethernet":number==4?"02534D413601":0;
++                if (!text) return -1;
++                n=2;r->data[1]=3;
++                while (*text && n+2<=sizeof(r->data)) { r->data[n++]=(uint8_t)*text++;r->data[n++]=0; }
++                if (*text || n>254) return -1;
++                r->data[0]=(uint8_t)n;
++            } else return -1;
++        } else return -1;
++        r->length=(uint16_t)(n<length?n:length);return 0;
++    }
++    if (type==0 && request==5 && value<=127 && !index && !length && !s->configuration) {
++        r->next.address=(uint8_t)value;r->change=A6_USB_ADDRESS;return 0;
++    }
++    if (type==0 && request==9 && value<=1 && !index && !length && s->address) {
++        r->next.configuration=(uint8_t)value;r->next.alternate=0;r->next.halted=0;r->next.filter=0;
++        r->change=A6_USB_CONFIGURATION;return 0;
++    }
++    if (type==0x80 && request==8 && !value && !index && length==1) {
++        r->data[0]=s->configuration;r->length=1;return 0;
++    }
++    if (type==1 && request==11 && s->configuration && index<=1 && value<=(index==1?1u:0u) && !length) {
++        if (index==1) { r->next.alternate=(uint8_t)value;r->next.halted&=1; }
++        r->change=A6_USB_INTERFACE;r->endpoint=(uint8_t)index;return 0;
++    }
++    if (type==0x81 && request==10 && s->configuration && index<=1 && !value && length==1) {
++        r->data[0]=index?s->alternate:0;r->length=1;return 0;
++    }
++    if (request==0 && !value && length==2) {
++        if (type==0x80 && !index) { r->length=2;return 0; }
++        if (type==0x81 && s->configuration && index<=1) { r->length=2;return 0; }
++        if (type==0x82) {
++            int bit=endpoint_bit(s,(uint16_t)index);
++            if (bit<0) return -1;
++            r->data[0]=(uint8_t)((s->halted&bit)!=0);r->length=2;return 0;
++        }
++    }
++    if (type==2 && (request==1 || request==3) && !value && !length) {
++        int bit=endpoint_bit(s,(uint16_t)index);
++        if (bit<=0) return -1;
++        r->endpoint=(uint8_t)index;
++        if (request==3) { r->next.halted|=bit;r->change=A6_USB_HALT; }
++        else { r->next.halted&=(uint8_t)~bit;r->change=A6_USB_CLEAR_HALT; }
++        return 0;
++    }
++    if (type==0x21 && request==0x43 && !(value&~31u) && !index && !length && s->configuration) {
++        r->next.filter=(uint16_t)value;r->change=A6_USB_FILTER;return 0;
++    }
++    return -1;
++}
++unsigned a6_ecm_notification(uint8_t *data,unsigned capacity,int speed,int connected) {
++    unsigned length=speed?16:8;
++    if (!data || capacity<length) return 0;
++    for (unsigned i=0;i<length;++i) data[i]=0;
++    data[0]=0xa1;data[1]=speed?0x2a:0;data[2]=speed?0:(connected?1:0);
++    if (speed) {
++        data[6]=8;
++        /* Symmetric conservative nominal rate, not a throughput measurement. */
++        data[8]=data[12]=0x80;data[9]=data[13]=0x96;data[10]=data[14]=0x98;
++    }
++    return length;
++}
+diff --git i/bsd/dev/a6plte/usb_ecm.h w/bsd/dev/a6plte/usb_ecm.h
+new file mode 100644
+index 0000000..d9a45df
+--- /dev/null
++++ w/bsd/dev/a6plte/usb_ecm.h
+@@ -0,0 +1,22 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef A6_USB_ECM_H
++#define A6_USB_ECM_H
++#include <stdint.h>
++#include <stddef.h>
++enum a6_usb_change { A6_USB_NO_CHANGE, A6_USB_ADDRESS, A6_USB_CONFIGURATION,
++    A6_USB_INTERFACE, A6_USB_FILTER, A6_USB_HALT, A6_USB_CLEAR_HALT };
++struct a6_ecm {
++    uint8_t address,configuration,alternate,halted,high_speed;
++    uint16_t filter;
++};
++struct a6_usb_reply {
++    struct a6_ecm next;
++    uint16_t length;
++    uint8_t change,endpoint;
++    uint8_t data[256];
++};
++/* Produces a bounded reply and candidate state. Commit only after status ACK. */
++int a6_ecm_setup(const struct a6_ecm *,const uint8_t setup[8],struct a6_usb_reply *);
++int a6_ecm_link(const struct a6_ecm *);
++unsigned a6_ecm_notification(uint8_t *data,unsigned capacity,int speed_notification,int connected);
++#endif
 diff --git i/bsd/dev/a6plte/userdata.c w/bsd/dev/a6plte/userdata.c
 new file mode 100644
 index 0000000..1cc441b
@@ -468,16 +1116,18 @@ index 0000000..1cc441b
 +    printf("A6PLTE eMMC: /dev/a6userdata and /dev/ra6userdata ready\n");
 +}
 diff --git i/bsd/kern/bsd_init.c w/bsd/kern/bsd_init.c
-index ffe7ce0..87e271b 100644
+index ffe7ce0..0f9f279 100644
 --- i/bsd/kern/bsd_init.c
 +++ w/bsd/kern/bsd_init.c
-@@ -1115,6 +1115,11 @@ bsd_autoconf(void)
+@@ -1115,6 +1115,13 @@ bsd_autoconf(void)
  	kprintf("bsd_autoconf: calling kminit\n");
  	kminit();
  
 +#if A6PLTE
 +	extern void a6_userdata_init(void);
 +	a6_userdata_init();
++	extern void a6_usb_init(void);
++	a6_usb_init();
 +#endif
 +
  	/*
@@ -6532,10 +7182,10 @@ index 937ce42..deffc98 100644
  	if (args != NULL) {
  		if (!pe_arm_map_interrupt_controller()) {
 diff --git i/pexpert/arm/pe_init.c w/pexpert/arm/pe_init.c
-index db1c4a0..5447e41 100644
+index db1c4a0..ccbdd8c 100644
 --- i/pexpert/arm/pe_init.c
 +++ w/pexpert/arm/pe_init.c
-@@ -66,6 +66,12 @@ uint32_t        gPlatformMemoryID;
+@@ -66,6 +66,14 @@ uint32_t        gPlatformMemoryID;
  uint32_t        gPlatformChipRole = UINT32_MAX;
  #endif /* not XNU_TARGET_OS_XR */
  static boolean_t vc_progress_initialized = FALSE;
@@ -6544,11 +7194,13 @@ index db1c4a0..5447e41 100644
 +	uintptr_t base=ml_io_map(0x07824000,0x2000);
 +	return base ? base+0x900 : 0;
 +}
++uintptr_t a6_usb_map_dwc3(void) { return ml_io_map(0x07000000,0x10000); }
++uint64_t a6_usb_physical(uintptr_t address) { return ml_static_vtop(address); }
 +#endif
  uint64_t    last_hwaccess_thread = 0;
  uint8_t last_hwaccess_type = 0;
  uint8_t last_hwaccess_size = 0;
-@@ -218,6 +224,21 @@ check_for_panic_log(void)
+@@ -218,6 +226,21 @@ check_for_panic_log(void)
  int
  PE_initialize_console(PE_Video * info, int op)
  {
@@ -6570,7 +7222,7 @@ index db1c4a0..5447e41 100644
  	static int last_console = -1;
  
  	if (info && (info != &PE_state.video)) {
-@@ -266,6 +287,7 @@ PE_initialize_console(PE_Video * info, int op)
+@@ -266,6 +289,7 @@ PE_initialize_console(PE_Video * info, int op)
  	}
  
  	return 0;
@@ -6578,7 +7230,7 @@ index db1c4a0..5447e41 100644
  }
  
  void
-@@ -311,7 +333,10 @@ PE_init_iokit(void)
+@@ -311,7 +335,10 @@ PE_init_iokit(void)
  	scale = PE_state.video.v_scale;
  	flip = 1;
  

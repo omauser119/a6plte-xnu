@@ -1,6 +1,10 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
 /* Initial native Darwin PID1 probe. Runtime libraries and Bash are later stages. */
 #include <sys/syscall.h>
+#include <sys/socket.h>
+#include <sys/sockio.h>
+#include <net/if.h>
+#include <netinet/in.h>
 #include "../xnu/bsd/sys/disk.h"
 static long console=-1;
 static char filebuf[512],release[64];
@@ -26,6 +30,24 @@ static void number(unsigned long n) {
     char out[32];unsigned i=sizeof(out);
     do { out[--i]=(char)('0'+n%10);n/=10; } while(n);
     output(out+i,sizeof(out)-i);
+}
+static void network_address(struct sockaddr *out,unsigned value) {
+    struct sockaddr_in *in=(struct sockaddr_in *)out;
+    *in=(struct sockaddr_in){.sin_len=sizeof(*in),.sin_family=AF_INET};
+    in->sin_addr.s_addr=__builtin_bswap32(value);
+}
+static void configure_network(void) {
+    long socket=call(SYS_socket,AF_INET,SOCK_DGRAM,0,0,0,0);
+    if (socket<0) { text("PID1: USB network socket failed\n");return; }
+    struct ifaliasreq address={0};
+    address.ifra_name[0]='e';address.ifra_name[1]='n';address.ifra_name[2]='0';
+    network_address(&address.ifra_addr,0xc0a83502); /* 192.168.53.2 */
+    network_address(&address.ifra_broadaddr,0xc0a83503);
+    network_address(&address.ifra_mask,0xfffffffc);
+    long error=call(SYS_ioctl,socket,SIOCAIFADDR,(long)&address,0,0,0);
+    if (!error) text("PID1: USB en0 configured 192.168.53.2/30\n");
+    else { text("PID1: en0 address failed, errno ");number((unsigned long)-error);text("\n"); }
+    call(SYS_close,socket,0,0,0,0,0);
 }
 __attribute__((noreturn)) void start(void) {
     console=call(SYS_open,(long)"/dev/console",2,0,0,0,0);
@@ -59,6 +81,7 @@ __attribute__((noreturn)) void start(void) {
         else { text("PID1: eMMC userdata read failed ");number((unsigned long)-n);text("\n"); }
         call(SYS_close,storage,0,0,0,0,0);
     } else { text("PID1: userdata device unavailable, errno ");number((unsigned long)-storage);text("\n"); }
+    configure_network();
     for(unsigned long beat=1;;++beat) {
         struct { long seconds;int microseconds,pad; } timeout={1,0,0};
         long result=call(SYS_select,0,0,0,0,(long)&timeout,0);
@@ -72,6 +95,11 @@ __attribute__((noreturn)) void start(void) {
         if (!call(SYS_sysctlbyname,(long)name,sizeof(name)-1,(long)&services,(long)&size,0,0)) {
             text(" / IO services ");number(services);
             if (services&16) text(" / watchdog timeout: no reset");
+        }
+        static const char usb_name[]="kern.a6plte_usb";
+        unsigned usb=0;size=sizeof(usb);
+        if (!call(SYS_sysctlbyname,(long)usb_name,sizeof(usb_name)-1,(long)&usb,(long)&size,0,0)) {
+            text(" / USB ");number(usb);
         }
         text("\n");
     }

@@ -22,6 +22,8 @@ python3 "$ROOT/tests/test_hfs_image.py"
 python3 "$ROOT/tests/test_iokit_catalogue.py"
 python3 "$ROOT/tests/test_amfi_queries.py"
 python3 "$ROOT/tests/test_amfi_signature.py"
+clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_usb.c" "$ROOT/xnu/bsd/dev/a6plte/usb_ecm.c" "$ROOT/xnu/bsd/dev/a6plte/usb_dwc3.c" -o "$ROOT/artifacts/test-usb"
+"$ROOT/artifacts/test-usb"
 for unit in storage sdhci; do
     sources=("$ROOT/xnu/bsd/dev/a6plte/sdhci.c")
     if [[ $unit == storage ]]; then sources=("$ROOT/xnu/bsd/dev/a6plte/gpt.c"); fi
