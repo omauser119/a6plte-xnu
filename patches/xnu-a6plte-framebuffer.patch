@@ -439,7 +439,7 @@ index 0000000..a7e3211
 +
 +#endif /* A6PLTE */
 diff --git i/iokit/KernelConfigTables.cpp w/iokit/KernelConfigTables.cpp
-index 559a9db..a3b5315 100644
+index 559a9db..4b414d8 100644
 --- i/iokit/KernelConfigTables.cpp
 +++ w/iokit/KernelConfigTables.cpp
 @@ -34,6 +34,20 @@
@@ -448,8 +448,8 @@ index 559a9db..a3b5315 100644
      "("
 +#if A6PLTE
 +    "   {"
-+    "     'IOClass'         = com_apple_filesystems_hfs;"
-+    "     'IOMatchCategory' = com_apple_filesystems_hfs;"
++    "     'IOClass'        ='com_apple_filesystems_hfs';"
++    "     'IOMatchCategory'='com_apple_filesystems_hfs';"
 +    "     'IOProviderClass' = IOResources;"
 +    "     'IOResourceMatch' = IOBSD;"
 +    "   },"
