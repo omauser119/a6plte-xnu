@@ -1,5 +1,12 @@
 # A6PLTE USB Ethernet bring-up
 
+USB is disabled by default at the user's request. The code stays compiled in,
+but `a6_usb_init()` returns before MMIO mapping, interface allocation, DMA setup
+or worker creation unless the boot argument `a6_usb=1` is explicitly supplied.
+The normal boot image does not supply it. `a6-init` stays the only userspace
+program and skips network configuration while USB is inactive. Userspace,
+Bash and SSH work is deferred until the user requests it.
+
 The first implementation adds a USB2 DWC3 peripheral driver and CDC-ECM control
 protocol to the native BSD component. It adopts the already powered/trained USB2
 PHY and clocks left by lk2nd. The device controller is reset before replacing

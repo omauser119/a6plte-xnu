@@ -31,6 +31,12 @@ static void number(unsigned long n) {
     do { out[--i]=(char)('0'+n%10);n/=10; } while(n);
     output(out+i,sizeof(out)-i);
 }
+static unsigned usb_status(void) {
+    static const char name[]="kern.a6plte_usb";
+    unsigned value=0;unsigned long size=sizeof(value);
+    if (call(SYS_sysctlbyname,(long)name,sizeof(name)-1,(long)&value,(long)&size,0,0)) return 0;
+    return value;
+}
 static void network_address(struct sockaddr *out,unsigned value) {
     struct sockaddr_in *in=(struct sockaddr_in *)out;
     *in=(struct sockaddr_in){.sin_len=sizeof(*in),.sin_family=AF_INET};
@@ -84,7 +90,8 @@ __attribute__((noreturn)) void start(void) {
         else { text("PID1: eMMC userdata read failed ");number((unsigned long)-n);text("\n"); }
         call(SYS_close,storage,0,0,0,0,0);
     } else { text("PID1: userdata device unavailable, errno ");number((unsigned long)-storage);text("\n"); }
-    configure_network();
+    if (usb_status()) configure_network();
+    else text("PID1: USB inactive\n");
     for(unsigned long beat=1;;++beat) {
         struct { long seconds;int microseconds,pad; } timeout={1,0,0};
         long result=call(SYS_select,0,0,0,0,(long)&timeout,0);

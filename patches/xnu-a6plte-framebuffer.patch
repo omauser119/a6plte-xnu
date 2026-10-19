@@ -317,10 +317,10 @@ index 0000000..752cd70
 +#endif
 diff --git i/bsd/dev/a6plte/usb.c w/bsd/dev/a6plte/usb.c
 new file mode 100644
-index 0000000..8091a9a
+index 0000000..b5fff3c
 --- /dev/null
 +++ w/bsd/dev/a6plte/usb.c
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,155 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Native XNU Ethernet interface for the inherited MSM8953 USB2/DWC3 gadget. */
 +#include <sys/param.h>
@@ -338,6 +338,7 @@ index 0000000..8091a9a
 +#include <kern/thread.h>
 +#include <kern/clock.h>
 +#include <kern/sched_prim.h>
++#include <pexpert/pexpert.h>
 +#include "usb_dwc3.h"
 +/* Same kernel KPI declaration used by BSD's pktsched_netem.c. */
 +extern kern_return_t thread_terminate(thread_t);
@@ -449,6 +450,9 @@ index 0000000..8091a9a
 +}
 +SYSCTL_PROC(_kern,OID_AUTO,a6plte_usb,CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED,NULL,0,status_sysctl,"I","A6 USB: 0 offline, 1 EP0 running, 3 Ethernet alternate setting active");
 +void a6_usb_init(void) {
++    int enabled=0;
++    PE_parse_boot_argn("a6_usb",&enabled,sizeof(enabled));
++    if (enabled!=1) { printf("A6PLTE USB: disabled\n");return; }
 +    mmio=a6_usb_map_dwc3();
 +    if (!mmio) { printf("A6PLTE USB: MMIO mapping failed\n");return; }
 +    struct ifnet_init_eparams p={.ver=IFNET_INIT_CURRENT_VERSION,.len=sizeof(p),

@@ -16,7 +16,7 @@ cat > "$STAGE/etc/a6plte-release" <<'EOF'
 A6PLTE / SM-A605FN
 Apple OSS XNU 12377.121.6 / Darwin 25.5.0
 Root: native Apple HFS+ driver, RAMDisk /dev/md0
-Initial PID1 probe; Bash and SSH are not installed yet.
+Userspace: static a6-init; USB disabled by default.
 EOF
 cp reference/hfs/APPLE_LICENSE "$STAGE/usr/share/licenses/hfs-APSL.txt"
 cp licenses/legacy-aes.txt "$STAGE/usr/share/licenses/legacy-aes.txt"

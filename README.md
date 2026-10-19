@@ -7,6 +7,11 @@ with an interactive Bash session over SSH through USB Ethernet. The
 [project roadmap](ROADMAP.md) records the hardware evidence, dependencies and
 acceptance checks for each step.
 
+Current scope: keep `/sbin/a6-init` and stabilize the kernel. Further userspace,
+Bash and SSH work is deferred until requested. The USB driver remains in the
+source but is disabled by default; the normal image does not start USB or
+configure `en0`. See [USB status](docs/USB.md).
+
 On SM-A605FN, the actual XNU kernel prints its own startup logs and panics on
 framebuffer. Hardware confirms VM bootstrap, platform registration, the Apple
 pthread kernel component, DLIL thread scheduling and the displayed Skywalk
