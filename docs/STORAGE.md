@@ -45,7 +45,7 @@ following matching geometry:
 | Byte size | 26,372,714,496 (`0x623efb000`) |
 
 These values are evidence for this phone, not hardcoded driver limits. The
-kernel must independently validate the on-disk GPT and derive the same slice.
+kernel independently validates the on-disk GPT before publishing the slice.
 Full getvar/debug logs and device identifiers remain in ignored local artifacts.
 
 ## Validation
@@ -57,8 +57,12 @@ unaligned buffers, inherited state, R1/CRC errors, command/data timeouts, cache
 flush and absence of automatic write retries. All three native BSD modules also
 compile against XNU headers.
 
-The first hardware check is read-only: PID1 opens the raw node, queries block
-count and write availability, and reads one sector. It prints
-`PID1: eMMC userdata sector read OK` on success. Actual hardware write/readback
+The first hardware check passed on the connected SM-A605FN with source
+`f7c546c`: the user confirmed `PID1: eMMC userdata sector read OK`. PID1 opened
+the native raw node and read a 512-byte sector through the SDHCI PIO backend.
+The node is published only after EXT_CSD checks and both GPT copies validate,
+so this result also exercises that initialization path on the real card.
+The probe also attempts block-count and write-availability queries; their exact
+displayed values have not been reported separately. Actual hardware write/readback
 and HFS+ mounting on userdata remain separate acceptance checks on the user's
 prepared volume. The ramdisk is not formatted or copied onto userdata by this probe.

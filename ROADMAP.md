@@ -13,6 +13,9 @@ DLIL и self-tests Skywalk. Исправление описания CTRR про�
 запуск PID1 `/sbin/a6-init` в ARM64 userspace. Обращения к отсутствующему AMFI
 исправлены: права не предоставляются, а raw XML/DER entitlements игнорируются.
 Все три задания Actions для этого ядра/rootfs прошли.
+Пользователь также подтвердил `PID1: eMMC userdata sector read OK` на сборке
+`f7c546c`: драйвер принял состояние SDHCI, проверил GPT и прочитал настоящий
+сектор `userdata` через BSD raw device. Аппаратная запись ещё не проверялась.
 
 В Actions успешно собран M2: настоящий драйвер Apple HFS+ из `hfs-715.120.4`,
 32 MiB образ HFS+, передача `/chosen/memory-map/RAMDisk` и выбор `rd=md0`.
@@ -37,7 +40,7 @@ Bash, LibSystem и SSH пока отсутствуют.
 | M1. Устойчивое ядро | Запустить IOKit platform expert, проверить GICv2 и виртуальный таймер, переключение потоков, ожидания и пробуждения, доступную RAM и криптографические зависимости | Несколько kernel threads работают 10 минут; проверены реальные timer IRQ, sleep/wakeup и отсутствие panic | В работе |
 | M2. Корневой ramdisk | Расширить упаковщик, зарезервировать и отобразить образ в RAM, передать `RAMDisk` в Apple DT, подключить HFS+ и devfs | XNU создаёт `/dev/md0`, монтирует HFS+ как `/` и читает проверочный файл | md0 и монтирование HFS+ подтверждены на телефоне; чтение файла из EL0 ожидается |
 | M3. EL0 и Darwin runtime | Первый ARM64 Mach-O процесс, системные вызовы, userspace VM, dyld, библиотеки LibSystem | Процесс из ramdisk выполняет write; затем динамический C-процесс проходит malloc, файлы, fork/exec/wait, signals и pthread smoke tests | PID1 запущен на телефоне; динамический runtime ещё не подключён |
-| D1. eMMC и userdata | После запуска ramdisk добавить MMC/SDHCI backend и ограниченный разделом block device для `userdata` | Проверены GPT, чтение и запись в пределах раздела, flush и повторное чтение; затем монтирование HFS+, созданной пользователем | Код PIO, GPT, BSD block/raw и RW готов, host-тесты прошли; аппаратная проверка в работе |
+| D1. eMMC и userdata | После запуска ramdisk добавить MMC/SDHCI backend и ограниченный разделом block device для `userdata` | Проверены GPT, чтение и запись в пределах раздела, flush и повторное чтение; затем монтирование HFS+, созданной пользователем | GPT и чтение из PID1 подтверждены на телефоне; RW/flush прошли host-тесты, аппаратная запись ожидает подготовленного тома |
 | M4. PID1 и Bash | Минимальный ramdisk init, `/dev`, `/tmp`, учётные записи, Bash и базовые команды из Apple OSS | PID1 запускает `/bin/bash -c` со скриптами; работают команды, pipes, redirects, дочерние процессы и их сбор через wait | Запланировано |
 | M5. USB peripheral | Qualcomm clocks/reset/power/USB2 PHY, DWC3 device mode, EP0, descriptors, bulk endpoints, DMA и IRQ | Компьютер перечисляет устройство, передача bulk проверена в обе стороны, повторное подключение работает | Запланировано |
 | M6. Сеть через USB | CDC-ECM, Ethernet frames, BSD ifnet, IPv4/ARP/TCP, статические адреса | На Linux-хосте появляется USB Ethernet; работают двусторонний ping и TCP передача с проверкой данных | Запланировано |

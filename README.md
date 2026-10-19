@@ -27,7 +27,9 @@ implemented yet.
 The current source adds an SDHCI PIO eMMC backend and native BSD block/raw
 devices restricted to the GPT `userdata` partition. Read/write, cache flush,
 GPT validation, bounds and error handling are implemented and host-tested;
-device validation is in progress. See [storage implementation and layout](docs/STORAGE.md).
+PID1 successfully read a sector from the real phone's userdata device with
+`PID1: eMMC userdata sector read OK`. Hardware write/readback remains to be
+tested on a prepared volume. See [storage implementation and layout](docs/STORAGE.md).
 
 Native `startup_debug=1` traces startup stages; `startup_debug=3` also logs each
 callback for diagnosis. Framebuffer scrolling and clearing use aligned scalar
