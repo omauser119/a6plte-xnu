@@ -1,8 +1,18 @@
 diff --git i/app/aboot/aboot.c w/app/aboot/aboot.c
-index b44a5c2..a79fddf 100644
+index b44a5c2..156ea3b 100644
 --- i/app/aboot/aboot.c
 +++ w/app/aboot/aboot.c
-@@ -402,6 +402,7 @@ static void update_ker_tags_rdisk_addr(boot_img_hdr *hdr, struct kernel64_hdr *k
+@@ -98,6 +98,9 @@
+ 
+ #if WITH_LK2ND
+ #include <lk2nd/init.h>
++#if LK2ND_A6PLTE_XNU
++#include <lk2nd/util/mmu.h>
++#endif
+ #endif
+ #if WITH_LK2ND_DEVICE
+ #include <lk2nd/device.h>
+@@ -402,6 +405,7 @@ static void update_ker_tags_rdisk_addr(boot_img_hdr *hdr, struct kernel64_hdr *k
  		hdr->kernel_addr = ABOOT_FORCE_KERNEL64_ADDR;
  	else
  		hdr->kernel_addr = ABOOT_FORCE_KERNEL_ADDR;
@@ -10,7 +20,7 @@ index b44a5c2..a79fddf 100644
  	hdr->ramdisk_addr = ABOOT_FORCE_RAMDISK_ADDR;
  	hdr->tags_addr = ABOOT_FORCE_TAGS_ADDR;
  
-@@ -1205,6 +1206,8 @@ void boot_linux(void *kernel, unsigned *tags,
+@@ -1205,6 +1209,8 @@ void boot_linux(void *kernel, unsigned *tags,
  		enum boot_type boot_type)
  {
  	unsigned char *final_cmdline;
@@ -19,7 +29,7 @@ index b44a5c2..a79fddf 100644
  #if DEVICE_TREE
  	int ret = 0;
  #endif
-@@ -1282,11 +1285,13 @@ tags_done:
+@@ -1282,11 +1288,13 @@ tags_done:
  
  	/* Turn off splash screen if enabled */
  #if DISPLAY_SPLASH_SCREEN
@@ -35,7 +45,7 @@ index b44a5c2..a79fddf 100644
  #if VERIFIED_BOOT_2
  	free_verified_boot_resource(&info);
  #endif
-@@ -1299,7 +1304,8 @@ tags_done:
+@@ -1299,7 +1307,8 @@ tags_done:
  	enter_critical_section();
  
  	/* do any platform specific cleanup before kernel entry */
@@ -45,6 +55,27 @@ index b44a5c2..a79fddf 100644
  
  	arch_disable_cache(UCACHE);
  
+@@ -3456,6 +3465,20 @@ void cmd_boot(const char *arg, void *data, unsigned sz)
+ 	}
+ #endif
+ 
++#if LK2ND_A6PLTE_XNU
++	/* MSM8953 maps only the first 90 MiB at startup. A kernel plus HFS+
++	 * package at DDR + 54 MiB can extend beyond that mapping. Validate
++	 * and map its complete destination before the first copy, while the
++	 * MMU is still active. Keep the platform's default load addresses. */
++	if (!strncmp((const char *)hdr->cmdline, "a6plte-xnu ", 11) &&
++	    hdr->ramdisk_size &&
++	    !lk2nd_mmu_map_ram_dynamic("XNU kernel/RAMDisk package",
++				      hdr->ramdisk_addr, hdr->ramdisk_size)) {
++		fastboot_fail("cannot map XNU package destination");
++		goto boot_failed;
++	}
++#endif
++
+ 	/* Load ramdisk & kernel */
+ 	memmove((void*) hdr->ramdisk_addr, ptr + page_size + kernel_actual, hdr->ramdisk_size);
+ 	memmove((void*) hdr->kernel_addr, (char*) (kernel_start_addr), kernel_size);
 diff --git i/dev/fbcon/fbcon.c w/dev/fbcon/fbcon.c
 index 64362c5..b2023c2 100644
 --- i/dev/fbcon/fbcon.c
