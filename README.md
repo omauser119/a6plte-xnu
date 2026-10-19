@@ -7,65 +7,26 @@ with an interactive Bash session over SSH through USB Ethernet. The
 [project roadmap](ROADMAP.md) records the hardware evidence, dependencies and
 acceptance checks for each step.
 
-The modified lk2nd menu and the first framebuffer output from the actual linked
-XNU kernel have been confirmed on SM-A605FN. After temporary loading with
-`fastboot boot`, XNU prints `start_first_cpu: MMU OFF` and
-`Framebuffer online. No UART.` The updated kernel has also reached
-`arm_vm_init: final TTBR1 active`, confirming the MMU transition,
-virtual execution in `arm_init` and activation of the final VM mappings.
-Native XNU logs now confirm completion of VM bootstrap, initialization of
-scheduler structures, Firehose, OSLog, IPC and IOKit on the physical display.
-The RGB888 console update passed the previous graphics-console fault and reached
-`ulock_initialize` in the kernel bootstrap thread. The bootstrap HMAC-DRBG update
-passed the `read_random` fault and reached creation of the swapout, swapfile
-creation and swapfile GC threads. The next hardware fault was in
-`crypto_random_kmem_ctx_size`, before a corecrypto provider was registered.
-The current source adds a per-CPU kmem generator using scalar ChaCha20 blocks,
-seeded by XNU's boot-seeded HMAC-DRBG, with lock-free generation and unbiased
-bounded selection. On hardware, this passed kmem initialization and reached
-lockdown-mode setup and the `vnguard` security policy. The next photographed stop
-is `image4 interface not available` in trust-cache runtime initialization.
-The A6PLTE source now keeps that runtime absent when Image4/AMFI providers are
-missing: hash/UUID queries report no match, loading is unsupported, and the
-static-cache capability query reports no capabilities. It supplies no successful
-trust decisions and does not change executable signature enforcement.
-The trust-cache update passed that stop on hardware and reached IOKit platform
-matching after machine lockdown. The next photographed panic is the fallback
-`IOPanicPlatform`, because no driver matched `samsung,a6plte`.
-The source now adds a built-in `A6PLTEPlatformExpert` personality with an exact
-board-name match and a higher probe score than the fallback. It uses the native
-platform and power-domain setup, publishes CPU/SoC device-tree services, and
-keeps unavailable firmware NVRAM absent. It also finalizes discovery of the single
-boot CPU so `kperf` can leave `ml_wait_max_cpus()`.
-Hardware now confirms successful platform registration and entry into BSD
-initialization: the MAC framework and network buffer pools initialize. The next
-photographed panic is `pthread kernel extension not loaded (function table is
-NULL)`. The source now builds Apple's actual libpthread kernel component into
-the image, registers its function table before lockdown, and adapts its private
-ABI to this XNU revision. Hardware confirms provider registration, successful
-DLIL SUM16 self-tests, and scheduling of every created DLIL kernel thread at
-least once. The next photographed fault is `aes_encrypt_key128+0xc`, called by
-`tcp_init` while setting the TCP Fast Open key: the full crypto provider is absent.
-The current source supplies the scalar AES CBC implementation from Apple's older
-XNU release and uses XNU's existing SHA-256/SHA-512 primitives for their legacy
-APIs while no provider is registered. Hardware confirms passage beyond the AES
-abort, the displayed Skywalk copy/zero/memcmp self-tests, and entry into
-`bsd_autoconf`. The next stop is `ml_unsafe_kernel_text` asserting because the
-Apple DT omitted `kernel-ctrr-to-be-enabled`. The bridge now reports that property
-as a 32-bit zero, matching the absence of Apple CTRR on Cortex-A53, so native XNU
-startup can initialize the queried state. The image has been temporarily loaded;
-progress beyond that assertion still needs hardware validation.
-Native `startup_debug=1` tracing is enabled in the bridge's boot arguments.
-On A6PLTE this now prints startup stages without logging every startup callback.
-`startup_debug=3` also enables per-callback addresses for targeted diagnosis;
-Regular kernel logs and panic output are unaffected by this trace selection.
-Framebuffer scrolling and clearing now use aligned scalar 64-bit transfers, with
-a byte fallback for unaligned geometry. Host tests compare 648 configurations
-against a byte-exact reference under address and undefined-behavior sanitizers;
-the speed improvement has not yet been measured on the phone.
-The random changes do not register a full corecrypto provider.
-Initial scheduling is observed through DLIL's startup check. Hardware timer IRQs,
-sustained scheduling and userspace are not yet confirmed.
+On SM-A605FN, the actual XNU kernel prints its own startup logs and panics on
+framebuffer. Hardware confirms VM bootstrap, platform registration, the Apple
+pthread kernel component, DLIL thread scheduling and the displayed Skywalk
+self-tests. The CTRR metadata correction passed its hardware check: the latest
+screen shows the kernel waiting for an `Apple_HFS` root disk, with no panic.
+
+The current source adds Apple's HFS+ filesystem, a 32 MiB root image, the native
+`RAMDisk` → `md0` path, and a static ARM64 `/sbin/a6-init` process. The first
+userspace check will print its PID and Darwin release, read a file from HFS+,
+and perform timed sleep/wakeup through real system calls. All three kernel/rootfs
+Actions jobs passed; hardware validation of this first rootfs and process is pending. Bash, a dynamic runtime and USB networking are not
+implemented yet.
+
+Native `startup_debug=1` traces startup stages; `startup_debug=3` also logs each
+callback for diagnosis. Framebuffer scrolling and clearing use aligned scalar
+64-bit transfers with byte fallback. Sanitizer tests compare 648 configurations
+against a byte-exact reference; the speed improvement has not been measured on
+the phone. Initial scheduling is observed, while sustained scheduling and timer
+IRQ delivery still need validation. Bootstrap crypto does not register a full
+corecrypto provider.
 
 ## Implemented
 
@@ -90,24 +51,32 @@ sustained scheduling and userspace are not yet confirmed.
 - Bootstrap AES CBC/ECB from Apple XNU's legacy C implementation, tested against
   NIST vectors for 128/192/256-bit keys, including unaligned and in-place buffers;
   SHA-256/SHA-512 legacy APIs use native primitives without a provider.
+- Built-in Apple HFS+ sources, native VFS registration and MacRoman conversion;
+  bootstrap MD5 derived from the RSA Data Security, Inc. MD5 Message-Digest Algorithm
+  supplies the existing HFS volume-UUID path before a crypto provider is present.
+- Versioned kernel/rootfs package with full payload CRC, reserved RAMDisk pages,
+  native `rd=md0` boot selection, and a first static ARM64 PID1 probe.
 - Pinned upstream patches, native config/MIG tools and component compilation probes.
 
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download the Darwin version and CTRR metadata update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup11).
+[Download XNU, HFS+ ramdisk and the updated lk2nd](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup12).
+The larger image requires the included lk2nd update and a hardware restart into it.
 
 ## GitHub Actions
 
 `A6PLTE bring-up` runs on pushes, pull requests and manual dispatch:
 
 - **Linux:** host tests, framebuffer boot image and UART-disabled lk2nd image.
-- **macOS:** Apple Clang, MIG/IIG generation, all configured kernel components and ARM64 executable linking.
+- **macOS:** Apple Clang, MIG/IIG generation, all configured kernel components, ARM64 executable linking, and HFS+ root image creation.
 - **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
-Artifacts include the linked XNU kernel, packaged boot image, lk2nd image and
-build diagnostics. All three jobs passed for the Darwin version and CTRR metadata update
-([run 39212080339](https://github.com/omauser119/a6plte-xnu/actions/runs/39212080339), source `85afdec`).
+Artifacts include the linked XNU kernel, packaged boot image, lk2nd image, raw
+HFS+ root image, native PID1 and build diagnostics. All three jobs passed for the HFS+ root image and PID1 probe
+([run 39217281711](https://github.com/omauser119/a6plte-xnu/actions/runs/39217281711), source `85b713f`).
+The subsequent full build also passed with the lk2nd mapping correction
+([run 39218551452](https://github.com/omauser119/a6plte-xnu/actions/runs/39218551452), source `476fae2`).
 A successful build does not establish runtime progress on hardware. No workflow
 flashes a device.
 
@@ -148,13 +117,14 @@ placeholder `1.0.0d1`; this port is a custom development build.
 
 ## Device testing
 
-From lk2nd/fastboot, the framebuffer payload can be loaded temporarily:
+After updating lk2nd and restarting into it, load the actual XNU kernel/rootfs
+package temporarily:
 
 ```sh
-fastboot boot artifacts/fb-smoke-boot.img
+fastboot boot xnu-boot.img
 ```
 
-No USB driver runs in this payload; return to lk2nd by hardware reboot.
+No USB driver runs in the current XNU image; return to lk2nd by hardware reboot.
 The modified bootloader was written from the running lk2nd interface with:
 
 ```sh
@@ -165,18 +135,24 @@ On this SM-A605FN, `fastboot reboot bootloader` entered Samsung Odin mode.
 Use a hardware restart and press Volume Down after the screen/vibration to return
 to lk2nd fastboot. The `lk2nd` target updates the bootloader's 512 KiB region;
 `boot` is the separate boot-image area exposed by lk2nd.
+The updated fastboot boot path maps the complete initrd destination before
+copying: a kernel/rootfs package at DDR + 54 MiB exceeds the original 90 MiB
+startup mapping. Wrapper offsets remain unchanged. Booting this larger image
+through the old loader reset the phone before XNU entry.
 
-`package-boot.sh /path/to/kernel` requires an actual linked ARM64_ALL Mach-O
-MH_EXECUTE with LC_UNIXTHREAD. It rejects ARM64e, IMG4 and filesets. The bridge
-uses a 128 MiB reserved-memory-aware allocation and no address slide. Before
-loading a full kernel, RAM and lk2nd download-buffer overlap must be checked.
+`package-boot.sh /path/to/kernel [raw-ramdisk.hfs]` requires an actual linked
+ARM64_ALL Mach-O MH_EXECUTE with LC_UNIXTHREAD. It rejects ARM64e, IMG4 and filesets.
+The bridge reserves a verified contiguous 256 MiB window for a kernel/rootfs
+package, or 128 MiB for a kernel-only package, with no address slide. Firmware,
+framebuffer, device tree and downloaded source buffers are excluded.
 `serial=1` selects the substituted framebuffer ABI, not hardware UART.
 
 ## Remaining work
 
 Full corecrypto integration, runtime compatibility of external dependencies,
 a complete platform device tree, and exception/timer validation remain in progress. SMP,
-storage, rootfs and power management are not implemented. Compiled-file counts
+eMMC and power management are not implemented; HFS+ rootfs and the first EL0
+process await hardware validation. Compiled-file counts
 are not a measure of boot readiness.
 
 ## Sources and licensing
@@ -193,6 +169,11 @@ Upstream sources are fetched at fixed commits; this repository stores patches:
   in source and [licenses/legacy-aes.txt](licenses/legacy-aes.txt).
   This table-based bootstrap path does not provide constant-time AES or a full
   corecrypto provider; see `libkern/crypto/a6plte_aes/SOURCE.txt` in the patched XNU.
+- [hfs-715.120.4](https://github.com/apple-oss-distributions/hfs/tree/hfs-715.120.4),
+  `124b970fd5390f1c2cd6f985478616a04f6eeb1f`, native HFS+ driver and encoding sources.
+- [XNU xnu-1699.32.7 MD5 implementation](https://github.com/apple-oss-distributions/xnu/blob/161efb48ee9912c6935f205e7ac9c370edb09318/libkern/crypto/md5.c),
+  derived from the RSA Data Security, Inc. MD5 Message-Digest Algorithm;
+  [license notices](licenses/legacy-md5.txt) are retained.
 - [bootstrap_cmds](https://github.com/apple-oss-distributions/bootstrap_cmds),
   `c71d2d72f48995baaea76148f61002e5299841de`, native MIG.
 - [PureDarwin](https://github.com/PureDarwin/PureDarwin),
