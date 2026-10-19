@@ -1,5 +1,5 @@
 diff --git i/app/aboot/aboot.c w/app/aboot/aboot.c
-index b44a5c2..156ea3b 100644
+index b44a5c2..dd2b2e1 100644
 --- i/app/aboot/aboot.c
 +++ w/app/aboot/aboot.c
 @@ -98,6 +98,9 @@
@@ -55,7 +55,29 @@ index b44a5c2..156ea3b 100644
  
  	arch_disable_cache(UCACHE);
  
-@@ -3456,6 +3465,20 @@ void cmd_boot(const char *arg, void *data, unsigned sz)
+@@ -3198,6 +3207,10 @@ void cmd_boot(const char *arg, void *data, unsigned sz)
+ 	}
+ #endif
+ 
++#if LK2ND_A6PLTE_XNU
++	fastboot_info("A6PLTE boot: command entered (hfs-map-v2)");
++#endif
++
+ 	if (sz < sizeof(hdr)) {
+ 		fastboot_fail("invalid bootimage header");
+ 		goto boot_failed;
+@@ -3394,6 +3407,10 @@ void cmd_boot(const char *arg, void *data, unsigned sz)
+ 	 */
+ 	update_ker_tags_rdisk_addr(hdr, kptr);
+ 
++#if LK2ND_A6PLTE_XNU
++	fastboot_info("A6PLTE boot: load addresses selected");
++#endif
++
+ 	/* Get virtual addresses since the hdr saves physical addresses. */
+ 	hdr->kernel_addr = VA(hdr->kernel_addr);
+ 	hdr->ramdisk_addr = VA(hdr->ramdisk_addr);
+@@ -3456,9 +3473,33 @@ void cmd_boot(const char *arg, void *data, unsigned sz)
  	}
  #endif
  
@@ -64,6 +86,7 @@ index b44a5c2..156ea3b 100644
 +	 * package at DDR + 54 MiB can extend beyond that mapping. Validate
 +	 * and map its complete destination before the first copy, while the
 +	 * MMU is still active. Keep the platform's default load addresses. */
++	fastboot_info("A6PLTE boot: DT ready; mapping package");
 +	if (!strncmp((const char *)hdr->cmdline, "a6plte-xnu ", 11) &&
 +	    hdr->ramdisk_size &&
 +	    !lk2nd_mmu_map_ram_dynamic("XNU kernel/RAMDisk package",
@@ -73,9 +96,37 @@ index b44a5c2..156ea3b 100644
 +	}
 +#endif
 +
++#if LK2ND_A6PLTE_XNU
++	fastboot_info("A6PLTE boot: copying kernel/RAMDisk package");
++#endif
  	/* Load ramdisk & kernel */
  	memmove((void*) hdr->ramdisk_addr, ptr + page_size + kernel_actual, hdr->ramdisk_size);
++#if LK2ND_A6PLTE_XNU
++	fastboot_info("A6PLTE boot: package copied; copying bridge");
++#endif
  	memmove((void*) hdr->kernel_addr, (char*) (kernel_start_addr), kernel_size);
++#if LK2ND_A6PLTE_XNU
++	fastboot_info("A6PLTE boot: copies complete; entering bridge");
++#endif
+ 
+ 	fastboot_okay("");
+ 	fastboot_stop();
+diff --git i/arch/arm/mmu.c w/arch/arm/mmu.c
+index 70adc41..cdd2242 100644
+--- i/arch/arm/mmu.c
++++ w/arch/arm/mmu.c
+@@ -168,6 +168,11 @@ bool arm_mmu_try_map_sections(addr_t paddr, addr_t vaddr, uint size, uint flags,
+ 	/* Add the new mappings */
+ 	for (i = 0; i < mb; ++i)
+ 		tt[index + i] = arm_mmu_section_desc(paddr + i * MB, flags);
++#if LK2ND_A6PLTE_XNU
++	/* LK stores the table in write-back RAM. Publish new descriptors
++	 * before invalidating translations and letting the walker use them. */
++	arch_clean_cache_range((addr_t)&tt[index], mb * sizeof(tt[0]));
++#endif
+ 	arm_mmu_flush();
+ 	return true;
+ }
 diff --git i/dev/fbcon/fbcon.c w/dev/fbcon/fbcon.c
 index 64362c5..b2023c2 100644
 --- i/dev/fbcon/fbcon.c
@@ -150,6 +201,39 @@ index df5c16a..5fbb585 100644
  
  /**
   * lk2nd_rng_seed_dt_update() - write a random seed to /chosen/rng-seed
+diff --git i/lk2nd/version/version.c w/lk2nd/version/version.c
+index 432b61b..278125e 100644
+--- i/lk2nd/version/version.c
++++ w/lk2nd/version/version.c
+@@ -45,5 +45,8 @@ DEV_TREE_UPDATE(lk2nd_version_dt_update);
+ static void lk2nd_version_publish(void)
+ {
+ 	fastboot_publish("lk2nd:version", LK2ND_VERSION);
++#if LK2ND_A6PLTE_XNU
++	fastboot_publish("a6plte:xnu-loader", "hfs-map-v2");
++#endif
+ }
+ FASTBOOT_INIT(lk2nd_version_publish);
+diff --git i/platform/msm8953/platform.c w/platform/msm8953/platform.c
+index b80300f..e505623 100644
+--- i/platform/msm8953/platform.c
++++ w/platform/msm8953/platform.c
+@@ -127,8 +127,14 @@ void platform_init_mmu_mappings(void)
+ 	uint32_t ddr_start = DDR_START;
+ 	uint32_t smem_addr = platform_get_smem_base_addr();
+ 
+-	/*Mapping the ddr start address for loading the kernel about 90 MB*/
++	/* Map the full A6PLTE boot package window before enabling caches.
++	 * The initrd begins at DDR + 54 MiB; kernel + HFS+ packages may
++	 * exceed the former 90 MiB window. No RAM is allocated here. */
++#if LK2ND_A6PLTE_XNU
++	sections = 192;
++#else
+ 	sections = 90;
++#endif
+ 	while(sections--)
+ 	{
+ 		arm_mmu_map_section(ddr_start + sections * MB, ddr_start + sections* MB, COMMON_MEMORY);
 diff --git i/platform/msm_shared/dev_tree.c w/platform/msm_shared/dev_tree.c
 index 86757c0..a160425 100644
 --- i/platform/msm_shared/dev_tree.c
