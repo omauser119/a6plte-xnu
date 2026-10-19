@@ -45,8 +45,23 @@ an unrelated allocator after an uncertain hardware failure.
 
 ## Validation status
 
-All three jobs passed in [Actions 39245233507](https://github.com/omauser119/a6plte-xnu/actions/runs/39245233507),
-source `2bcdf49`. Physical USB enumeration and network delivery are pending.
+All three jobs passed in [Actions 39251328230](https://github.com/omauser119/a6plte-xnu/actions/runs/39251328230),
+source `0a5b7de`. Physical USB enumeration and network delivery are pending.
+
+The first hardware failure was a zero transfer-resource index for initial EP0
+SETUP before RUN_STOP on DWC3 2.70a. Accepting that deferred allocation reached
+the connection event and the first GET_DESCRIPTOR SETUP in the owned DMA ring.
+The next boot stopped in a VM page-hash assertion while loading PID1; the host
+reported descriptor/address timeouts and did not bind an Ethernet interface.
+The diagnostic revision preserves full early-panic text and cleans the CPU
+caches at the panic stop so lk2nd can inspect the fault state after a warm reset.
+Inspection found repeated RGB888 glyph rows in the page-hash buckets directly
+above the framebuffer's virtual allocation. The board console previously let
+the cursor advance beyond its last row while scrolling with interrupts enabled;
+the new USB thread could print during that interval. The fix serializes each
+console character on the single boot CPU, keeps the cursor in range during
+scrolling, and clips every pixel store. Tall displays scroll eight rows at a
+time to reduce expensive framebuffer reads. Hardware validation is pending.
 
 Host ASan/UBSan tests exercise HS/FS/other-speed descriptors, setup field bounds,
 100,000 randomized requests, EP0 and bulk sequences, terminating zero packets,

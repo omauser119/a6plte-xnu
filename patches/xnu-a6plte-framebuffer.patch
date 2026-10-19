@@ -6769,10 +6769,10 @@ index 0000000..b06c269
 +#endif
 diff --git i/pexpert/arm/a6plte/early.c w/pexpert/arm/a6plte/early.c
 new file mode 100644
-index 0000000..5fca374
+index 0000000..41b5f74
 --- /dev/null
 +++ w/pexpert/arm/a6plte/early.c
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,130 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if defined(A6PLTE)
 +#include "fb.h"
@@ -6789,6 +6789,25 @@ index 0000000..5fca374
 +static unsigned written;
 +enum { DEFERRED, BOOTSTRAP, MAPPED };
 +static int state;
++/* One boot CPU. A timer can switch between printf callers in the middle of a
++ * scroll; protect the cursor, pending ring and pixel stores as one operation.
++ * Do not use scheduler/lock APIs: this path also runs with the MMU off. */
++static uint64_t console_enter(void) {
++#ifdef __aarch64__
++    uint64_t flags;
++    __asm__ volatile("mrs %0,daif; msr daifset,#3" : "=r"(flags) :: "memory");
++    return flags;
++#else
++    return 0;
++#endif
++}
++static void console_leave(uint64_t flags) {
++#ifdef __aarch64__
++    __asm__ volatile("msr daif,%0" :: "r"(flags) : "memory");
++#else
++    (void)flags;
++#endif
++}
 +int a6_xnu_get_display(struct a6_display *display) {
 +    if (!display) return 0;
 +    *display=(struct a6_display){0};
@@ -6800,9 +6819,11 @@ index 0000000..5fca374
 +    return 1;
 +}
 +void a6_xnu_putc(char c) {
++    uint64_t flags=console_enter();
 +    pending[written%sizeof(pending)]=c;
 +    ++written;
 +    if(state!=DEFERRED) a6_fb_putc(&screen,c);
++    console_leave(flags);
 +}
 +void a6_xnu_puts(const char *s) { while(*s) a6_xnu_putc(*s++); }
 +void a6_xnu_early_entry(const void *ptr) {
@@ -6903,10 +6924,10 @@ index 0000000..1727b0b
 +#endif
 diff --git i/pexpert/arm/a6plte/fb.c w/pexpert/arm/a6plte/fb.c
 new file mode 100644
-index 0000000..1bec1ee
+index 0000000..b2dc3e1
 --- /dev/null
 +++ w/pexpert/arm/a6plte/fb.c
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,93 @@
 +#if defined(A6PLTE)
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#include "fb.h"
@@ -6955,18 +6976,23 @@ index 0000000..1bec1ee
 +    barrier();
 +}
 +static void pixel(struct a6_fb *f, uint32_t x, uint32_t y, int on) {
++    if (x>=f->width || y>=f->height) return;
 +    volatile uint8_t *p = f->base + (uint64_t)y*f->stride + x*bpp(f->format);
 +    /* White on black deliberately avoids any RGB/BGR ambiguity in first-stage logs. */
 +    for (unsigned k=0; k<bpp(f->format); ++k) p[k]=on ? 255 : 0;
 +}
 +static void newline(struct a6_fb *f) {
-+    f->x=0; ++f->y;
++    f->x=0;
 +    uint32_t rows=f->height/CH;
-+    if (f->y < rows) return;
-+    uint64_t line=(uint64_t)CH*f->stride, used=(uint64_t)rows*line;
-+    scroll_bytes(f->base,f->base+line,used-line);
-+    clear_bytes(f->base+used-line,line);
-+    f->y=rows-1;
++    if (f->y < rows-1) { ++f->y; return; }
++    /* Reading the inherited Device-memory framebuffer is expensive.  Leave
++     * room for eight more lines per full-screen move on a tall display. */
++    uint32_t drop=rows>=16?8:1;
++    /* Keep the cursor in range even while the long pixel move is in progress. */
++    f->y=rows-drop;
++    uint64_t line=(uint64_t)CH*f->stride, used=(uint64_t)rows*line, shift=drop*line;
++    scroll_bytes(f->base,f->base+shift,used-shift);
++    clear_bytes(f->base+used-shift,shift);
 +}
 +void a6_fb_putc(struct a6_fb *f, char ch) {
 +    if (!f->base) return;
