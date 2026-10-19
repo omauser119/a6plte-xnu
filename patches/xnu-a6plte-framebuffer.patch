@@ -847,6 +847,32 @@ index 0000000..d983bb1
 +options   CONFIG_KERNEL_TAGGING		# <kernel_tagging>
 +
 +options A6PLTE # <a6plte>
+diff --git i/iokit/Kernel/IOKitDebug.cpp w/iokit/Kernel/IOKitDebug.cpp
+index 8698ba1..e5c9f47 100644
+--- i/iokit/Kernel/IOKitDebug.cpp
++++ w/iokit/Kernel/IOKitDebug.cpp
+@@ -47,7 +47,11 @@ extern "C" {
+ 
+ #include "IOKitKernelInternal.h"
+ 
++#if A6PLTE
++TUNABLE_WRITEABLE(SInt64, gIOKitDebug, "io", DEBUG_INIT_VALUE | kIOSleepWakeWdogOff);
++#else
+ TUNABLE_WRITEABLE(SInt64, gIOKitDebug, "io", DEBUG_INIT_VALUE);
++#endif
+ TUNABLE_DEV_WRITEABLE(SInt64, gIOKitTrace, "iotrace", 0);
+ 
+ #if DEVELOPMENT || DEBUG
+@@ -66,6 +70,9 @@ sysctl_debug_iokit
+ 	int changed, error = sysctl_io_number(req, gIOKitDebug, sizeof(gIOKitDebug), &newValue, &changed);
+ 	if (changed) {
+ 		gIOKitDebug = ((gIOKitDebug & ~kIOKitDebugUserOptions) | (newValue & kIOKitDebugUserOptions));
++#if A6PLTE
++		gIOKitDebug |= kIOSleepWakeWdogOff;
++#endif
+ 	}
+ 	return error;
+ }
 diff --git i/iokit/Kernel/IOService.cpp w/iokit/Kernel/IOService.cpp
 index 6824ed8..813af06 100644
 --- i/iokit/Kernel/IOService.cpp
@@ -910,22 +936,52 @@ index e3c0911..2c17027 100644
  	kern_return_t ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
  		proc,
  		entitlement,
+diff --git i/iokit/Kernel/arm/A6GraphicsLayout.c w/iokit/Kernel/arm/A6GraphicsLayout.c
+new file mode 100644
+index 0000000..9a8bcfe
+--- /dev/null
++++ w/iokit/Kernel/arm/A6GraphicsLayout.c
+@@ -0,0 +1,22 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#include "A6PlatformServicesABI.h"
++
++int a6_surface_layout(uint64_t w,uint64_t h,uint64_t format,struct a6_surface_info *out) {
++    if (!out) return 0;
++    *out=(struct a6_surface_info){0};
++    if (!w || !h || w>4096 || h>4096 || (format!=A6_PIXEL_RGB888 && format!=A6_PIXEL_XRGB8888)) return 0;
++    uint32_t bpp=format==A6_PIXEL_RGB888?3:4;
++    uint64_t stride=(w*bpp+63)&~UINT64_C(63);
++    uint64_t size=(stride*h+4095)&~UINT64_C(4095);
++    if (size>A6_SURFACE_MAX_BYTES) return 0;
++    *out=(struct a6_surface_info){A6_SERVICE_ABI_VERSION,(uint32_t)w,(uint32_t)h,(uint32_t)stride,(uint32_t)format,0,size};
++    return 1;
++}
++int a6_display_rectangle(const struct a6_display_info *d,uint64_t x,uint64_t y,
++    uint64_t w,uint64_t h,uint64_t stride,uint64_t bytes) {
++    if (!d || !w || !h || x>=d->width || y>=d->height || w>d->width-x || h>d->height-y) return 0;
++    uint32_t bpp=d->pixel_format==A6_PIXEL_RGB888?3:d->pixel_format==A6_PIXEL_XRGB8888?4:0;
++    if (!bpp || d->bits_per_pixel!=bpp*8 || (uint64_t)d->stride< (uint64_t)d->width*bpp ||
++        d->size < (uint64_t)d->stride*d->height || stride<w*bpp || stride>65536) return 0;
++    return h<=bytes/stride;
++}
 diff --git i/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
 new file mode 100644
-index 0000000..a7e3211
+index 0000000..75ede36
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,86 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if A6PLTE
 +
 +#include <IOKit/IODeviceTreeSupport.h>
 +#include <IOKit/IOLib.h>
++#include <IOKit/IOKitDebug.h>
 +#include <IOKit/IOPlatformExpert.h>
 +#include <machine/machine_routines.h>
 +#include <pexpert/arm64/board_config.h>
 +
 +static_assert(MAX_CPUS == 1, "A6PLTE platform expert currently supports the boot CPU only");
++extern void a6_start_platform_services(IOService *provider);
 +
 +/*
 + * The low-level PE code already owns the framebuffer, GICv2 and boot CPU.
@@ -958,6 +1014,9 @@ index 0000000..a7e3211
 +	 * supplied by IOCPUInterruptController, so kperf's ml_wait_max_cpus can wake.
 +	 */
 +	ml_set_max_cpus(MAX_CPUS);
++	/* Keep PM's separate sleep/wake panic watchdog disabled as well. */
++	gIOKitDebug |= kIOSleepWakeWdogOff;
++	a6_start_platform_services(this);
 +
 +	registerService();
 +	IOLog("A6PLTEPlatformExpert: SM-A605FN platform registered\n");
@@ -997,6 +1056,425 @@ index 0000000..a7e3211
 +}
 +
 +#endif /* A6PLTE */
+diff --git i/iokit/Kernel/arm/A6PlatformServices.cpp w/iokit/Kernel/arm/A6PlatformServices.cpp
+new file mode 100644
+index 0000000..a6f5d32
+--- /dev/null
++++ w/iokit/Kernel/arm/A6PlatformServices.cpp
+@@ -0,0 +1,370 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* Board services with an explicitly versioned bring-up ABI, not Apple's private ABI. */
++#if A6PLTE
++#include <IOKit/IOService.h>
++#include <IOKit/IOUserClient.h>
++#include <IOKit/IOBufferMemoryDescriptor.h>
++#include <IOKit/IODeviceMemory.h>
++#include <IOKit/IOWorkLoop.h>
++#include <IOKit/IOTimerEventSource.h>
++#include <IOKit/system_management/IOWatchDogTimer.h>
++#include <IOKit/IOLib.h>
++#include <libkern/c++/OSNumber.h>
++#include <kern/clock.h>
++#include "A6PlatformServicesABI.h"
++
++class A6PLTEWatchdog : public IOWatchDogTimer {
++    OSDeclareDefaultStructors(A6PLTEWatchdog);
++    IOWorkLoop *loop=nullptr;
++    IOTimerEventSource *timer=nullptr;
++    IOLock *stateLock=nullptr;
++    uint64_t deadline=0,expirations=0;
++    static void expired(OSObject *,IOTimerEventSource *);
++public:
++    bool start(IOService *) APPLE_KEXT_OVERRIDE;
++    void stop(IOService *) APPLE_KEXT_OVERRIDE;
++    void free() APPLE_KEXT_OVERRIDE;
++    void setWatchDogTimer(UInt32) APPLE_KEXT_OVERRIDE;
++    IOReturn setProperties(OSObject *) APPLE_KEXT_OVERRIDE;
++};
++OSDefineMetaClassAndStructors(A6PLTEWatchdog,IOWatchDogTimer);
++bool A6PLTEWatchdog::start(IOService *provider) {
++    stateLock=IOLockAlloc();loop=IOWorkLoop::workLoop();
++    if (!stateLock || !loop) return false;
++    timer=IOTimerEventSource::timerEventSource(this,expired);
++    if (!timer || loop->addEventSource(timer)!=kIOReturnSuccess) return false;
++    setName("IOWatchDogTimer");
++    setProperty("A6WatchdogLogOnly",true);
++    setProperty("A6HardwareResetEnabled",false);
++    if (!IOWatchDogTimer::start(provider)) return false;
++    IOLog("A6PLTE watchdog: log only; hardware reset disabled\n");
++    /* Exercise a real IOKit timer; expiry must leave the running PID1 intact. */
++    setProperty("A6BootTimerSelfTest",true);setWatchDogTimer(2);
++    return true;
++}
++void A6PLTEWatchdog::setWatchDogTimer(UInt32 seconds) {
++    if (!stateLock || !timer) return;
++    IOLockLock(stateLock);
++    timer->cancelTimeout();deadline=0;
++    setProperty("A6RequestedTimeoutSeconds",seconds,32);
++    setProperty("IOWatchDogEnabled",false); /* No reset watchdog is ever armed. */
++    setProperty("A6DiagnosticTimerArmed",seconds!=0);
++    if (seconds) {
++        clock_interval_to_deadline(seconds,kSecondScale,&deadline);
++        if (timer->wakeAtTime(deadline)!=kIOReturnSuccess) {
++            deadline=0;setProperty("A6DiagnosticTimerArmed",false);
++        }
++    }
++    IOLockUnlock(stateLock);
++}
++IOReturn A6PLTEWatchdog::setProperties(OSObject *properties) {
++    if (IOUserClient::clientHasPrivilege(current_task(),kIOClientPrivilegeAdministrator)!=kIOReturnSuccess)
++        return kIOReturnNotPrivileged;
++    OSNumber *number=OSDynamicCast(OSNumber,properties);
++    if (!number || number->unsigned64BitValue()>UINT32_MAX) return kIOReturnBadArgument;
++    setWatchDogTimer(number->unsigned32BitValue());return kIOReturnSuccess;
++}
++void A6PLTEWatchdog::expired(OSObject *target,__unused IOTimerEventSource *source) {
++    A6PLTEWatchdog *self=OSDynamicCast(A6PLTEWatchdog,target);
++    if (!self) return;
++    IOLockLock(self->stateLock);
++    if (self->deadline && mach_absolute_time()>=self->deadline) {
++        self->deadline=0;++self->expirations;
++        self->setProperty("A6DiagnosticTimerArmed",false);
++        self->setProperty("A6ExpirationCount",self->expirations,64);
++        IOLog("A6PLTE watchdog: timeout observed; continuing without reset\n");
++    }
++    IOLockUnlock(self->stateLock);
++}
++void A6PLTEWatchdog::stop(IOService *provider) {
++    IOWatchDogTimer::stop(provider);
++    if (timer && loop) loop->removeEventSource(timer);
++    IOService::stop(provider);
++}
++void A6PLTEWatchdog::free() {
++    if (timer) { timer->cancelTimeout();if (loop) loop->removeEventSource(timer);timer->release(); }
++    if (loop) loop->release();if (stateLock) IOLockFree(stateLock);
++    IOWatchDogTimer::free();
++}
++
++class IOSurfaceRoot : public IOService {
++    OSDeclareDefaultStructors(IOSurfaceRoot);
++    IOLock *quotaLock=nullptr;
++    uint64_t charged=0;
++public:
++    bool start(IOService *) APPLE_KEXT_OVERRIDE;
++    void free() APPLE_KEXT_OVERRIDE;
++    bool reserve(uint64_t);
++    void unreserve(uint64_t);
++    IOReturn newUserClient(task_t,void *,UInt32,OSDictionary *,IOUserClient **) APPLE_KEXT_OVERRIDE;
++};
++class IOMobileFramebuffer : public IOService {
++    OSDeclareDefaultStructors(IOMobileFramebuffer);
++    struct a6_display display={};
++    IOLock *blitLock=nullptr;
++public:
++    bool start(IOService *) APPLE_KEXT_OVERRIDE;
++    void free() APPLE_KEXT_OVERRIDE;
++    const struct a6_display *getDisplay() const { return &display; }
++    IOReturn blit(const uint64_t *,const uint8_t *,uint32_t);
++    IOReturn newUserClient(task_t,void *,UInt32,OSDictionary *,IOUserClient **) APPLE_KEXT_OVERRIDE;
++};
++class AppleKeyStore : public IOService {
++    OSDeclareDefaultStructors(AppleKeyStore);
++public:
++    bool start(IOService *) APPLE_KEXT_OVERRIDE;
++    IOReturn newUserClient(task_t,void *,UInt32,OSDictionary *,IOUserClient **) APPLE_KEXT_OVERRIDE;
++};
++/* Charge RAM until the final descriptor/mapping reference dies, not just until
++ * the client releases its handle. Otherwise lingering mappings bypass the cap. */
++class A6SurfaceMemory : public IOBufferMemoryDescriptor {
++    OSDeclareDefaultStructors(A6SurfaceMemory);
++    IOSurfaceRoot *root=nullptr;
++    uint64_t charge=0;
++public:
++    static A6SurfaceMemory *allocate(IOSurfaceRoot *,uint64_t);
++    void free() APPLE_KEXT_OVERRIDE;
++};
++class A6PlatformUserClient : public IOUserClient {
++    OSDeclareDefaultStructors(A6PlatformUserClient);
++    IOLock *clientLock=nullptr;
++    A6SurfaceMemory *surface=nullptr;
++    struct a6_surface_info surfaceInfo={};
++    IOSurfaceRoot *surfaceRoot=nullptr;
++    IOMobileFramebuffer *framebuffer=nullptr;
++    IODeviceMemory *aperture=nullptr;
++    static IOReturn create(OSObject *,void *,IOExternalMethodArguments *);
++    static IOReturn info(OSObject *,void *,IOExternalMethodArguments *);
++    static IOReturn destroy(OSObject *,void *,IOExternalMethodArguments *);
++    static IOReturn displayInfo(OSObject *,void *,IOExternalMethodArguments *);
++    static IOReturn displayBlit(OSObject *,void *,IOExternalMethodArguments *);
++public:
++    bool start(IOService *) APPLE_KEXT_OVERRIDE;
++    void free() APPLE_KEXT_OVERRIDE;
++    IOReturn clientClose() APPLE_KEXT_OVERRIDE;
++    IOReturn externalMethod(uint32_t,IOExternalMethodArguments *,IOExternalMethodDispatch * = nullptr,
++        OSObject * = nullptr,void * = nullptr) APPLE_KEXT_OVERRIDE;
++    IOReturn clientMemoryForType(UInt32,IOOptionBits *,IOMemoryDescriptor **) APPLE_KEXT_OVERRIDE;
++};
++OSDefineMetaClassAndStructors(IOSurfaceRoot,IOService);
++OSDefineMetaClassAndStructors(IOMobileFramebuffer,IOService);
++OSDefineMetaClassAndStructors(AppleKeyStore,IOService);
++OSDefineMetaClassAndStructors(A6SurfaceMemory,IOBufferMemoryDescriptor);
++OSDefineMetaClassAndStructors(A6PlatformUserClient,IOUserClient);
++
++static void identify(IOService *service,const char *implementation) {
++    service->setProperty("A6Implementation",implementation);
++    service->setProperty("A6PrivateAppleABICompatible",false);
++    service->setProperty("A6UserClientType",A6_SERVICE_CONNECT_TYPE,32);
++    service->setProperty("A6ABIVersion",A6_SERVICE_ABI_VERSION,32);
++}
++bool IOSurfaceRoot::start(IOService *provider) {
++    if (!IOService::start(provider) || !(quotaLock=IOLockAlloc())) return false;
++    setName("IOSurfaceRoot");identify(this,"CPU shared-memory surfaces");
++    setProperty("A6SurfaceMaxBytes",A6_SURFACE_MAX_BYTES,64);
++    setProperty("A6SurfacePoolBytes",A6_SURFACE_POOL_BYTES,64);
++    setProperty("A6GPUAcceleration",false);
++    /* Native allocation and zeroing smoke check, with no user mapping yet. */
++    A6SurfaceMemory *test=A6SurfaceMemory::allocate(this,4096);
++    if (!test) return false;
++    volatile uint8_t *bytes=(volatile uint8_t *)test->getBytesNoCopy();
++    bytes[0]=0x53;bytes[4095]=0x46;
++    bool passed=bytes[0]==0x53 && bytes[4095]==0x46;
++    bzero(test->getBytesNoCopy(),4096);test->release();
++    if (!passed) return false;
++    setProperty("A6BufferAllocationSelfTest",true);
++    registerService();
++    IOLog("IOSurfaceRoot: CPU buffers ready, allocation self-test passed; A6 ABI v1\n");
++    return true;
++}
++void IOSurfaceRoot::free() { if (quotaLock) IOLockFree(quotaLock);IOService::free(); }
++bool IOSurfaceRoot::reserve(uint64_t bytes) {
++    IOLockLock(quotaLock);
++    bool ok=bytes && bytes<=A6_SURFACE_MAX_BYTES && charged<=A6_SURFACE_POOL_BYTES-bytes;
++    if (ok) { charged+=bytes;setProperty("A6AllocatedBytes",charged,64); }
++    IOLockUnlock(quotaLock);return ok;
++}
++void IOSurfaceRoot::unreserve(uint64_t bytes) {
++    IOLockLock(quotaLock);charged-=bytes;setProperty("A6AllocatedBytes",charged,64);IOLockUnlock(quotaLock);
++}
++A6SurfaceMemory *A6SurfaceMemory::allocate(IOSurfaceRoot *owner,uint64_t bytes) {
++    if (!owner->reserve(bytes)) return nullptr;
++    A6SurfaceMemory *memory=new A6SurfaceMemory;
++    if (!memory) { owner->unreserve(bytes);return nullptr; }
++    memory->root=owner;owner->retain();memory->charge=bytes;
++    if (!memory->initWithPhysicalMask(kernel_task,kIODirectionInOut | kIOMemoryKernelUserShared,bytes,4096,0)) {
++        memory->release();return nullptr;
++    }
++    bzero(memory->getBytesNoCopy(),bytes);
++    return memory;
++}
++void A6SurfaceMemory::free() {
++    if (root) { root->unreserve(charge);root->release();root=nullptr; }
++    IOBufferMemoryDescriptor::free();
++}
++bool IOMobileFramebuffer::start(IOService *provider) {
++    if (!IOService::start(provider) || !a6_xnu_get_display(&display) || !(blitLock=IOLockAlloc())) return false;
++    setName("IOMobileFramebuffer");identify(this,"lk2nd inherited scanout, CPU blit");
++    setProperty("IOFBWidth",display.info.width,32);setProperty("IOFBHeight",display.info.height,32);
++    setProperty("IOFBRowBytes",display.info.stride,32);setProperty("IOFBDepth",display.info.bits_per_pixel,32);
++    setProperty("IOFBMemorySize",display.info.size,64);
++    setProperty("A6PageFlipSupported",false);setProperty("A6VBlankInterruptSupported",false);
++    setProperty("A6ReadOnlyApertureMapping",true);
++    registerService();
++    IOLog("IOMobileFramebuffer: %ux%u, stride %u, %u bpp; A6 ABI v1\n",
++        display.info.width,display.info.height,display.info.stride,display.info.bits_per_pixel);
++    return true;
++}
++void IOMobileFramebuffer::free() { if (blitLock) IOLockFree(blitLock);IOService::free(); }
++IOReturn IOMobileFramebuffer::blit(const uint64_t *v,const uint8_t *data,uint32_t bytes) {
++    if (!a6_display_rectangle(&display.info,v[0],v[1],v[2],v[3],v[4],bytes)) return kIOReturnBadArgument;
++    unsigned bpp=display.info.bits_per_pixel/8;
++    IOLockLock(blitLock);
++    volatile uint8_t *destination=(volatile uint8_t *)(uintptr_t)display.virtual_address;
++    for (uint64_t row=0;row<v[3];++row) {
++        uint64_t offset=(v[1]+row)*display.info.stride+v[0]*bpp;
++        for (uint64_t col=0;col<v[2]*bpp;++col) destination[offset+col]=data[row*v[4]+col];
++    }
++    __asm__ volatile("dsb sy" ::: "memory");
++    IOLockUnlock(blitLock);return kIOReturnSuccess;
++}
++bool AppleKeyStore::start(IOService *provider) {
++    if (!IOService::start(provider)) return false;
++    setName("AppleKeyStore");identify(this,"unsupported-operation stub");
++    setProperty("A6Stub",true);setProperty("A6SecureEnclavePresent",false);
++    setProperty("A6KeybagsSupported",false);setProperty("A6HardwareKeysAvailable",false);
++    registerService();
++    IOLog("AppleKeyStore: stub registered; keybag/SEP operations unsupported\n");
++    return true;
++}
++static IOReturn openClient(IOService *service,task_t task,void *security,UInt32 type,
++    OSDictionary *properties,IOUserClient **handler,bool keyStore=false) {
++    if (!handler) return kIOReturnBadArgument;
++    *handler=nullptr;
++    if (type!=A6_SERVICE_CONNECT_TYPE && !(keyStore && type==0)) return kIOReturnUnsupported;
++    if (IOUserClient::clientHasPrivilege(task,kIOClientPrivilegeAdministrator)!=kIOReturnSuccess)
++        return kIOReturnNotPrivileged;
++    A6PlatformUserClient *client=new A6PlatformUserClient;
++    if (!client) return kIOReturnNoMemory;
++    if (!client->initWithTask(task,security,type,properties)) { client->release();return kIOReturnNoMemory; }
++    client->setProperty(kIOUserClientDefaultLockingKey,true);
++    if (!client->attach(service)) { client->release();return kIOReturnError; }
++    if (!client->start(service)) { client->detach(service);client->release();return kIOReturnError; }
++    *handler=client;return kIOReturnSuccess;
++}
++IOReturn IOSurfaceRoot::newUserClient(task_t t,void *s,UInt32 type,OSDictionary *p,IOUserClient **h) {
++    return openClient(this,t,s,type,p,h);
++}
++IOReturn IOMobileFramebuffer::newUserClient(task_t t,void *s,UInt32 type,OSDictionary *p,IOUserClient **h) {
++    return openClient(this,t,s,type,p,h);
++}
++IOReturn AppleKeyStore::newUserClient(task_t t,void *s,UInt32 type,OSDictionary *p,IOUserClient **h) {
++    return openClient(this,t,s,type,p,h,true);
++}
++bool A6PlatformUserClient::start(IOService *provider) {
++    if (!IOUserClient::start(provider) || !(clientLock=IOLockAlloc())) return false;
++    surfaceRoot=OSDynamicCast(IOSurfaceRoot,provider);
++    framebuffer=OSDynamicCast(IOMobileFramebuffer,provider);
++    if (surfaceRoot) surfaceRoot->retain();
++    if (framebuffer) {
++        framebuffer->retain();const struct a6_display *d=framebuffer->getDisplay();
++        aperture=IODeviceMemory::withRange(d->physical_address,d->info.size).detach();
++        if (!aperture) return false;
++    }
++    return true;
++}
++void A6PlatformUserClient::free() {
++    if (surface) surface->release();if (aperture) aperture->release();
++    if (surfaceRoot) surfaceRoot->release();if (framebuffer) framebuffer->release();
++    if (clientLock) IOLockFree(clientLock);IOUserClient::free();
++}
++IOReturn A6PlatformUserClient::clientClose() { terminate();return kIOReturnSuccess; }
++IOReturn A6PlatformUserClient::externalMethod(uint32_t selector,IOExternalMethodArguments *a,
++    __unused IOExternalMethodDispatch *dispatch,__unused OSObject *target,__unused void *reference) {
++    if (!a || a->asyncWakePort || a->asyncReferenceCount || a->structureInputDescriptor || a->structureOutputDescriptor)
++        return kIOReturnBadArgument;
++    if (isInactive()) return kIOReturnNotReady;
++    static const IOExternalMethodDispatch surfaceMethods[]={
++        {create,3,0,0,sizeof(struct a6_surface_info)},
++        {info,0,0,0,sizeof(struct a6_surface_info)}, {destroy,0,0,0,0}
++    };
++    static const IOExternalMethodDispatch displayMethods[]={
++        {displayInfo,0,0,0,sizeof(struct a6_display_info)},
++        {displayBlit,5,kIOUCVariableStructureSize,0,0}
++    };
++    const IOExternalMethodDispatch *entry=nullptr;
++    if (surfaceRoot && selector<sizeof(surfaceMethods)/sizeof(surfaceMethods[0])) entry=&surfaceMethods[selector];
++    else if (framebuffer && selector<sizeof(displayMethods)/sizeof(displayMethods[0])) entry=&displayMethods[selector];
++    if (!entry) return kIOReturnUnsupported; /* Includes every AppleKeyStore selector. */
++    return IOUserClient::externalMethod(selector,a,const_cast<IOExternalMethodDispatch *>(entry),this,nullptr);
++}
++IOReturn A6PlatformUserClient::create(OSObject *object,__unused void *reference,IOExternalMethodArguments *a) {
++    A6PlatformUserClient *self=OSDynamicCast(A6PlatformUserClient,object);
++    struct a6_surface_info layout;
++    if (!self || !a6_surface_layout(a->scalarInput[0],a->scalarInput[1],a->scalarInput[2],&layout)) return kIOReturnBadArgument;
++    IOLockLock(self->clientLock);
++    IOReturn result=kIOReturnBusy;
++    if (!self->surface) {
++        self->surface=A6SurfaceMemory::allocate(self->surfaceRoot,layout.size);
++        result=self->surface?kIOReturnSuccess:kIOReturnNoMemory;
++        if (self->surface) { self->surfaceInfo=layout;bcopy(&layout,a->structureOutput,sizeof(layout)); }
++    }
++    IOLockUnlock(self->clientLock);return result;
++}
++IOReturn A6PlatformUserClient::info(OSObject *object,__unused void *reference,IOExternalMethodArguments *a) {
++    A6PlatformUserClient *self=OSDynamicCast(A6PlatformUserClient,object);
++    if (!self) return kIOReturnBadArgument;
++    IOLockLock(self->clientLock);
++    IOReturn result=self->surface?kIOReturnSuccess:kIOReturnNotReady;
++    if (self->surface) bcopy(&self->surfaceInfo,a->structureOutput,sizeof(self->surfaceInfo));
++    IOLockUnlock(self->clientLock);return result;
++}
++IOReturn A6PlatformUserClient::destroy(OSObject *object,__unused void *reference,__unused IOExternalMethodArguments *a) {
++    A6PlatformUserClient *self=OSDynamicCast(A6PlatformUserClient,object);
++    if (!self) return kIOReturnBadArgument;
++    IOLockLock(self->clientLock);
++    A6SurfaceMemory *memory=self->surface;self->surface=nullptr;self->surfaceInfo={};
++    IOLockUnlock(self->clientLock);if (memory) memory->release();return kIOReturnSuccess;
++}
++IOReturn A6PlatformUserClient::displayInfo(OSObject *object,__unused void *reference,IOExternalMethodArguments *a) {
++    A6PlatformUserClient *self=OSDynamicCast(A6PlatformUserClient,object);
++    if (!self || !self->framebuffer) return kIOReturnNotReady;
++    bcopy(&self->framebuffer->getDisplay()->info,a->structureOutput,sizeof(struct a6_display_info));
++    return kIOReturnSuccess;
++}
++IOReturn A6PlatformUserClient::displayBlit(OSObject *object,__unused void *reference,IOExternalMethodArguments *a) {
++    A6PlatformUserClient *self=OSDynamicCast(A6PlatformUserClient,object);
++    if (!self || !self->framebuffer) return kIOReturnNotReady;
++    if (!a->structureInput || a->structureInputSize>65536) return kIOReturnBadArgument;
++    return self->framebuffer->blit(a->scalarInput,(const uint8_t *)a->structureInput,a->structureInputSize);
++}
++IOReturn A6PlatformUserClient::clientMemoryForType(UInt32 type,IOOptionBits *options,IOMemoryDescriptor **memory) {
++    if (!options || !memory) return kIOReturnBadArgument;
++    *memory=nullptr;*options=0;
++    if (type!=A6_SERVICE_MEMORY || isInactive()) return kIOReturnUnsupported;
++    IOLockLock(clientLock);
++    IOMemoryDescriptor *descriptor=surface?static_cast<IOMemoryDescriptor *>(surface):aperture;
++    if (descriptor) {
++        descriptor->retain();*memory=descriptor;
++        if (aperture) *options=kIOMapReadOnly | kIOMapInhibitCache;
++    }
++    IOLockUnlock(clientLock);return descriptor?kIOReturnSuccess:kIOReturnNotReady;
++}
++
++template <typename Service> static void startBoardService(IOService *provider,const char *name) {
++    Service *service=new Service;
++    if (!service) { IOLog("A6PLTE: %s allocation failed\n",name);return; }
++    bool attached=false;
++    if (!service->init() || !(attached=service->attach(provider)) || !service->start(provider)) {
++        IOLog("A6PLTE: %s start failed\n",name);
++        if (attached) service->detach(provider);
++    }
++    service->release();
++}
++void a6_start_platform_services(IOService *provider) {
++    startBoardService<A6PLTEWatchdog>(provider,"watchdog");
++    startBoardService<AppleKeyStore>(provider,"AppleKeyStore");
++    startBoardService<IOSurfaceRoot>(provider,"IOSurfaceRoot");
++    startBoardService<IOMobileFramebuffer>(provider,"IOMobileFramebuffer");
++}
++#endif
+diff --git i/iokit/Kernel/arm/A6PlatformServicesABI.h w/iokit/Kernel/arm/A6PlatformServicesABI.h
+new file mode 100644
+index 0000000..5c0a5cb
+--- /dev/null
++++ w/iokit/Kernel/arm/A6PlatformServicesABI.h
+@@ -0,0 +1,37 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef A6_PLATFORM_SERVICES_ABI_H
++#define A6_PLATFORM_SERVICES_ABI_H
++#include <stdint.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++/* Deliberately separate from Apple's private user-client selectors. */
++#define A6_SERVICE_CONNECT_TYPE 0x41365031u /* A6P1 */
++#define A6_SERVICE_ABI_VERSION 1u
++#define A6_SURFACE_MAX_BYTES (8u * 1024u * 1024u)
++#define A6_SURFACE_POOL_BYTES (32u * 1024u * 1024u)
++enum { A6_PIXEL_RGB888=1, A6_PIXEL_XRGB8888=2 };
++enum { A6_SURFACE_CREATE=0, A6_SURFACE_INFO=1, A6_SURFACE_DESTROY=2 };
++enum { A6_DISPLAY_INFO=0, A6_DISPLAY_BLIT=1 };
++#define A6_SERVICE_MEMORY 1u
++struct a6_surface_info {
++    uint32_t version, width, height, stride, pixel_format, reserved;
++    uint64_t size;
++};
++struct a6_display_info {
++    uint32_t version, width, height, stride, pixel_format, bits_per_pixel;
++    uint64_t size;
++};
++/* Kernel-private address; never part of the userspace reply. */
++struct a6_display {
++    struct a6_display_info info;
++    uint64_t physical_address, virtual_address;
++};
++int a6_surface_layout(uint64_t width,uint64_t height,uint64_t format,struct a6_surface_info *);
++int a6_display_rectangle(const struct a6_display_info *,uint64_t x,uint64_t y,
++    uint64_t width,uint64_t height,uint64_t stride,uint64_t bytes);
++int a6_xnu_get_display(struct a6_display *);
++#ifdef __cplusplus
++}
++#endif
++#endif
 diff --git i/iokit/KernelConfigTables.cpp w/iokit/KernelConfigTables.cpp
 index 559a9db..4b414d8 100644
 --- i/iokit/KernelConfigTables.cpp
@@ -1110,14 +1588,16 @@ index 2bbd161..8c01124 100644
  	void *entitlement_object = NULL;
  	ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
 diff --git i/iokit/conf/files w/iokit/conf/files
-index c72c690..6aa4089 100644
+index c72c690..fa06bb1 100644
 --- i/iokit/conf/files
 +++ w/iokit/conf/files
-@@ -80,6 +80,7 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
+@@ -80,6 +80,9 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
  iokit/Kernel/IOGuardPageMemoryDescriptor.cpp		optional iokitcpp
  
  iokit/Kernel/IOPlatformExpert.cpp			optional iokitcpp
 +iokit/Kernel/arm/A6PLTEPlatformExpert.cpp		optional a6plte
++iokit/Kernel/arm/A6PlatformServices.cpp		optional a6plte
++iokit/Kernel/arm/A6GraphicsLayout.c		optional a6plte
  iokit/Kernel/IOPlatformIO.cpp				optional iokitcpp
  
  iokit/Kernel/IOCPU.cpp					optional iokitcpp
@@ -5541,15 +6021,16 @@ index 0000000..b06c269
 +#endif
 diff --git i/pexpert/arm/a6plte/early.c w/pexpert/arm/a6plte/early.c
 new file mode 100644
-index 0000000..b6278a2
+index 0000000..5fca374
 --- /dev/null
 +++ w/pexpert/arm/a6plte/early.c
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,109 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if defined(A6PLTE)
 +#include "fb.h"
 +#include "boot_abi.h"
 +#include "early.h"
++#include <iokit/Kernel/arm/A6PlatformServicesABI.h>
 +/* Called before XNU establishes any virtual mappings, on the boot CPU only. */
 +unsigned char a6_xnu_early_stack[16384] __attribute__((aligned(16)));
 +/* Physical framebuffer range consumed by start.s before enabling translation. */
@@ -5560,6 +6041,16 @@ index 0000000..b6278a2
 +static unsigned written;
 +enum { DEFERRED, BOOTSTRAP, MAPPED };
 +static int state;
++int a6_xnu_get_display(struct a6_display *display) {
++    if (!display) return 0;
++    *display=(struct a6_display){0};
++    if (state!=MAPPED || !screen.base || (screen.format!=A6_RGB888 && screen.format!=A6_XRGB8888)) return 0;
++    display->info=(struct a6_display_info){A6_SERVICE_ABI_VERSION,screen.width,screen.height,
++        screen.stride,screen.format,screen.format==A6_RGB888?24u:32u,screen.size};
++    display->physical_address=video.base;
++    display->virtual_address=(uintptr_t)screen.base;
++    return 1;
++}
 +void a6_xnu_putc(char c) {
 +    pending[written%sizeof(pending)]=c;
 +    ++written;

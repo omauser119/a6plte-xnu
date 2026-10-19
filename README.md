@@ -82,6 +82,11 @@ Bringup12's initial runtime-mapping fix was incomplete; its loader must be updat
 
 ## GitHub Actions
 
+The current platform-service extension adds a log-only `IOWatchDogTimer`, an
+explicit `AppleKeyStore` stub, CPU shared-memory `IOSurfaceRoot`, and an inherited
+scanout `IOMobileFramebuffer`. Graphics use a documented A6 ABI; private iOS
+framework compatibility is not yet implemented. See [platform services](docs/PLATFORM-SERVICES.md).
+
 `A6PLTE bring-up` runs on pushes, pull requests and manual dispatch:
 
 - **Linux:** host tests, framebuffer boot image and UART-disabled lk2nd image.
