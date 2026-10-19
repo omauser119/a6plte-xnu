@@ -13,6 +13,8 @@ PY
 dtc -q -I dts -O dtb -o "$ROOT/artifacts/test.dtb" "$ROOT/artifacts/test.dts" 2>/dev/null
 clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_console.c" "$ROOT/console/fb.c" "$ROOT/shim/fdt.c" -o "$ROOT/artifacts/test-console"
 "$ROOT/artifacts/test-console" "$ROOT/artifacts/test.dtb"
+clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_apple_dt.c" "$ROOT/shim/apple_dt.c" -o "$ROOT/artifacts/test-apple-dt"
+"$ROOT/artifacts/test-apple-dt"
 python3 "$ROOT/tests/test_pack.py"
 python3 "$ROOT/tests/test_bootimg.py"
 python3 "$ROOT/tests/test_crc32.py"

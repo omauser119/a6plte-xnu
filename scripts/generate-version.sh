@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Stamp a local development version using XNU's own generator.
+# Stamp the pinned source's Darwin version using XNU's own generator.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 export SRCROOT="$ROOT/xnu"
 export OBJROOT="$ROOT/build/xnu"
 export CURRENT_KERNEL_CONFIG_LC=development
-# No matching KDK is installed. Do not impersonate an Apple release version.
-A6_DARWIN_VERSION=${RC_DARWIN_KERNEL_VERSION:-1.0.0d1}
+# xnu-12377.121.6 belongs to Darwin 25.5.0. Keep the custom target explicit.
+A6_DARWIN_VERSION=${RC_DARWIN_KERNEL_VERSION:-25.5.0}
+export KERNEL_BUILD_OBJROOT=${KERNEL_BUILD_OBJROOT:-xnu-12377.121.6/DEVELOPMENT_ARM64_A6PLTE}
 mkdir -p "$ROOT/build/kernel-headers/libkern" "$OBJROOT"
 printf '%s\n' "$A6_DARWIN_VERSION" > "$OBJROOT/xnuVersion"
 cp "$SRCROOT/libkern/libkern/version.h.template" "$ROOT/build/kernel-headers/libkern/version.h.pending"

@@ -135,8 +135,11 @@ XNU typed-allocation builtins. `check-platform.sh` generates private/exported MI
 checks 18 platform objects. Per-file diagnostics and JSON results are stored in
 `artifacts/`. These scripts do not link a kernel.
 
-`generate-version.sh` uses XNU's original generator with a local development stamp
-`1.0.0d1` unless `RC_DARWIN_KERNEL_VERSION` is set. This is not an Apple Darwin release.
+`generate-version.sh` uses XNU's original generator with Darwin `25.5.0`, matching
+the pinned XNU `12377.121.6`, and identifies this port as
+`xnu-12377.121.6/DEVELOPMENT_ARM64_A6PLTE`. `RC_DARWIN_KERNEL_VERSION` and
+`KERNEL_BUILD_OBJROOT` can override those defaults. Older images used the incorrect
+placeholder `1.0.0d1`; this port is a custom development build.
 
 ## Device testing
 
