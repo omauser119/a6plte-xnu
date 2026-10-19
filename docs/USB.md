@@ -55,8 +55,9 @@ an unrelated allocator after an uncertain hardware failure.
 All three jobs passed in [Actions 39255213878](https://github.com/omauser119/a6plte-xnu/actions/runs/39255213878),
 source `5d32313`. The USB-disabled image was temporarily booted through lk2nd;
 its linked console IRQ/FIQ guard, complete package CRC and exact PID1/rootfs
-contents were checked before loading. PID1 stability after this fix awaits
-hardware confirmation. Physical USB enumeration and networking remain unproven
+contents were checked before loading. The user confirmed that PID1 runs and
+the sleep/wakeup counter increases with USB disabled. Sustained runtime has not
+been measured. Physical USB enumeration and networking remain unproven
 and further USB work is deferred at the user's request.
 
 The first hardware failure was a zero transfer-resource index for initial EP0
@@ -72,7 +73,8 @@ the cursor advance beyond its last row while scrolling with interrupts enabled;
 the new USB thread could print during that interval. The fix serializes each
 console character on the single boot CPU, keeps the cursor in range during
 scrolling, and clips every pixel store. Tall displays scroll eight rows at a
-time to reduce expensive framebuffer reads. Hardware validation is pending.
+time to reduce expensive framebuffer reads. The USB-disabled image reaches
+PID1 with an increasing counter; active USB operation after the fix is untested.
 
 Host ASan/UBSan tests exercise HS/FS/other-speed descriptors, setup field bounds,
 100,000 randomized requests, EP0 and bulk sequences, terminating zero packets,

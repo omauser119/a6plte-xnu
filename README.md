@@ -18,6 +18,9 @@ pthread kernel component, DLIL thread scheduling and the displayed Skywalk
 self-tests. Hardware now also confirms the native `md0` memory disk and
 `hfs: mounted A6PLTE_ROOT`: Apple's HFS+ driver mounted the supplied root image.
 The user also confirmed that `/sbin/a6-init` started as PID1 in ARM64 userspace.
+For source `5d32313`, the user confirmed PID1 and an increasing sleep/wakeup
+counter after the framebuffer fix with USB disabled; sustained runtime and
+active USB operation remain unverified.
 
 The image contains a 32 MiB HFS+ root image, the native
 `RAMDisk` → `md0` path, and a static ARM64 `/sbin/a6-init` process. The first

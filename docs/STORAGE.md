@@ -66,3 +66,13 @@ The probe also attempts block-count and write-availability queries; their exact
 displayed values have not been reported separately. Actual hardware write/readback
 and HFS+ mounting on userdata remain separate acceptance checks on the user's
 prepared volume. The ramdisk is not formatted or copied onto userdata by this probe.
+
+## Future root-volume switch
+
+The user's future command **«чеснок»** requests implementing and testing boot
+from the user's HFS+ userspace on the GPT `userdata` partition instead of the
+current ramdisk. The user will prepare the filesystem and its contents. Until
+that command, keep the ramdisk boot and `a6-init`; do not perform the switch now.
+The later switch must validate the actual GPT and HFS+ volume and stay within
+the userdata slice. It does not authorize formatting the volume or replacing
+the user's prepared files. USB stays disabled and UART remains prohibited.
