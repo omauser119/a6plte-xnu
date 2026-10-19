@@ -1,12 +1,13 @@
 diff --git i/bsd/conf/files.arm64 w/bsd/conf/files.arm64
-index a77bd10..f006eec 100644
+index a77bd10..ec534ab 100644
 --- i/bsd/conf/files.arm64
 +++ w/bsd/conf/files.arm64
-@@ -1,4 +1,7 @@
+@@ -1,4 +1,8 @@
  bsd/dev/arm64/conf.c		standard
 +bsd/dev/a6plte/gpt.c              optional a6plte
 +bsd/dev/a6plte/sdhci.c            optional a6plte
 +bsd/dev/a6plte/userdata.c         optional a6plte
++bsd/dev/a6plte/services.c         optional a6plte
  bsd/dev/arm/cons.c		standard
  bsd/dev/arm/km.c		standard
  bsd/dev/arm/kern_machdep.c	standard
@@ -242,6 +243,24 @@ index 0000000..87032ef
 +    }
 +    return ready(h);
 +}
+diff --git i/bsd/dev/a6plte/services.c w/bsd/dev/a6plte/services.c
+new file mode 100644
+index 0000000..f265e07
+--- /dev/null
++++ w/bsd/dev/a6plte/services.c
+@@ -0,0 +1,12 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* Read-only evidence of completed service startup and actual timer callback. */
++#include <sys/param.h>
++#include <sys/sysctl.h>
++#include <iokit/Kernel/arm/A6PlatformServicesABI.h>
++static int service_status(__unused struct sysctl_oid *oidp,__unused void *arg1,
++    __unused int arg2,struct sysctl_req *request) {
++    int status=(int)a6_platform_service_status();
++    return sysctl_handle_int(oidp,&status,0,request);
++}
++SYSCTL_PROC(_kern,OID_AUTO,a6plte_services,CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED,
++    NULL,0,service_status,"I","A6 platform service readiness and diagnostic watchdog expiry");
 diff --git i/bsd/dev/a6plte/storage.h w/bsd/dev/a6plte/storage.h
 new file mode 100644
 index 0000000..752cd70
@@ -1058,15 +1077,16 @@ index 0000000..75ede36
 +#endif /* A6PLTE */
 diff --git i/iokit/Kernel/arm/A6PlatformServices.cpp w/iokit/Kernel/arm/A6PlatformServices.cpp
 new file mode 100644
-index 0000000..a6f5d32
+index 0000000..c88b819
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PlatformServices.cpp
-@@ -0,0 +1,370 @@
+@@ -0,0 +1,381 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Board services with an explicitly versioned bring-up ABI, not Apple's private ABI. */
 +#if A6PLTE
 +#include <IOKit/IOService.h>
 +#include <IOKit/IOUserClient.h>
++#include <IOKit/IOKitKeys.h>
 +#include <IOKit/IOBufferMemoryDescriptor.h>
 +#include <IOKit/IODeviceMemory.h>
 +#include <IOKit/IOWorkLoop.h>
@@ -1076,6 +1096,11 @@ index 0000000..a6f5d32
 +#include <libkern/c++/OSNumber.h>
 +#include <kern/clock.h>
 +#include "A6PlatformServicesABI.h"
++static uint32_t serviceStatus;
++extern "C" uint32_t a6_platform_service_status(void) {
++    return __atomic_load_n(&serviceStatus,__ATOMIC_ACQUIRE);
++}
++static void ready(uint32_t bits) { __atomic_fetch_or(&serviceStatus,bits,__ATOMIC_RELEASE); }
 +
 +class A6PLTEWatchdog : public IOWatchDogTimer {
 +    OSDeclareDefaultStructors(A6PLTEWatchdog);
@@ -1104,6 +1129,7 @@ index 0000000..a6f5d32
 +    IOLog("A6PLTE watchdog: log only; hardware reset disabled\n");
 +    /* Exercise a real IOKit timer; expiry must leave the running PID1 intact. */
 +    setProperty("A6BootTimerSelfTest",true);setWatchDogTimer(2);
++    ready(A6_READY_WATCHDOG);
 +    return true;
 +}
 +void A6PLTEWatchdog::setWatchDogTimer(UInt32 seconds) {
@@ -1136,6 +1162,7 @@ index 0000000..a6f5d32
 +        self->deadline=0;++self->expirations;
 +        self->setProperty("A6DiagnosticTimerArmed",false);
 +        self->setProperty("A6ExpirationCount",self->expirations,64);
++        ready(A6_WATCHDOG_TIMEOUT_OBSERVED);
 +        IOLog("A6PLTE watchdog: timeout observed; continuing without reset\n");
 +    }
 +    IOLockUnlock(self->stateLock);
@@ -1239,6 +1266,7 @@ index 0000000..a6f5d32
 +    setProperty("A6BufferAllocationSelfTest",true);
 +    registerService();
 +    IOLog("IOSurfaceRoot: CPU buffers ready, allocation self-test passed; A6 ABI v1\n");
++    ready(A6_READY_SURFACES);
 +    return true;
 +}
 +void IOSurfaceRoot::free() { if (quotaLock) IOLockFree(quotaLock);IOService::free(); }
@@ -1277,6 +1305,7 @@ index 0000000..a6f5d32
 +    registerService();
 +    IOLog("IOMobileFramebuffer: %ux%u, stride %u, %u bpp; A6 ABI v1\n",
 +        display.info.width,display.info.height,display.info.stride,display.info.bits_per_pixel);
++    ready(A6_READY_DISPLAY);
 +    return true;
 +}
 +void IOMobileFramebuffer::free() { if (blitLock) IOLockFree(blitLock);IOService::free(); }
@@ -1299,6 +1328,7 @@ index 0000000..a6f5d32
 +    setProperty("A6KeybagsSupported",false);setProperty("A6HardwareKeysAvailable",false);
 +    registerService();
 +    IOLog("AppleKeyStore: stub registered; keybag/SEP operations unsupported\n");
++    ready(A6_READY_KEYSTORE_STUB);
 +    return true;
 +}
 +static IOReturn openClient(IOService *service,task_t task,void *security,UInt32 type,
@@ -1434,10 +1464,10 @@ index 0000000..a6f5d32
 +#endif
 diff --git i/iokit/Kernel/arm/A6PlatformServicesABI.h w/iokit/Kernel/arm/A6PlatformServicesABI.h
 new file mode 100644
-index 0000000..5c0a5cb
+index 0000000..53fd528
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PlatformServicesABI.h
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,40 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#ifndef A6_PLATFORM_SERVICES_ABI_H
 +#define A6_PLATFORM_SERVICES_ABI_H
@@ -1454,6 +1484,9 @@ index 0000000..5c0a5cb
 +enum { A6_SURFACE_CREATE=0, A6_SURFACE_INFO=1, A6_SURFACE_DESTROY=2 };
 +enum { A6_DISPLAY_INFO=0, A6_DISPLAY_BLIT=1 };
 +#define A6_SERVICE_MEMORY 1u
++enum { A6_READY_WATCHDOG=1, A6_READY_KEYSTORE_STUB=2, A6_READY_SURFACES=4,
++    A6_READY_DISPLAY=8, A6_WATCHDOG_TIMEOUT_OBSERVED=16 };
++uint32_t a6_platform_service_status(void);
 +struct a6_surface_info {
 +    uint32_t version, width, height, stride, pixel_format, reserved;
 +    uint64_t size;

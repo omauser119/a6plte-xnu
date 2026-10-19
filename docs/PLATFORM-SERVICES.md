@@ -70,3 +70,10 @@ are not exposed. Unit tests exercise overflow, zero sizes, format rejection,
 allocation caps, edge rectangles and 100,000 randomized layout/bounds cases with
 ASan/UBSan. Actual IORegistry matching, user mappings, blits and timer expiry need
 hardware verification.
+
+`kern.a6plte_services` is a read-only native sysctl. Bits 1/2/4/8 record successful
+watchdog/keystore-stub/surface/framebuffer startup; bit 16 is set only when the
+real watchdog timer callback observes its deadline. PID1 reads it through
+`SYS_sysctlbyname` after each sleep/wakeup and prints the numeric mask. `31`
+means all four startup paths completed and the timer expired without requesting
+reset. It does not certify untested user-client operations or iOS private ABI.

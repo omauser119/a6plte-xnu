@@ -66,6 +66,13 @@ __attribute__((noreturn)) void start(void) {
             text("PID1: select failed, errno ");number((unsigned long)-result);text("\n");
             for(;;) call(SYS_select,0,0,0,0,0,0);
         }
-        text("PID1: sleep/wakeup ");number(beat);text("\n");
+        text("PID1: sleep/wakeup ");number(beat);
+        unsigned services=0;unsigned long size=sizeof(services);
+        static const char name[]="kern.a6plte_services";
+        if (!call(SYS_sysctlbyname,(long)name,sizeof(name)-1,(long)&services,(long)&size,0,0)) {
+            text(" / IO services ");number(services);
+            if (services&16) text(" / watchdog timeout: no reset");
+        }
+        text("\n");
     }
 }
