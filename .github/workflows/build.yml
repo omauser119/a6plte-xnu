@@ -52,6 +52,7 @@ jobs:
         if: always() && hashFiles('build/mig-generated/results.json') != ''
         run: python3 scripts/check-component.py mig 2>&1 | tee mig.log
       - name: Generate IOKit RPC interfaces
+        if: always() && hashFiles('build/xnu/iokit/Makefile') != ''
         run: python3 scripts/generate-iokit.py 2>&1 | tee iig.log
       - name: Build remaining kernel components
         if: always() && hashFiles('build/xnu/bsd/Makefile') != ''
