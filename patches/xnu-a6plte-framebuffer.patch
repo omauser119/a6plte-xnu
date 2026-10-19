@@ -1370,6 +1370,19 @@ index 4c22764..325e2af 100644
  #if   PMAP_CS_PPL_MONITOR
  	ret = ppl_query_trust_cache(query_type, cdhash, query_token);
  #else
+diff --git c/bsd/kern/kpi_socket.c w/bsd/kern/kpi_socket.c
+index 003cfb0..735eaf3 100644
+--- c/bsd/kern/kpi_socket.c
++++ w/bsd/kern/kpi_socket.c
+@@ -727,7 +727,7 @@ sock_receive_internal(socket_t sock, struct msghdr *msg, mbuf_t *data,
+ 	int error = 0;
+ 	user_ssize_t length = 0;
+ 	struct sockaddr *fromsa = NULL;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF((msg != NULL) ? msg->msg_iovlen : 0)];
++	UIO_STACKBUF(uio_buf, (msg != NULL) ? msg->msg_iovlen : 0);
+ 
+ 	if (sock == NULL) {
+ 		return EINVAL;
 diff --git c/bsd/kern/sys_generic.c w/bsd/kern/sys_generic.c
 index 9de68e1..66a3528 100644
 --- c/bsd/kern/sys_generic.c

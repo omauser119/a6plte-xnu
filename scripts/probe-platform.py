@@ -40,7 +40,7 @@ if component=='pthread':
 if source.endswith(('.cpp', '.cc')):
     flags[0] = 'clang++'
     flags.remove('-std=gnu17')
-    flags += ['-std=gnu++2b', '-nostdinc++', '-fsized-deallocation', '-fapple-kext', '-fno-rtti', '-I'+str(r/'build/cxx-support')]
+    flags += ['-std=gnu++17', '-nostdinc++', '-fsized-deallocation', '-fapple-kext', '-fno-rtti', '-I'+str(r/'build/cxx-support')]
 
 if component != 'osfmk': flags += ['-I'+str(r/'build/export-headers')]
 for path in [out/config_component,out/'osfmk',out/'pexpert',out/'bsd',out/'iokit',r/'build/kernel-headers',x/'osfmk',x/'bsd',x/'pexpert',x/'iokit',x/'libkern',x/'libsa',x/'EXTERNAL_HEADERS',x,r/'reference/libdispatch']: flags+=['-I'+str(path)]

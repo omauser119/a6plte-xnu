@@ -40,6 +40,9 @@ These kernel dependencies match Apple's `distribution-macOS` `macos-135` tree:
 - bootstrap_cmds `129`: `fc3180f320239c85da79fc30a281a8830f1301f1`.
 
 Source fetches apply this branch's patches, not the 12377 patches.
+Xcode 16 IIG output is adapted to the original contiguous Mach RPC messages:
+8796 keeps its four-field IORPC, with content resolved by its native
+`IORPCMessageFromMach()` helper. Kernel C++ uses the upstream C++17 dialect.
 The native Apple allocator builtins remain enabled; no fake allocator types or
 undefined-symbol link bypass is used. The installed lk2nd does not need a new
 package format or a flash operation for this profile.
