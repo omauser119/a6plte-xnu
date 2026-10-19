@@ -8,6 +8,8 @@ kernel,image=map(Path,sys.argv[1:])
 spec=importlib.util.spec_from_file_location('pack',root/'scripts/pack-xnu.py')
 pack=importlib.util.module_from_spec(spec);spec.loader.exec_module(pack)
 k=kernel.read_bytes();b=image.read_bytes()
+assert b'Darwin Kernel Version 22.6.0:' in k
+assert b'xnu-8796.141.3/DEVELOPMENT_ARM64_A6PLTE' in k
 assert struct.unpack_from('<4I',k)==(0xfeedfacf,0x100000c,0,2)
 assert not subprocess.check_output(['llvm-nm','--undefined-only',str(kernel)],text=True).strip()
 symbols=subprocess.check_output(['llvm-nm',str(kernel)],text=True)

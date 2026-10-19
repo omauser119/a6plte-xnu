@@ -47,7 +47,7 @@ for (directory,stem,server),kernel,exported in variants:
     status=pre.returncode
     if not status:
         cmd=[str(r/'build/host-mig/migcom'),'-novouchers']
-        if kernel: cmd+=['-mach_msg2'] if server else ['-maxonstack','1024']
+        if kernel: cmd+=['-maxonstack','1024']
         cmd+=['-header','/dev/null' if server else str(out/f'{stem}.h'),
               '-sheader',str(out/f'{server_stem}.h') if server else '/dev/null',
               '-user','/dev/null' if server or exported else str(source_out/f'{stem}_user.c'),

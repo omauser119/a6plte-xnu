@@ -67,20 +67,15 @@ struct IOUserClient { static OSObject *copyClientEntitlement(task_t, const char 
 names = (
     ('IOTaskHasStringEntitlement', 'boolean_t'),
     ('IOTaskHasEntitlement', 'boolean_t'),
-    ('IOTaskGetIntegerEntitlement', 'boolean_t'),
     ('IOTaskGetEntitlement', 'char *'),
-    ('IOTaskHasEntitlementAsBooleanOrObject', 'boolean_t'),
 )
 source = fixture + ''.join(function('xnu/iokit/bsddev/IOKitBSDInit.cpp', n, t) for n, t in names)
 source += function('xnu/iokit/Kernel/IOUserClient.cpp', 'IOUserClient::copyClientEntitlement', 'OSObject *')
 source += r'''
 void denied(task_t task, const char *name) {
-    uint64_t value = 42;
     assert(!IOTaskHasStringEntitlement(task, name, "value"));
     assert(!IOTaskHasEntitlement(task, name));
-    assert(!IOTaskGetIntegerEntitlement(task, name, &value) && value == 42);
     assert(!IOTaskGetEntitlement(task, name));
-    assert(!IOTaskHasEntitlementAsBooleanOrObject(task, name));
     assert(!IOUserClient::copyClientEntitlement(task, name));
 }
 int main() {
@@ -100,25 +95,19 @@ int main() {
     status = KERN_SUCCESS;
     assert(IOTaskHasEntitlement(nullptr, "right"));
     assert(IOTaskHasStringEntitlement(&user, "right", "value"));
-    uint64_t value = 0;
-    assert(IOTaskGetIntegerEntitlement(&user, "right", &value) && value == 123456789);
     assert(!IOTaskGetEntitlement(&user, "right")); // Number isn't a string.
     object_kind = 1;
-    assert(!IOTaskGetIntegerEntitlement(&user, "right", &value) && value == 123456789);
     char *text = IOTaskGetEntitlement(&user, "right");
     assert(text && !strcmp(text, "darwin")); free(text);
     OSObject *object = IOUserClient::copyClientEntitlement(&user, "right");
     assert(dynamic_cast<OSString *>(object)); object->release();
-    assert(releases == 5);
+    assert(releases == 3);
     status = 1;
-    assert(!IOTaskHasEntitlementAsBooleanOrObject(&user, "right"));
 #if A6PLTE
     auto copy = provider.OSEntitlements.copyEntitlementAsOSObjectWithProc;
     provider.OSEntitlements.copyEntitlementAsOSObjectWithProc = nullptr;
-    assert(!IOTaskHasEntitlementAsBooleanOrObject(&user, "right"));
     assert(!IOUserClient::copyClientEntitlement(&user, "right"));
     status = KERN_SUCCESS;
-    assert(IOTaskHasEntitlementAsBooleanOrObject(&user, "right"));
     provider.OSEntitlements.copyEntitlementAsOSObjectWithProc = copy;
 #endif
 }

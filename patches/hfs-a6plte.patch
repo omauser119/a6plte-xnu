@@ -1,6 +1,6 @@
-diff --git i/core/hfs_iokit.cpp w/core/hfs_iokit.cpp
+diff --git c/core/hfs_iokit.cpp w/core/hfs_iokit.cpp
 index 34be23f..d328907 100644
---- i/core/hfs_iokit.cpp
+--- c/core/hfs_iokit.cpp
 +++ w/core/hfs_iokit.cpp
 @@ -38,6 +38,9 @@
  #include <IOKit/IOPlatformExpert.h>
@@ -66,9 +66,9 @@ index 34be23f..d328907 100644
  }
 +
 +#endif /* CONFIG_PROTECT */
-diff --git i/core/hfs_iokit.h w/core/hfs_iokit.h
+diff --git c/core/hfs_iokit.h w/core/hfs_iokit.h
 index d31a062..f31575f 100644
---- i/core/hfs_iokit.h
+--- c/core/hfs_iokit.h
 +++ w/core/hfs_iokit.h
 @@ -30,7 +30,9 @@
  #define hfs_iokit_h
@@ -96,9 +96,9 @@ index d31a062..f31575f 100644
  
  __END_DECLS
  
-diff --git i/core/hfs_vfsops.c w/core/hfs_vfsops.c
-index c7ff05f..3cc05a2 100644
---- i/core/hfs_vfsops.c
+diff --git c/core/hfs_vfsops.c w/core/hfs_vfsops.c
+index 557430b..d04c5fb 100644
+--- c/core/hfs_vfsops.c
 +++ w/core/hfs_vfsops.c
 @@ -515,7 +515,9 @@ hfs_mount(struct mount *mp, vnode_t devvp, user_addr_t data, vfs_context_t conte
  #if	TARGET_OS_OSX 
@@ -121,9 +121,9 @@ index c7ff05f..3cc05a2 100644
  
  #if HFS_LEAK_DEBUG && TARGET_OS_OSX
  	if (hfs_active_mounts == 0) {
-diff --git i/core/kext-config.h w/core/kext-config.h
+diff --git c/core/kext-config.h w/core/kext-config.h
 index 59088a5..1f7e702 100644
---- i/core/kext-config.h
+--- c/core/kext-config.h
 +++ w/core/kext-config.h
 @@ -30,6 +30,24 @@
  #define _hfs_config_

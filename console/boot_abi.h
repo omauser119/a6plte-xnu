@@ -3,7 +3,7 @@
 #define A6_BOOT_ABI_H
 #include <stdint.h>
 #include <stddef.h>
-/* Exact LP64 layout of rel/xnu-12377 pexpert/pexpert/arm64/boot.h. */
+/* Exact LP64 layout of rel/xnu-8796 pexpert/pexpert/arm64/boot.h. */
 struct a6_boot_video { uint64_t base, display, stride, width, height, depth; };
 struct a6_boot_args {
     uint16_t revision, version;
@@ -13,13 +13,13 @@ struct a6_boot_args {
     uint32_t machine_type, pad1;
     uint64_t device_tree;
     uint32_t device_tree_length;
-    char command_line[1024];
+    char command_line[608];
     uint32_t pad2;
     uint64_t boot_flags, mem_size_actual;
 };
 _Static_assert(offsetof(struct a6_boot_args,video)==40,"Video ABI");
 _Static_assert(offsetof(struct a6_boot_args,device_tree)==96,"DeviceTree ABI");
 _Static_assert(offsetof(struct a6_boot_args,command_line)==108,"CommandLine ABI");
-_Static_assert(offsetof(struct a6_boot_args,boot_flags)==1136,"BootFlags ABI");
-_Static_assert(sizeof(struct a6_boot_args)==1152,"boot_args ABI");
+_Static_assert(offsetof(struct a6_boot_args,boot_flags)==720,"BootFlags ABI");
+_Static_assert(sizeof(struct a6_boot_args)==736,"boot_args ABI");
 #endif

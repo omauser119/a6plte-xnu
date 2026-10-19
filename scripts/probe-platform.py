@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile the new XNU platform TU against generated 12377 headers; no header stubs."""
+"""Compile the new XNU platform TU against generated 8796 headers; no header stubs."""
 from pathlib import Path
 import subprocess,sys,shlex,os
 r=Path(__file__).resolve().parents[1]; x=r/'xnu'; out=r/'build/xnu'
@@ -8,7 +8,7 @@ generated=source.startswith('build/')
 mig_generated=source.startswith('build/mig-generated/')
 component='osfmk' if mig_generated else (source.split('/')[2] if generated else source.split('/')[0])
 component=os.environ.get('A6_COMPONENT', component)
-source_path=(r if generated or source.startswith('reference/') else x)/source
+source_path=(r if generated or source.startswith(('reference/','tests/')) else x)/source
 flags=['clang','--target=arm64-apple-darwin','-mcpu=cortex-a53','-ffreestanding','-fno-builtin','-fno-stack-protector','-mkernel','-fno-strict-aliasing','-fno-common','-fblocks','-D__API_AVAILABLE_PLATFORM_bridgeos(x)=bridgeos,introduced=x','-D__API_AVAILABLE_PLATFORM_xros(x)=visionos,introduced=x','-std=gnu17','-O2','-DCURRENT_MACHINE_CONFIG_LC=a6plte','-DXNU_TARGET_OS_OSX=1','-DXNU_TARGET_OS_IOS=0','-DARM64_BOARD_CONFIG_A6PLTE=1','-DA6PLTE=1','-DVM_KERNEL_LINK_ADDRESS=0xfffffff007004000','-Darm64','-DARM64','-D__ARM64__','-DLP64','-DPAGE_SIZE_FIXED','-DKERNEL=1','-DKERNEL_PRIVATE=1','-DXNU_KERNEL_PRIVATE=1','-D__APPLE_API_PRIVATE=1','-D__APPLE_API_UNSTABLE=1','-DPRIVATE=1','-DOS_FIREHOSE_SPI=1','-isysroot',os.environ.get('SDK',str(Path.home()/'.local/share/theos/sdks/iPhoneOS16.5.sdk'))]
 component_defines = {
     'osfmk': ['MACH_KERNEL_PRIVATE'],

@@ -14,7 +14,8 @@ cp -R reference/platform-headers/EXTERNAL_HEADERS/CodeSignature build/kernel-hea
 ln -sfn "$ROOT/xnu/osfmk/libsa/string.h" build/kernel-headers/string.h
 ln -sfn "$ROOT/xnu/osfmk/libsa/types.h" build/kernel-headers/types.h
 ln -sfn "$ROOT/xnu/osfmk/libsa/stdlib.h" build/kernel-headers/stdlib.h
-for header in xnu/san/memory/*.h xnu/san/coverage/*.h; do
+for header in xnu/san/*.h xnu/san/memory/*.h xnu/san/coverage/*.h; do
+    [[ -f $header ]] || continue
     ln -sfn "$ROOT/$header" "build/kernel-headers/san/$(basename "$header")"
 done
 for header in Availability.h AvailabilityInternal.h AvailabilityMacros.h AvailabilityVersions.h; do
@@ -55,4 +56,5 @@ for source in \
         exit 1
     }
 done
+A6_COMPONENT=osfmk python3 scripts/probe-platform.py tests/boot_abi.c > artifacts/check-boot-abi.log 2>&1 || { cat artifacts/check-boot-abi.log; exit 1; }
 echo 'Platform compilation passed. These objects are NOT a linked or bootable XNU kernel.'

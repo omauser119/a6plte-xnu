@@ -1,4 +1,4 @@
-name: A6PLTE bring-up
+name: A6PLTE XNU 8796
 on:
   push:
   pull_request:
@@ -65,7 +65,7 @@ jobs:
         run: python3 scripts/link-xnu.py 2>&1 | tee link.log
       - uses: actions/upload-artifact@v4
         with:
-          name: xnu-linked-kernel
+          name: xnu-8796-linked-kernel
           path: artifacts/kernel.a6plte
       - name: Build HFS+ root ramdisk and native PID1
         timeout-minutes: 3
@@ -73,7 +73,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: xnu-build-output
+          name: xnu-8796-build-output
           path: |
             *.log
             artifacts/**/*.log
@@ -95,16 +95,16 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang llvm lld device-tree-compiler
       - uses: actions/download-artifact@v4
         with:
-          name: xnu-build-output
+          name: xnu-8796-build-output
       - name: Package linked kernel for lk2nd
         run: ./scripts/package-boot.sh artifacts/kernel.a6plte artifacts/ramdisk.hfs
       - name: Package userdata HFS+ root without a ramdisk
         run: |
           ./scripts/package-boot.sh --root=userdata artifacts/kernel.a6plte
-          python3 scripts/check-userdata-boot.py artifacts/kernel.a6plte artifacts/xnu-userdata-boot.img
+          python3 scripts/check-userdata-boot.py artifacts/kernel.a6plte artifacts/xnu-8796-userdata-boot.img
       - uses: actions/upload-artifact@v4
         with:
-          name: xnu-boot-image
+          name: xnu-8796-boot-image
           path: |
-            artifacts/xnu-boot.img
-            artifacts/xnu-userdata-boot.img
+            artifacts/xnu-8796-boot.img
+            artifacts/xnu-8796-userdata-boot.img

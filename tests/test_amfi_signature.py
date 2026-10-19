@@ -26,18 +26,14 @@ struct cs_blob {
     void *csb_der_entitlements_blob;
 };
 int calls = 0, result = 0;
-int modern(void *ent, cs_blob *blob, const void *monitor) {
-    assert(ent == blob->csb_entitlements && !monitor); ++calls; return result;
-}
 int legacy(void *ent, cs_blob *blob) {
     assert(ent == blob->csb_entitlements); ++calls; return result;
 }
 struct Provider {
     struct {
-        int (*adjustContext)(void *, cs_blob *, const void *);
         int (*adjustContextWithoutMonitor)(void *, cs_blob *);
     } OSEntitlements;
-} provider{{modern, legacy}}, *amfi = nullptr;
+} provider{{legacy}}, *amfi = nullptr;
 static errno_t
 ''' + body + r'''
 int main() {
@@ -60,7 +56,6 @@ int main() {
     assert(accelerate_entitlement_queries(&blob) == 0 && calls == 1);
     result = 5;
     assert(accelerate_entitlement_queries(&blob) == EPERM && calls == 2);
-    provider.OSEntitlements.adjustContext = nullptr;
     result = 0;
     assert(accelerate_entitlement_queries(&blob) == 0 && calls == 3);
     result = 5;

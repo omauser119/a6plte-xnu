@@ -62,7 +62,7 @@ class CatalogueTest(unittest.TestCase):
     def test_compiled_profiles_and_real_driver_names(self):
         for a6 in (False,True):
             rows=LegacyCatalogue(catalogue(a6)).parse()
-            self.assertEqual(len(rows),4 if a6 else 2)
+            self.assertEqual(len(rows),3 if a6 else 1)
             drivers={r['IOClass']:r for r in rows}
             self.assertEqual(len(drivers),len(rows))
             self.assertEqual(drivers['IOPanicPlatform']['IOProbeScore'],0)

@@ -11,6 +11,7 @@ cp "$ROOT/build/host-config/config" "$OBJROOT/SETUP/config/config"
 for component in pexpert osfmk bsd libkern iokit libsa security san; do
     export SOURCE="$SRCROOT/$component"
     mkdir -p "$OBJROOT/$component"
+    rm -f "$OBJROOT/$component/Makefile"
     "$TCSH" -f "$SRCROOT/SETUP/config/doconf" -cpu arm64 -soc a6plte -platform MacOSX -d "$OBJROOT/$component" -m "$SRCROOT/config" -s "$SOURCE/conf" -c DEVELOPMENT
     test -s "$OBJROOT/$component/Makefile"
 done

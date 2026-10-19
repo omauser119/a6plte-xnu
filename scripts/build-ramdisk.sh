@@ -14,7 +14,7 @@ xcrun ld -arch arm64 -static -no_pie -e _start -platform_version macos 11.0 "$A6
 python3 scripts/check-init.py "$STAGE/sbin/a6-init"
 cat > "$STAGE/etc/a6plte-release" <<'EOF'
 A6PLTE / SM-A605FN
-Apple OSS XNU 12377.121.6 / Darwin 25.5.0
+Apple OSS XNU 8796.141.3 / Darwin 22.6.0
 Root: native Apple HFS+ driver, RAMDisk /dev/md0
 Userspace: static a6-init; USB disabled by default.
 EOF

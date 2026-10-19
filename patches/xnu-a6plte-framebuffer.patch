@@ -1,6 +1,21 @@
-diff --git i/bsd/conf/files.arm64 w/bsd/conf/files.arm64
+diff --git c/SETUP/config/mkheaders.c w/SETUP/config/mkheaders.c
+index e3d2f34..81d54f9 100644
+--- c/SETUP/config/mkheaders.c
++++ w/SETUP/config/mkheaders.c
+@@ -189,7 +189,9 @@ do_header(const char *dev, const char *hname, int count)
+ 		perror(file);
+ 		exit(1);
+ 	}
+-	for (fl = fl_head; fl != 0; fl = fl->f_next) {
++	/* Save the next node before freeing the current header entry. */
++	for (fl = fl_head; fl != 0; fl = fl_head) {
++		fl_head = fl->f_next;
+ 		fprintf(outf, "#define %s %d\n",
+ 		    fl->f_fn, count ? fl->f_type : 0);
+ 		free((char *)fl);
+diff --git c/bsd/conf/files.arm64 w/bsd/conf/files.arm64
 index a77bd10..5fc6f17 100644
---- i/bsd/conf/files.arm64
+--- c/bsd/conf/files.arm64
 +++ w/bsd/conf/files.arm64
 @@ -1,4 +1,12 @@
  bsd/dev/arm64/conf.c		standard
@@ -15,7 +30,7 @@ index a77bd10..5fc6f17 100644
  bsd/dev/arm/cons.c		standard
  bsd/dev/arm/km.c		standard
  bsd/dev/arm/kern_machdep.c	standard
-diff --git i/bsd/dev/a6plte/gpt.c w/bsd/dev/a6plte/gpt.c
+diff --git c/bsd/dev/a6plte/gpt.c w/bsd/dev/a6plte/gpt.c
 new file mode 100644
 index 0000000..c8c1346
 --- /dev/null
@@ -130,7 +145,7 @@ index 0000000..c8c1346
 +    if (!p->disk->read) return A6_IO_OFFLINE;
 +    return p->disk->read(p->disk->cookie,p->first+lba,count,buf);
 +}
-diff --git i/bsd/dev/a6plte/hfs_volume.c w/bsd/dev/a6plte/hfs_volume.c
+diff --git c/bsd/dev/a6plte/hfs_volume.c w/bsd/dev/a6plte/hfs_volume.c
 new file mode 100644
 index 0000000..b15d1b9
 --- /dev/null
@@ -177,7 +192,7 @@ index 0000000..b15d1b9
 +    *out=primary;
 +    return 0;
 +}
-diff --git i/bsd/dev/a6plte/sdhci.c w/bsd/dev/a6plte/sdhci.c
+diff --git c/bsd/dev/a6plte/sdhci.c w/bsd/dev/a6plte/sdhci.c
 new file mode 100644
 index 0000000..87032ef
 --- /dev/null
@@ -294,7 +309,7 @@ index 0000000..87032ef
 +    }
 +    return ready(h);
 +}
-diff --git i/bsd/dev/a6plte/services.c w/bsd/dev/a6plte/services.c
+diff --git c/bsd/dev/a6plte/services.c w/bsd/dev/a6plte/services.c
 new file mode 100644
 index 0000000..f265e07
 --- /dev/null
@@ -312,7 +327,7 @@ index 0000000..f265e07
 +}
 +SYSCTL_PROC(_kern,OID_AUTO,a6plte_services,CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED,
 +    NULL,0,service_status,"I","A6 platform service readiness and diagnostic watchdog expiry");
-diff --git i/bsd/dev/a6plte/storage.h w/bsd/dev/a6plte/storage.h
+diff --git c/bsd/dev/a6plte/storage.h w/bsd/dev/a6plte/storage.h
 new file mode 100644
 index 0000000..f7a48ec
 --- /dev/null
@@ -369,7 +384,7 @@ index 0000000..f7a48ec
 +uintptr_t a6_emmc_map_sdhci(void);
 +void a6_userdata_init(void);
 +#endif
-diff --git i/bsd/dev/a6plte/usb.c w/bsd/dev/a6plte/usb.c
+diff --git c/bsd/dev/a6plte/usb.c w/bsd/dev/a6plte/usb.c
 new file mode 100644
 index 0000000..b5fff3c
 --- /dev/null
@@ -530,7 +545,7 @@ index 0000000..b5fff3c
 +    thread_deallocate(thread);
 +    printf("A6PLTE USB: native en0 ready, polled DMA, no UART\n");
 +}
-diff --git i/bsd/dev/a6plte/usb_dwc3.c w/bsd/dev/a6plte/usb_dwc3.c
+diff --git c/bsd/dev/a6plte/usb_dwc3.c w/bsd/dev/a6plte/usb_dwc3.c
 new file mode 100644
 index 0000000..1f6e76c
 --- /dev/null
@@ -839,7 +854,7 @@ index 0000000..1f6e76c
 +    if (d->ops->link) d->ops->link(d->cookie,0);
 +    report(d,A6_USB_REPORT_STOP,0,0);
 +}
-diff --git i/bsd/dev/a6plte/usb_dwc3.h w/bsd/dev/a6plte/usb_dwc3.h
+diff --git c/bsd/dev/a6plte/usb_dwc3.h w/bsd/dev/a6plte/usb_dwc3.h
 new file mode 100644
 index 0000000..53d56c1
 --- /dev/null
@@ -882,7 +897,7 @@ index 0000000..53d56c1
 +int a6_dwc3_send(struct a6_dwc3 *,const uint8_t *,unsigned);
 +void a6_dwc3_stop(struct a6_dwc3 *);
 +#endif
-diff --git i/bsd/dev/a6plte/usb_ecm.c w/bsd/dev/a6plte/usb_ecm.c
+diff --git c/bsd/dev/a6plte/usb_ecm.c w/bsd/dev/a6plte/usb_ecm.c
 new file mode 100644
 index 0000000..168237b
 --- /dev/null
@@ -993,7 +1008,7 @@ index 0000000..168237b
 +    }
 +    return length;
 +}
-diff --git i/bsd/dev/a6plte/usb_ecm.h w/bsd/dev/a6plte/usb_ecm.h
+diff --git c/bsd/dev/a6plte/usb_ecm.h w/bsd/dev/a6plte/usb_ecm.h
 new file mode 100644
 index 0000000..d9a45df
 --- /dev/null
@@ -1021,7 +1036,7 @@ index 0000000..d9a45df
 +int a6_ecm_link(const struct a6_ecm *);
 +unsigned a6_ecm_notification(uint8_t *data,unsigned capacity,int speed_notification,int connected);
 +#endif
-diff --git i/bsd/dev/a6plte/userdata.c w/bsd/dev/a6plte/userdata.c
+diff --git c/bsd/dev/a6plte/userdata.c w/bsd/dev/a6plte/userdata.c
 new file mode 100644
 index 0000000..90bea63
 --- /dev/null
@@ -1195,11 +1210,11 @@ index 0000000..90bea63
 +    return 0;
 +}
 +int a6_userdata_root_selected(void) { return selected_root; }
-diff --git i/bsd/kern/bsd_init.c w/bsd/kern/bsd_init.c
-index ffe7ce0..c338d41 100644
---- i/bsd/kern/bsd_init.c
+diff --git c/bsd/kern/bsd_init.c w/bsd/kern/bsd_init.c
+index 4df41ba..031f80a 100644
+--- c/bsd/kern/bsd_init.c
 +++ w/bsd/kern/bsd_init.c
-@@ -263,6 +263,9 @@ int darkboot = 0;
+@@ -261,6 +261,9 @@ int darkboot = 0;
  #endif
  
  extern kern_return_t IOFindBSDRoot(char *, unsigned int, dev_t *, u_int32_t *);
@@ -1209,7 +1224,7 @@ index ffe7ce0..c338d41 100644
  extern void IOSecureBSDRoot(const char * rootName);
  extern kern_return_t IOKitBSDInit(void );
  extern boolean_t IOSetRecoveryBoot(bsd_bootfail_mode_t, uuid_t, boolean_t);
-@@ -944,6 +947,11 @@ bsd_init(void)
+@@ -918,6 +921,11 @@ bsd_init(void)
  		require_rootauth = TRUE;
  #endif // XNU_TARGET_OS_OSX && defined(__arm64__)
  
@@ -1221,7 +1236,7 @@ index ffe7ce0..c338d41 100644
  		if (require_rootauth) {
  			/* enforce sealedness */
  			int autherr = VNOP_IOCTL(rootvnode, FSIOC_KERNEL_ROOTAUTH, NULL, 0, vfs_context_kernel());
-@@ -1115,6 +1123,13 @@ bsd_autoconf(void)
+@@ -1085,6 +1093,13 @@ bsd_autoconf(void)
  	kprintf("bsd_autoconf: calling kminit\n");
  	kminit();
  
@@ -1235,11 +1250,11 @@ index ffe7ce0..c338d41 100644
  	/*
  	 * Early startup for bsd pseudodevices.
  	 */
-diff --git i/bsd/kern/kern_exec.c w/bsd/kern/kern_exec.c
-index 2467b24..d35e0e3 100644
---- i/bsd/kern/kern_exec.c
+diff --git c/bsd/kern/kern_exec.c w/bsd/kern/kern_exec.c
+index f41b75b..ab4b6ae 100644
+--- c/bsd/kern/kern_exec.c
 +++ w/bsd/kern/kern_exec.c
-@@ -8027,6 +8027,9 @@ load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path)
+@@ -6832,6 +6832,9 @@ load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path)
  }
  
  static const char * init_programs[] = {
@@ -1249,36 +1264,11 @@ index 2467b24..d35e0e3 100644
  #if DEBUG
  	"/usr/appleinternal/sbin/launchd.debug",
  #endif
-diff --git i/bsd/kern/kern_mib.c w/bsd/kern/kern_mib.c
-index e67ea79..701a36e 100644
---- i/bsd/kern/kern_mib.c
-+++ w/bsd/kern/kern_mib.c
-@@ -750,7 +750,9 @@ sysctl_load_devicetree_entries(void)
- 		}
- 	}
- 
-+#if !defined(A6PLTE)
- 	eng_sample_dev_fused = !ml_device_is_prod_fused();
-+#endif
- }
- STARTUP(SYSCTL, STARTUP_RANK_MIDDLE, sysctl_load_devicetree_entries);
- 
-@@ -1090,6 +1092,10 @@ sysctl_hw_engineering_sample(__unused struct sysctl_oid *oidp,
-     __unused void *arg1, __unused int arg2,
-     struct sysctl_req *req)
- {
-+#if defined(A6PLTE)
-+	/* Apple engineering-sample fuse semantics do not describe Qualcomm QFPROM. */
-+	return ENOTSUP;
-+#endif
- #if DEVELOPMENT || DEBUG
- 	int es = 1;
- #else
-diff --git i/bsd/kern/kern_trustcache.c w/bsd/kern/kern_trustcache.c
-index 4b1e8a9..706f289 100644
---- i/bsd/kern/kern_trustcache.c
+diff --git c/bsd/kern/kern_trustcache.c w/bsd/kern/kern_trustcache.c
+index 4c22764..325e2af 100644
+--- c/bsd/kern/kern_trustcache.c
 +++ w/bsd/kern/kern_trustcache.c
-@@ -567,6 +567,22 @@ trust_cache_runtime_init(void)
+@@ -236,6 +236,22 @@ trust_cache_runtime_init(void)
  	bool allow_engineering_caches = false;
  	bool allow_legacy_caches = false;
  
@@ -1301,7 +1291,7 @@ index 4b1e8a9..706f289 100644
  #if CONFIG_SECOND_STATIC_TRUST_CACHE
  	allow_second_static_cache = true;
  #endif
-@@ -809,6 +825,12 @@ check_trust_cache_runtime_for_uuid(
+@@ -478,6 +494,12 @@ check_trust_cache_runtime_for_uuid(
  		return KERN_INVALID_ARGUMENT;
  	}
  
@@ -1311,23 +1301,10 @@ index 4b1e8a9..706f289 100644
 +	}
 +#endif
 +
- #if CONFIG_SPTM
- 	ret = txm_check_trust_cache_runtime_for_uuid(check_uuid);
- #elif PMAP_CS_PPL_MONITOR
-@@ -823,6 +845,12 @@ check_trust_cache_runtime_for_uuid(
- kern_return_t
- unload_trust_cache(uuid_t uuid)
- {
-+#if A6PLTE
-+	if (trust_cache_rt == NULL) {
-+		return KERN_NOT_SUPPORTED;
-+	}
-+#endif
-+
- 	kern_return_t ret = KERN_DENIED;
- 	uuid_string_t uuid_string = {0};
- 
-@@ -861,6 +889,12 @@ load_trust_cache(
+ #if   PMAP_CS_PPL_MONITOR
+ 	ret = ppl_check_trust_cache_runtime_for_uuid(check_uuid);
+ #else
+@@ -492,6 +514,12 @@ load_trust_cache(
  	const uint8_t *img4_object, const size_t img4_object_len,
  	const uint8_t *img4_ext_manifest, const size_t img4_ext_manifest_len)
  {
@@ -1340,7 +1317,7 @@ index 4b1e8a9..706f289 100644
  	TCType_t type = kTCTypeInvalid;
  	kern_return_t ret = KERN_DENIED;
  
-@@ -936,6 +970,12 @@ load_trust_cache_with_type(
+@@ -567,6 +595,12 @@ load_trust_cache_with_type(
  	 * the manifest embedded. In this case, we need to extract the different artifacts
  	 * out of the object.
  	 */
@@ -1353,7 +1330,7 @@ index 4b1e8a9..706f289 100644
  	if (img4_ext_manifest_len != 0) {
  		img4_payload = img4_object;
  		img4_payload_len = img4_object_len;
-@@ -1049,6 +1089,12 @@ load_legacy_trust_cache(
+@@ -668,6 +702,12 @@ load_legacy_trust_cache(
  		panic("overflow on the module: %p | %lu", module_data, module_size);
  	}
  
@@ -1363,63 +1340,44 @@ index 4b1e8a9..706f289 100644
 +	}
 +#endif
 +
- #if CONFIG_SPTM
- 	ret = txm_load_legacy_trust_cache(module_data, module_size);
- #elif PMAP_CS_PPL_MONITOR
-@@ -1079,6 +1125,18 @@ query_trust_cache(
+ #if   PMAP_CS_PPL_MONITOR
+ 	ret = ppl_load_legacy_trust_cache(module_data, module_size);
+ #else
+@@ -696,6 +736,13 @@ query_trust_cache(
  		return KERN_INVALID_ARGUMENT;
  	}
  
 +#if A6PLTE
-+	if (query_type >= kTCQueryTypeTotal) {
-+		return KERN_INVALID_ARGUMENT;
-+	}
 +	if (trust_cache_rt == NULL) {
-+		if (query_token != NULL) {
-+			memset(query_token, 0, sizeof(*query_token));
-+		}
++		if (query_token != NULL) memset(query_token, 0, sizeof(*query_token));
 +		return KERN_NOT_FOUND;
 +	}
 +#endif
 +
- #if CONFIG_SPTM
- 	ret = txm_query_trust_cache(query_type, cdhash, query_token);
- #elif PMAP_CS_PPL_MONITOR
-diff --git i/bsd/kern/ubc_subr.c w/bsd/kern/ubc_subr.c
-index 79bf0cb..fd0a00e 100644
---- i/bsd/kern/ubc_subr.c
+ #if   PMAP_CS_PPL_MONITOR
+ 	ret = ppl_query_trust_cache(query_type, cdhash, query_token);
+ #else
+diff --git c/bsd/kern/ubc_subr.c w/bsd/kern/ubc_subr.c
+index 9b553be..8fd49b8 100644
+--- c/bsd/kern/ubc_subr.c
 +++ w/bsd/kern/ubc_subr.c
-@@ -4484,6 +4484,25 @@ accelerate_entitlement_queries(
+@@ -4336,6 +4336,11 @@ accelerate_entitlement_queries(
  	 */
  	assert(ret == KERN_NOT_SUPPORTED);
  
 +#if A6PLTE
-+	/*
-+	 * With no AMFI provider, this experimental port treats raw XML/DER
-+	 * entitlements as absent. No entitlement context is created or rights
-+	 * granted. An existing context without its provider is inconsistent.
-+	 * Structural signature validation and executable-page hashes still run.
-+	 */
-+	if (amfi == NULL) {
-+		if (cs_blob->csb_entitlements != NULL) {
-+			return ENOTSUP;
-+		}
-+		return 0;
-+	}
-+	if (amfi->OSEntitlements.adjustContext == NULL &&
-+	    amfi->OSEntitlements.adjustContextWithoutMonitor == NULL) {
-+		return ENOTSUP;
-+	}
++	/* An absent provider supplies no entitlement context or rights. */
++	if (amfi == NULL) return cs_blob->csb_entitlements == NULL ? 0 : ENOTSUP;
++	if (amfi->OSEntitlements.adjustContextWithoutMonitor == NULL) return ENOTSUP;
 +#endif
-+
- 	if (amfi->OSEntitlements.adjustContext != NULL) {
- 		ret = amfi->OSEntitlements.adjustContext(cs_blob->csb_entitlements, cs_blob, NULL);
- 	} else {
-diff --git i/bsd/pthread/pthread_shims.c w/bsd/pthread/pthread_shims.c
-index e5e58b5..29dbc4e 100644
---- i/bsd/pthread/pthread_shims.c
+ 	ret = amfi->OSEntitlements.adjustContextWithoutMonitor(
+ 		cs_blob->csb_entitlements,
+ 		cs_blob);
+diff --git c/bsd/pthread/pthread_shims.c w/bsd/pthread/pthread_shims.c
+index 84e350b..66e3717 100644
+--- c/bsd/pthread/pthread_shims.c
 +++ w/bsd/pthread/pthread_shims.c
-@@ -60,6 +60,11 @@
+@@ -59,6 +59,11 @@
  /* version number of the in-kernel shims given to pthread.kext */
  #define PTHREAD_SHIMS_VERSION 1
  
@@ -1431,9 +1389,9 @@ index e5e58b5..29dbc4e 100644
  #define PTHREAD_CALLBACK_MEMBER kevent_workq_internal
  
  /* compile time asserts to check the length of structures in pthread_shims.h */
-@@ -624,6 +629,21 @@ static const struct pthread_callbacks_s pthread_callbacks = {
- SECURITY_READ_ONLY_LATE(pthread_callbacks_t) pthread_kern = &pthread_callbacks;
- SECURITY_READ_ONLY_LATE(pthread_functions_t) pthread_functions = NULL;
+@@ -613,6 +618,21 @@ static const struct pthread_callbacks_s pthread_callbacks = {
+ pthread_callbacks_t pthread_kern = &pthread_callbacks;
+ pthread_functions_t pthread_functions = NULL;
  
 +#if A6PLTE
 +/* Register the real built-in Apple libpthread table before read-only lockdown. */
@@ -1453,9 +1411,9 @@ index e5e58b5..29dbc4e 100644
  /*
   * pthread_kext_register is called by pthread.kext upon load, it has to provide
   * us with a function pointer table of pthread internal calls. In return, this
-diff --git i/bsd/sys/pthread_internal.h w/bsd/sys/pthread_internal.h
+diff --git c/bsd/sys/pthread_internal.h w/bsd/sys/pthread_internal.h
 index 42e23d8..c355403 100644
---- i/bsd/sys/pthread_internal.h
+--- c/bsd/sys/pthread_internal.h
 +++ w/bsd/sys/pthread_internal.h
 @@ -33,7 +33,18 @@
  #include <kern/thread_call.h>
@@ -1477,41 +1435,35 @@ index 42e23d8..c355403 100644
  	char opaque[48];
  #else
  	char opaque[32];
-diff --git i/config/MASTER.arm64.a6plte.MacOSX w/config/MASTER.arm64.a6plte.MacOSX
+diff --git c/config/MASTER.arm64.a6plte.MacOSX w/config/MASTER.arm64.a6plte.MacOSX
 new file mode 100644
-index 0000000..d983bb1
+index 0000000..d2e9e67
 --- /dev/null
 +++ w/config/MASTER.arm64.a6plte.MacOSX
-@@ -0,0 +1,135 @@
-+# A6PLTE bring-up: no Apple PPL or Apple CPU performance counters.
+@@ -0,0 +1,110 @@
 +#
 +# Mach Operating System
 +# Copyright (c) 1986 Carnegie-Mellon University
-+# Copyright 2001-2024 Apple Inc.
++# Copyright 2001-2018 Apple Inc.
 +#
 +# All rights reserved.  The CMU software License Agreement
 +# specifies the terms and conditions for use and redistribution.
++#  
 +######################################################################
 +#
 +#  Master Apple configuration file (see the master machine independent
 +#  configuration file for a description of the file format).
 +#
 +######################################################################
++#  
 +#  Standard Apple OS Configurations:
 +#  -------- ----- -- ---------------
 +#
-+#if MASTER_CONFIG_ENABLE_EXCLAVES
-+#  ARM_EXTRAS_BASE = [ config_sptm config_sptm_iommu config_exclaves ]
-+#elif MASTER_CONFIG_ENABLE_SPTM
-+#  ARM_EXTRAS_BASE = [ config_sptm config_sptm_iommu ]
-+#else
-+#  ARM_EXTRAS_BASE = [ nos_arm_pmap nos_arm_asm a6plte ]
-+#endif
-+#  KERNEL_BASE =    [ arm64 medium msgb_large config_requires_u32_munging config_delay_idle_sleep config_proc_udata_storage config_uexc config_darkboot ARM_EXTRAS_BASE ]
++#  KERNEL_BASE =    [ arm64 nos_arm_pmap nos_arm_asm a6plte medium msgb_large config_requires_u32_munging config_delay_idle_sleep config_proc_udata_storage config_uexc config_darkboot ARM_EXTRAS_BASE ]
 +#  KERNEL_RELEASE = [ KERNEL_BASE release ]
-+#  KERNEL_DEV =     [ KERNEL_BASE development mach_assert config_xnupost proc_ref_debug config_proc_resource_limits config_ext_paniclog ]
-+#  KERNEL_DEBUG =   [ KERNEL_BASE debug mach_assert config_xnupost config_waitq_stats config_workloop_debug config_proc_resource_limits config_ext_paniclog ]
-+#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump config_ucoredump pgo config_personas ]
++#  KERNEL_DEV =     [ KERNEL_BASE development mach_assert config_xnupost proc_ref_debug config_proc_resource_limits ]
++#  KERNEL_DEBUG =   [ KERNEL_BASE debug mach_assert config_xnupost config_waitq_stats config_workloop_debug config_proc_resource_limits ]
++#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump pgo config_personas ]
 +#  BSD_RELEASE =    [ BSD_BASE ]
 +#  BSD_DEV =        [ BSD_BASE config_vnguard ]
 +#  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
@@ -1520,13 +1472,13 @@ index 0000000..d983bb1
 +#  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
 +#  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
 +#  NFS =            [ nfsserver ]
-+#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_flowswitch config_nexus_netif ]
++#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_monitor config_nexus_flowswitch config_nexus_netif ]
 +#  SKYWALK_RELEASE = [ SKYWALK_BASE ]
 +#  SKYWALK_DEV =    [ SKYWALK_BASE ]
 +#  SKYWALK_DEBUG =  [ SKYWALK_BASE ]
-+#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk if_bridge MULTIPATH if_fake if_redirect remote_vif ]
++#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk config_mbuf_jumbo if_bridge MULTIPATH if_fake remote_vif ]
 +#  NETWORKING_RELEASE = [ NETWORKING ]
-+#  NETWORKING_DEV = [ NETWORKING_RELEASE packet_mangler if_headless kctl_test ]
++#  NETWORKING_DEV = [ NETWORKING_RELEASE packet_mangler if_headless ]
 +#  NETWORKING_DEBUG = [ NETWORKING_DEV ]
 +#  VPN =            [ ipsec flow_divert necp content_filter ]
 +#  PF =             [ pf pflog ]
@@ -1544,54 +1496,34 @@ index 0000000..d983bb1
 +#  LIBKERN_RELEASE =[ LIBKERN_BASE zlib ]
 +#  LIBKERN_DEV =    [ LIBKERN_BASE zlib iotracking ]
 +#  LIBKERN_DEBUG =  [ LIBKERN_BASE zlib iotracking ]
-+#if SOC_IS_VIRTUALIZED
-+#  CPU_COUNTERS_BASE = [ ]
-+#else /*!SOC_IS_VIRTUALIZED*/
-+#  CPU_COUNTERS_BASE = [    ]
-+#endif /*SOC_IS_VIRTUALIZED*/
-+#  PERF_DBG_BASE =  [ config_dtrace mach_kdp kdp_interactive_debugging config_kdp_coredump_encryption CPU_COUNTERS_BASE kperf ]
++#  PERF_DBG_BASE =  [ config_dtrace mach_kdp kdp_interactive_debugging config_kdp_coredump_encryption ]
 +#  PERF_DBG_RELEASE=[ PERF_DBG_BASE ist_kdebug ]
-+#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
-+#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
-+#  PERF_DBG_KASAN = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger config_debug_syscall_rejection config_iotrace config_memory_microstackshot ]
++#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
++#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
 +#if SOC_IS_VIRTUALIZED
 +#  PARAVIRT_BASE =  [ config_pv_ticket ]
 +#else
 +#  PARAVIRT_BASE =  [ ]
 +#endif /*SOC_IS_VIRTUALIZED*/
-+#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE ]
++#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE config_ledger_interval_max ]
 +#  MACH_RELEASE =   [ MACH_BASE ]
-+#  MACH_DEV =       [ MACH_BASE config_io_accounting importance_trace config_task_suspend_stats ]
-+#  MACH_DEBUG =     [ MACH_BASE config_io_accounting importance_trace importance_debug config_task_suspend_stats ]
-+#  SCHED_BASE =     [ config_sched_timeshare_core config_sched_deferred_ast config_clutch config_sched_sfi config_sched_auto_join config_preadopt_tg ]
++#  MACH_DEV =       [ MACH_BASE config_io_accounting importance_trace ]
++#  MACH_DEBUG =     [ MACH_BASE config_io_accounting importance_trace importance_debug ]
++#  SCHED_BASE =     [ config_sched_traditional config_sched_multiq config_sched_deferred_ast config_clutch config_sched_sfi config_sched_auto_join config_preadopt_tg ]
 +#  SCHED_RELEASE =  [ SCHED_BASE ]
 +#  SCHED_DEV =      [ SCHED_BASE ]
-+#  SCHED_DEBUG =    [ SCHED_BASE ]
-+#if MASTER_CONFIG_ENABLE_KERNEL_TAG && MASTER_CONFIG_ENABLE_SPTM
-+#  VM_EXTRA =       [ kernel_tagging ]
-+#  VM_EXTRA_DEV =   [ ]
-+#elif MASTER_CONFIG_ENABLE_SPTM
-+#  VM_EXTRA =       [ ]
-+#  VM_EXTRA_DEV =   [ ]
-+#else
-+#  VM_EXTRA =       [ ]
-+#  VM_EXTRA_DEV =   [ ]
-+#endif /* MASTER_CONFIG_ENABLE_KERNEL_TAG && MASTER_CONFIG_ENABLE_SPTM */
-+#  VM_BASE =        [ vm_pressure_events memorystatus config_code_decryption encrypted_swap config_deferred_reclaim VM_EXTRA ]
++#  SCHED_DEBUG =    [ SCHED_BASE config_sched_grrr config_sched_proto ]
++#  VM_BASE =        [ vm_pressure_events memorystatus config_code_decryption encrypted_swap config_deferred_reclaim ]
 +#  VM_RELEASE =     [ VM_BASE ]
-+#  VM_DEV =         [ VM_BASE dynamic_codesigning VM_EXTRA_DEV ]
-+#  VM_DEBUG =       [ VM_BASE dynamic_codesigning VM_EXTRA_DEV ]
-+#  VM_KASAN =       [ VM_BASE dynamic_codesigning config_kasan config_ubsan config_kcov config_ksancov kernel_tagging kernel_tbi ]
-+#  SECURITY_BASE  =   [ config_macf config_audit kernel_integrity config_csr config_csr_from_dt config_setuid config_kas_info config_secure_bsd_root config_arcade config_supplemental_signatures second_static_trust_cache reslide_shared_cache ]
-+#  SECURITY_RELEASE = [ SECURITY_BASE ]
-+#  SECURITY_DEV   =   [ SECURITY_BASE ]
-+#  SECURITY_DEBUG =   [ SECURITY_BASE ]
-+#  BASE =           [ PF VPN NFS ]
-+#  RELEASE =        [ BASE KERNEL_RELEASE BSD_RELEASE FILESYS_RELEASE SKYWALK_RELEASE NETWORKING_RELEASE IOKIT_RELEASE LIBKERN_RELEASE    PERF_DBG_RELEASE MACH_RELEASE SCHED_RELEASE VM_RELEASE SECURITY_RELEASE ]
-+#  DEVELOPMENT =    [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     IOKIT_DEV     LIBKERN_DEV        PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_DEV     SECURITY_DEV     ]
-+#  DEBUG =          [ BASE KERNEL_DEBUG   BSD_DEBUG   FILESYS_DEBUG   SKYWALK_DEBUG   NETWORKING_DEBUG   IOKIT_DEBUG   LIBKERN_DEBUG      PERF_DBG_DEBUG   MACH_DEBUG   SCHED_DEBUG   VM_DEBUG   SECURITY_DEBUG   ]
-+#  KASAN =          [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     IOKIT_DEV     LIBKERN_DEV        PERF_DBG_KASAN   MACH_DEV     SCHED_DEV     VM_KASAN   SECURITY_DEV     ]
-+#  SPTM =           [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     IOKIT_DEV     LIBKERN_DEV        PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_DEV     SECURITY_DEV     ]
++#  VM_DEV =         [ VM_BASE dynamic_codesigning pgzalloc ]
++#  VM_DEBUG =       [ VM_BASE dynamic_codesigning pgzalloc ]
++#  VM_KASAN =       [ VM_BASE dynamic_codesigning config_kasan config_ubsan config_kcov config_ksancov kernel_tbi ]
++#  SECURITY =       [ config_macf config_audit kernel_integrity config_csr config_csr_from_dt config_setuid config_kas_info config_secure_bsd_root config_arcade config_supplemental_signatures second_static_trust_cache reslide_shared_cache ]
++#  BASE =           [ PF VPN SECURITY NFS ]
++#  RELEASE =        [ BASE KERNEL_RELEASE BSD_RELEASE FILESYS_RELEASE SKYWALK_RELEASE NETWORKING_RELEASE IOKIT_RELEASE LIBKERN_RELEASE    PERF_DBG_RELEASE MACH_RELEASE SCHED_RELEASE VM_RELEASE ]
++#  DEVELOPMENT =    [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     IOKIT_DEV     LIBKERN_DEV        PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_DEV     ]
++#  DEBUG =          [ BASE KERNEL_DEBUG   BSD_DEBUG   FILESYS_DEBUG   SKYWALK_DEBUG   NETWORKING_DEBUG   IOKIT_DEBUG   LIBKERN_DEBUG      PERF_DBG_DEBUG   MACH_DEBUG   SCHED_DEBUG   VM_DEBUG   ]
++#  KASAN =          [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     IOKIT_DEV     LIBKERN_DEV        PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_KASAN   ]
 +#
 +######################################################################
 +#
@@ -1613,14 +1545,15 @@ index 0000000..d983bb1
 +
 +options CONFIG_MACF_LAZY_VNODE_LABELS   # Turn on labels, don't preallocate
 +
++options CONFIG_HYPERVISOR_PUBLIC   # unrestricted entitlement for hypervisor
++
 +options   CONFIG_RESLIDE_SHARED_CACHE		# <reslide_shared_cache>
 +options   CONFIG_KERNEL_TBI		# <kernel_tbi>
-+options   CONFIG_KERNEL_TAGGING		# <kernel_tagging>
 +
 +options A6PLTE # <a6plte>
-diff --git i/iokit/Kernel/IOKitDebug.cpp w/iokit/Kernel/IOKitDebug.cpp
-index 8698ba1..e5c9f47 100644
---- i/iokit/Kernel/IOKitDebug.cpp
+diff --git c/iokit/Kernel/IOKitDebug.cpp w/iokit/Kernel/IOKitDebug.cpp
+index f9a8664..da996db 100644
+--- c/iokit/Kernel/IOKitDebug.cpp
 +++ w/iokit/Kernel/IOKitDebug.cpp
 @@ -47,7 +47,11 @@ extern "C" {
  
@@ -1644,11 +1577,11 @@ index 8698ba1..e5c9f47 100644
  	}
  	return error;
  }
-diff --git i/iokit/Kernel/IOService.cpp w/iokit/Kernel/IOService.cpp
-index 6824ed8..200ce57 100644
---- i/iokit/Kernel/IOService.cpp
+diff --git c/iokit/Kernel/IOService.cpp w/iokit/Kernel/IOService.cpp
+index 8559a66..c534073 100644
+--- c/iokit/Kernel/IOService.cpp
 +++ w/iokit/Kernel/IOService.cpp
-@@ -67,6 +67,11 @@
+@@ -65,6 +65,11 @@
  #include <sys/kdebug.h>
  #include <string.h>
  
@@ -1660,7 +1593,7 @@ index 6824ed8..200ce57 100644
  #include <machine/pal_routines.h>
  
  #define LOG kprintf
-@@ -5396,6 +5401,16 @@ IOService::publishHiddenMedia(IOService * parent)
+@@ -5126,6 +5131,16 @@ IOService::publishHiddenMedia(IOService * parent)
  	bool                wasHiding;
  
  	iomediaClass = OSMetaClass::getMetaClassWithName(gIOMediaKey);
@@ -1677,7 +1610,7 @@ index 6824ed8..200ce57 100644
  	assert(iomediaClass);
  
  	LOCKWRITENOTIFY();
-@@ -5449,7 +5464,12 @@ IOService::setRootMedia(IOService * root)
+@@ -5179,7 +5194,12 @@ IOService::setRootMedia(IOService * root)
  	bool unhide;
  
  	ioblockstoragedriverClass = OSMetaClass::getMetaClassWithName(gIOBlockStorageDriverKey);
@@ -1690,14 +1623,18 @@ index 6824ed8..200ce57 100644
  
  	while (root) {
  		if (root->metaCast(ioblockstoragedriverClass)) {
-diff --git i/iokit/Kernel/IOUserClient.cpp w/iokit/Kernel/IOUserClient.cpp
-index e3c0911..2c17027 100644
---- i/iokit/Kernel/IOUserClient.cpp
+diff --git c/iokit/Kernel/IOUserClient.cpp w/iokit/Kernel/IOUserClient.cpp
+index 2613ab5..a5adf3f 100644
+--- c/iokit/Kernel/IOUserClient.cpp
 +++ w/iokit/Kernel/IOUserClient.cpp
-@@ -1591,6 +1591,12 @@ IOUserClient::copyClientEntitlement( task_t task,
- 		return NULL;
+@@ -1504,6 +1504,16 @@ IOUserClient::copyClientEntitlement( task_t task,
  	}
+ 	proc_t proc = (proc_t)get_bsdtask_info(task);
  
++	if (proc == NULL) {
++		return NULL;
++	}
++
 +#if A6PLTE
 +	if (amfi == NULL || amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc == NULL) {
 +		return NULL;
@@ -1707,7 +1644,7 @@ index e3c0911..2c17027 100644
  	kern_return_t ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
  		proc,
  		entitlement,
-diff --git i/iokit/Kernel/arm/A6GraphicsLayout.c w/iokit/Kernel/arm/A6GraphicsLayout.c
+diff --git c/iokit/Kernel/arm/A6GraphicsLayout.c w/iokit/Kernel/arm/A6GraphicsLayout.c
 new file mode 100644
 index 0000000..9a8bcfe
 --- /dev/null
@@ -1735,7 +1672,7 @@ index 0000000..9a8bcfe
 +        d->size < (uint64_t)d->stride*d->height || stride<w*bpp || stride>65536) return 0;
 +    return h<=bytes/stride;
 +}
-diff --git i/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
+diff --git c/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
 new file mode 100644
 index 0000000..75ede36
 --- /dev/null
@@ -1827,7 +1764,7 @@ index 0000000..75ede36
 +}
 +
 +#endif /* A6PLTE */
-diff --git i/iokit/Kernel/arm/A6PlatformServices.cpp w/iokit/Kernel/arm/A6PlatformServices.cpp
+diff --git c/iokit/Kernel/arm/A6PlatformServices.cpp w/iokit/Kernel/arm/A6PlatformServices.cpp
 new file mode 100644
 index 0000000..fd880ff
 --- /dev/null
@@ -2214,7 +2151,7 @@ index 0000000..fd880ff
 +    startBoardService<IOMobileFramebuffer>(provider,"IOMobileFramebuffer");
 +}
 +#endif
-diff --git i/iokit/Kernel/arm/A6PlatformServicesABI.h w/iokit/Kernel/arm/A6PlatformServicesABI.h
+diff --git c/iokit/Kernel/arm/A6PlatformServicesABI.h w/iokit/Kernel/arm/A6PlatformServicesABI.h
 new file mode 100644
 index 0000000..53fd528
 --- /dev/null
@@ -2260,9 +2197,9 @@ index 0000000..53fd528
 +}
 +#endif
 +#endif
-diff --git i/iokit/KernelConfigTables.cpp w/iokit/KernelConfigTables.cpp
-index 559a9db..4b414d8 100644
---- i/iokit/KernelConfigTables.cpp
+diff --git c/iokit/KernelConfigTables.cpp w/iokit/KernelConfigTables.cpp
+index 2b14eda..9500a9b 100644
+--- c/iokit/KernelConfigTables.cpp
 +++ w/iokit/KernelConfigTables.cpp
 @@ -34,6 +34,20 @@
  
@@ -2285,11 +2222,11 @@ index 559a9db..4b414d8 100644
      "   {"
      "     'IOClass'         = IOPanicPlatform;"
      "     'IOProviderClass' = IOPlatformExpertDevice;"
-diff --git i/iokit/bsddev/IOKitBSDInit.cpp w/iokit/bsddev/IOKitBSDInit.cpp
-index 2bbd161..f327f3e 100644
---- i/iokit/bsddev/IOKitBSDInit.cpp
+diff --git c/iokit/bsddev/IOKitBSDInit.cpp w/iokit/bsddev/IOKitBSDInit.cpp
+index 5219fb0..a3f4279 100644
+--- c/iokit/bsddev/IOKitBSDInit.cpp
 +++ w/iokit/bsddev/IOKitBSDInit.cpp
-@@ -67,6 +67,11 @@ extern dev_t mdevadd(int devid, uint64_t base, unsigned int size, int phys);
+@@ -64,6 +64,11 @@ extern dev_t mdevadd(int devid, uint64_t base, unsigned int size, int phys);
  extern dev_t mdevlookup(int devid);
  extern void mdevremoveall(void);
  extern int mdevgetrange(int devid, uint64_t *base, uint64_t *size);
@@ -2301,7 +2238,7 @@ index 2bbd161..f327f3e 100644
  extern void di_root_ramfile(IORegistryEntry * entry);
  extern int IODTGetDefault(const char *key, void *infoAddr, unsigned int infoSize);
  extern boolean_t cpuid_vmm_present(void);
-@@ -732,6 +737,19 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
+@@ -707,6 +712,19 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
  		rdBootVar[0] = 0;
  	}
  
@@ -2321,7 +2258,7 @@ index 2bbd161..f327f3e 100644
  	if ((regEntry = IORegistryEntry::fromPath( "/chosen", gIODTPlane ))) {
  		do {
  			di_root_ramfile(regEntry);
-@@ -1038,6 +1056,10 @@ IORamDiskBSDRoot(void)
+@@ -1008,6 +1026,10 @@ IORamDiskBSDRoot(void)
  	return false;
  }
  
@@ -2332,10 +2269,14 @@ index 2bbd161..f327f3e 100644
  void
  IOSecureBSDRoot(const char * rootName)
  {
-@@ -1578,6 +1600,13 @@ IOTaskHasStringEntitlement(task_t task, const char *entitlement, const char *val
- 		return false;
+@@ -1492,6 +1514,17 @@ IOTaskHasStringEntitlement(task_t task, const char *entitlement, const char *val
  	}
+ 	proc_t proc = (proc_t)get_bsdtask_info(task);
  
++	if (proc == NULL) {
++		return false;
++	}
++
 +#if A6PLTE
 +	/* No provider means no entitlement; never grant rights as a fallback. */
 +	if (amfi == NULL || amfi->OSEntitlements.queryEntitlementStringWithProc == NULL) {
@@ -2346,10 +2287,14 @@ index 2bbd161..f327f3e 100644
  	kern_return_t ret = amfi->OSEntitlements.queryEntitlementStringWithProc(
  		proc,
  		entitlement,
-@@ -1621,6 +1650,13 @@ IOTaskHasEntitlement(task_t task, const char *entitlement)
- 		return false;
+@@ -1523,6 +1556,17 @@ IOTaskHasEntitlement(task_t task, const char *entitlement)
  	}
+ 	proc_t proc = (proc_t)get_bsdtask_info(task);
  
++	if (proc == NULL) {
++		return false;
++	}
++
 +#if A6PLTE
 +	/* No provider means no entitlement; never grant rights as a fallback. */
 +	if (amfi == NULL || amfi->OSEntitlements.queryEntitlementBooleanWithProc == NULL) {
@@ -2360,24 +2305,14 @@ index 2bbd161..f327f3e 100644
  	kern_return_t ret = amfi->OSEntitlements.queryEntitlementBooleanWithProc(
  		proc,
  		entitlement);
-@@ -1651,6 +1687,13 @@ IOTaskGetIntegerEntitlement(task_t task, const char *entitlement, uint64_t *valu
- 		return false;
+@@ -1556,6 +1600,17 @@ IOTaskGetEntitlement(task_t task, const char *entitlement)
  	}
+ 	proc_t proc = (proc_t)get_bsdtask_info(task);
  
-+#if A6PLTE
-+	/* No provider means no entitlement; never grant rights as a fallback. */
-+	if (amfi == NULL || amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc == NULL) {
-+		return false;
++	if (proc == NULL) {
++		return NULL;
 +	}
-+#endif
 +
- 	kern_return_t ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
- 		proc,
- 		entitlement,
-@@ -1701,6 +1744,13 @@ IOTaskGetEntitlement(task_t task, const char *entitlement)
- 		return NULL;
- 	}
- 
 +#if A6PLTE
 +	/* No provider means no entitlement; never grant rights as a fallback. */
 +	if (amfi == NULL || amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc == NULL) {
@@ -2388,38 +2323,11 @@ index 2bbd161..f327f3e 100644
  	kern_return_t ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
  		proc,
  		entitlement,
-@@ -1740,6 +1790,13 @@ IOTaskHasEntitlementAsBooleanOrObject(task_t task, const char *entitlement)
- 		return false;
- 	}
- 
-+#if A6PLTE
-+	/* No provider means no entitlement; never grant rights as a fallback. */
-+	if (amfi == NULL || amfi->OSEntitlements.queryEntitlementBooleanWithProc == NULL) {
-+		return false;
-+	}
-+#endif
-+
- 	kern_return_t ret = amfi->OSEntitlements.queryEntitlementBooleanWithProc(
- 		proc,
- 		entitlement);
-@@ -1747,6 +1804,12 @@ IOTaskHasEntitlementAsBooleanOrObject(task_t task, const char *entitlement)
- 		return true;
- 	}
- 
-+#if A6PLTE
-+	if (amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc == NULL) {
-+		return false;
-+	}
-+#endif
-+
- 	/* Check for the presence of an object */
- 	void *entitlement_object = NULL;
- 	ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
-diff --git i/iokit/conf/files w/iokit/conf/files
-index c72c690..fa06bb1 100644
---- i/iokit/conf/files
+diff --git c/iokit/conf/files w/iokit/conf/files
+index 5fb0a52..e8b0193 100644
+--- c/iokit/conf/files
 +++ w/iokit/conf/files
-@@ -80,6 +80,9 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
+@@ -79,6 +79,9 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
  iokit/Kernel/IOGuardPageMemoryDescriptor.cpp		optional iokitcpp
  
  iokit/Kernel/IOPlatformExpert.cpp			optional iokitcpp
@@ -2429,9 +2337,9 @@ index c72c690..fa06bb1 100644
  iokit/Kernel/IOPlatformIO.cpp				optional iokitcpp
  
  iokit/Kernel/IOCPU.cpp					optional iokitcpp
-diff --git i/libkern/conf/files w/libkern/conf/files
-index c4684c2..0939129 100644
---- i/libkern/conf/files
+diff --git c/libkern/conf/files w/libkern/conf/files
+index ece14c7..059c89c 100644
+--- c/libkern/conf/files
 +++ w/libkern/conf/files
 @@ -99,6 +99,11 @@ libkern/crypto/corecrypto_des.c			optional crypto
  libkern/crypto/corecrypto_aes.c			optional crypto
@@ -2445,7 +2353,7 @@ index c4684c2..0939129 100644
  libkern/crypto/corecrypto_rsa.c		    optional crypto
  libkern/crypto/corecrypto_chacha20poly1305.c	optional	crypto
  
-diff --git i/libkern/crypto/a6plte_aes/SOURCE.txt w/libkern/crypto/a6plte_aes/SOURCE.txt
+diff --git c/libkern/crypto/a6plte_aes/SOURCE.txt w/libkern/crypto/a6plte_aes/SOURCE.txt
 new file mode 100644
 index 0000000..e5c5d5b
 --- /dev/null
@@ -2463,7 +2371,7 @@ index 0000000..e5c5d5b
 +This supplies AES CBC/ECB for the standalone bootstrap image. It does not register
 +or claim to implement a full corecrypto provider. The legacy AES implementation
 +uses lookup tables; it is not a constant-time crypto provider for production use.
-diff --git i/libkern/crypto/a6plte_aes/aes.h w/libkern/crypto/a6plte_aes/aes.h
+diff --git c/libkern/crypto/a6plte_aes/aes.h w/libkern/crypto/a6plte_aes/aes.h
 new file mode 100644
 index 0000000..9a1d04b
 --- /dev/null
@@ -2688,7 +2596,7 @@ index 0000000..9a1d04b
 +#endif
 +
 +#endif
-diff --git i/libkern/crypto/a6plte_aes/gen/aescrypt.c w/libkern/crypto/a6plte_aes/gen/aescrypt.c
+diff --git c/libkern/crypto/a6plte_aes/gen/aescrypt.c w/libkern/crypto/a6plte_aes/gen/aescrypt.c
 new file mode 100644
 index 0000000..387fe81
 --- /dev/null
@@ -3114,7 +3022,7 @@ index 0000000..387fe81
 +#if defined(__cplusplus)
 +}
 +#endif
-diff --git i/libkern/crypto/a6plte_aes/gen/aeskey.c w/libkern/crypto/a6plte_aes/gen/aeskey.c
+diff --git c/libkern/crypto/a6plte_aes/gen/aeskey.c w/libkern/crypto/a6plte_aes/gen/aeskey.c
 new file mode 100644
 index 0000000..3940b4d
 --- /dev/null
@@ -3575,7 +3483,7 @@ index 0000000..3940b4d
 +#if defined(__cplusplus)
 +}
 +#endif
-diff --git i/libkern/crypto/a6plte_aes/gen/aesopt.h w/libkern/crypto/a6plte_aes/gen/aesopt.h
+diff --git c/libkern/crypto/a6plte_aes/gen/aesopt.h w/libkern/crypto/a6plte_aes/gen/aesopt.h
 new file mode 100644
 index 0000000..63e71d5
 --- /dev/null
@@ -4319,7 +4227,7 @@ index 0000000..63e71d5
 +#endif
 +
 +#endif
-diff --git i/libkern/crypto/a6plte_aes/gen/aestab.c w/libkern/crypto/a6plte_aes/gen/aestab.c
+diff --git c/libkern/crypto/a6plte_aes/gen/aestab.c w/libkern/crypto/a6plte_aes/gen/aestab.c
 new file mode 100644
 index 0000000..41e25de
 --- /dev/null
@@ -4709,7 +4617,7 @@ index 0000000..41e25de
 +}
 +#endif
 +
-diff --git i/libkern/crypto/a6plte_aes/gen/aestab.h w/libkern/crypto/a6plte_aes/gen/aestab.h
+diff --git c/libkern/crypto/a6plte_aes/gen/aestab.h w/libkern/crypto/a6plte_aes/gen/aestab.h
 new file mode 100644
 index 0000000..a450ec4
 --- /dev/null
@@ -4890,7 +4798,7 @@ index 0000000..a450ec4
 +#endif
 +
 +#endif
-diff --git i/libkern/crypto/a6plte_kmem_rng.c w/libkern/crypto/a6plte_kmem_rng.c
+diff --git c/libkern/crypto/a6plte_kmem_rng.c w/libkern/crypto/a6plte_kmem_rng.c
 new file mode 100644
 index 0000000..ac446ff
 --- /dev/null
@@ -4974,7 +4882,7 @@ index 0000000..ac446ff
 +    return 0;
 +}
 +#endif
-diff --git i/libkern/crypto/a6plte_kmem_rng.h w/libkern/crypto/a6plte_kmem_rng.h
+diff --git c/libkern/crypto/a6plte_kmem_rng.h w/libkern/crypto/a6plte_kmem_rng.h
 new file mode 100644
 index 0000000..5339c83
 --- /dev/null
@@ -4997,7 +4905,7 @@ index 0000000..5339c83
 +void a6_kmem_rng_generate(struct a6_kmem_rng *, void *, size_t);
 +int a6_kmem_rng_uniform(struct a6_kmem_rng *, uint64_t bound, uint64_t *);
 +#endif
-diff --git i/libkern/crypto/a6plte_md5.c w/libkern/crypto/a6plte_md5.c
+diff --git c/libkern/crypto/a6plte_md5.c w/libkern/crypto/a6plte_md5.c
 new file mode 100644
 index 0000000..fcc2743
 --- /dev/null
@@ -5365,7 +5273,7 @@ index 0000000..fcc2743
 +	x15 = x14 = x13 = x12 = x11 = x10 = x9 = x8 = 0;
 +	x7 = x6 = x5 = x4 = x3 = x2 = x1 = x0 = 0;
 +}
-diff --git i/libkern/crypto/a6plte_md5.h w/libkern/crypto/a6plte_md5.h
+diff --git c/libkern/crypto/a6plte_md5.h w/libkern/crypto/a6plte_md5.h
 new file mode 100644
 index 0000000..7085d79
 --- /dev/null
@@ -5382,9 +5290,9 @@ index 0000000..7085d79
 +void a6_md5_update(MD5_CTX *, const void *, unsigned int);
 +void a6_md5_final(unsigned char [MD5_DIGEST_LENGTH], MD5_CTX *);
 +#endif
-diff --git i/libkern/crypto/corecrypto_aes.c w/libkern/crypto/corecrypto_aes.c
+diff --git c/libkern/crypto/corecrypto_aes.c w/libkern/crypto/corecrypto_aes.c
 index 20ff4f1..1f9a837 100644
---- i/libkern/crypto/corecrypto_aes.c
+--- c/libkern/crypto/corecrypto_aes.c
 +++ w/libkern/crypto/corecrypto_aes.c
 @@ -31,10 +31,20 @@
  #include <corecrypto/ccmode.h>
@@ -5443,9 +5351,9 @@ index 20ff4f1..1f9a837 100644
  	const struct ccmode_cbc *cbc = g_crypto_funcs->ccaes_cbc_decrypt;
  	cccbc_iv_decl(cbc->block_size, ctx_iv);
  
-diff --git i/libkern/crypto/corecrypto_md5.c w/libkern/crypto/corecrypto_md5.c
+diff --git c/libkern/crypto/corecrypto_md5.c w/libkern/crypto/corecrypto_md5.c
 index 242dcdb..80296fb 100644
---- i/libkern/crypto/corecrypto_md5.c
+--- c/libkern/crypto/corecrypto_md5.c
 +++ w/libkern/crypto/corecrypto_md5.c
 @@ -2,6 +2,9 @@
  #include <libkern/crypto/md5.h>
@@ -5487,9 +5395,9 @@ index 242dcdb..80296fb 100644
  	const struct ccdigest_info *di = g_crypto_funcs->ccmd5_di;
  	ccdigest_di_decl(di, di_ctx);
  
-diff --git i/libkern/crypto/corecrypto_rand.c w/libkern/crypto/corecrypto_rand.c
+diff --git c/libkern/crypto/corecrypto_rand.c w/libkern/crypto/corecrypto_rand.c
 index d46815b..3624f27 100644
---- i/libkern/crypto/corecrypto_rand.c
+--- c/libkern/crypto/corecrypto_rand.c
 +++ w/libkern/crypto/corecrypto_rand.c
 @@ -30,12 +30,33 @@
  #include <corecrypto/ccrng.h>
@@ -5575,9 +5483,9 @@ index d46815b..3624f27 100644
  	g_crypto_funcs->random_kmem_init_fn(ctx);
 +#endif
  }
-diff --git i/libkern/crypto/corecrypto_sha2.c w/libkern/crypto/corecrypto_sha2.c
+diff --git c/libkern/crypto/corecrypto_sha2.c w/libkern/crypto/corecrypto_sha2.c
 index 7392f0c..d66f96d 100644
---- i/libkern/crypto/corecrypto_sha2.c
+--- c/libkern/crypto/corecrypto_sha2.c
 +++ w/libkern/crypto/corecrypto_sha2.c
 @@ -31,6 +31,9 @@
  #include <libkern/libkern.h>
@@ -5699,29 +5607,28 @@ index 7392f0c..d66f96d 100644
  
  	ccdigest_final(di, ctx->ctx, digest);
  }
-diff --git i/makedefs/MakeInc.def w/makedefs/MakeInc.def
-index e37762b..d4c57c8 100644
---- i/makedefs/MakeInc.def
+diff --git c/makedefs/MakeInc.def w/makedefs/MakeInc.def
+index 5bd6f23..0581eb3 100644
+--- c/makedefs/MakeInc.def
 +++ w/makedefs/MakeInc.def
 @@ -29,7 +29,7 @@ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
  else ifneq ($(findstring _host,$(RC_ProjectName)),)
  SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
  else
--SUPPORTED_ARM64_MACHINE_CONFIGS = T6000 T6020 T6030 T6031 T6041 T6050 T8101 T8103 T8112 T8122 T8132 T8142 VMAPPLE
-+SUPPORTED_ARM64_MACHINE_CONFIGS = T6000 T6020 T6030 T6031 T6041 T6050 T8101 T8103 T8112 T8122 T8132 T8142 VMAPPLE A6PLTE
+-SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE
++SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE A6PLTE
  
- SPTM_ENABLED_SOCS_MacOSX = t6000 t8112 t6020 t8122 t6030 t6031 t6041 t6050 t8132 t8142
- EXCLAVES_ENABLED_SOCS_MacOSX = t8142 t6050
-@@ -92,6 +92,8 @@ MACHINE_FLAGS_ARM64_T8122 = -DARM64_BOARD_CONFIG_T8122_T8130		-mcpu=apple-m3
- MACHINE_FLAGS_ARM64_T8132 = -DARM64_BOARD_CONFIG_T8132			-mcpu=apple-m4
- MACHINE_FLAGS_ARM64_T8142 = -DARM64_BOARD_CONFIG_T8142 			-mcpu=apple-m4+memtag+predres2
+ endif
  
+@@ -61,6 +61,7 @@ MACHINE_FLAGS_ARM64_T8103 = -DARM64_BOARD_CONFIG_T8103                  -mcpu=ap
+ MACHINE_FLAGS_ARM64_T6000 = -DARM64_BOARD_CONFIG_T6000 		-mcpu=apple-a14
+ MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE              -march=armv8.5a
+ MACHINE_FLAGS_ARM64_BCM2837 = -DARM64_BOARD_CONFIG_BCM2837
 +MACHINE_FLAGS_ARM64_A6PLTE = -DARM64_BOARD_CONFIG_A6PLTE -DA6PLTE=1 -mcpu=cortex-a53
-+
- MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE              -march=armv8.5a+sme2
  
  
-@@ -350,6 +352,10 @@ else ifneq ($(findstring _host,$(RC_ProjectName)),)
+ #
+@@ -239,6 +240,10 @@ else ifneq ($(findstring _host,$(RC_ProjectName)),)
  ARCH_FLAGS_ARM64          = -arch arm64e
  else
  
@@ -5732,41 +5639,39 @@ index e37762b..d4c57c8 100644
  ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG ?=
  
  ifeq ($(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG),)
-@@ -441,10 +447,12 @@ ARM64_LINK_ADDR    = 0xfffffff007004000
+@@ -329,10 +334,12 @@ ARM64_LINK_ADDR    =0xfffffff007004000
  
  # Use ARM_LARGE_MEMORY config for all MacOSX targets.
  ifneq ($(filter $(PLATFORM),MacOSX),)
 +ifneq ($(CURRENT_MACHINE_CONFIG),A6PLTE)
- ARM64_LARGE_MEMORY = 1
- ARM64_PLKSEG_ADDR  = 0xfffffe0004004000
- ARM64_LINK_ADDR    = 0xfffffe0007004000
+ LARGE_MEMORY_DEFINE=-DARM_LARGE_MEMORY=1
+ ARM64_PLKSEG_ADDR  =0xfffffe0004004000
+ ARM64_LINK_ADDR    =0xfffffe0007004000
  endif
 +endif
  
  
- ifeq ($(ARM64_LARGE_MEMORY),1)
-diff --git i/osfmk/arm/arm_init.c w/osfmk/arm/arm_init.c
-index 6690846..d470c14 100644
---- i/osfmk/arm/arm_init.c
+ CFLAGS_ARM64	= -Darm64 -DARM64 -D__ARM64__ -DLP64 -DPAGE_SIZE_FIXED -DVM_KERNEL_LINK_ADDRESS=$(ARM64_LINK_ADDR) \
+diff --git c/osfmk/arm/arm_init.c w/osfmk/arm/arm_init.c
+index e26a1d7..c7ac878 100644
+--- c/osfmk/arm/arm_init.c
 +++ w/osfmk/arm/arm_init.c
-@@ -356,6 +356,12 @@ arm_init(
+@@ -346,6 +346,10 @@ arm_init(
  	DTEntry chosen = NULL;
  	unsigned int dt_entry_size = 0;
  
-+#if defined(A6PLTE)
++#if A6PLTE
 +	extern void a6_xnu_puts(const char *);
 +	a6_xnu_puts("arm_init: virtual execution entered\n");
-+	kprintf("XNU arm_init: BootArgs=%p phys=%llx virt=%llx mem=%llu\n",
-+	    args, args->physBase, args->virtBase, args->memSize);
 +#endif
+ 	arm_setup_pre_sign();
+ 
  	arm_slide_rebase_and_sign_image();
+@@ -513,7 +517,13 @@ arm_init(
+ 	__builtin_arm_wsr("pan", 1);
+ #endif  /* __ARM_PAN_AVAILABLE__ */
  
- 	arm_static_if_init(args);
-@@ -569,7 +575,13 @@ arm_init(
- 	gDramSize = *dram_size;
- 	pmap_first_pnum = (ppnum_t)atop(gDramBase);
- 
-+#if defined(A6PLTE)
++#if A6PLTE
 +	a6_xnu_puts("arm_vm_init: begin\n");
 +#endif
  	arm_vm_init(xmaxmem, args);
@@ -5776,7 +5681,7 @@ index 6690846..d470c14 100644
  
  	if (debug_boot_arg) {
  		patch_low_glo();
-@@ -583,6 +595,13 @@ arm_init(
+@@ -527,6 +537,13 @@ arm_init(
  
  	/* Setup debugging output. */
  	const unsigned int serial_exists = serial_init();
@@ -5790,11 +5695,11 @@ index 6690846..d470c14 100644
  	kernel_startup_initialize_upto(STARTUP_SUB_KPRINTF);
  	kprintf("kprintf initialized\n");
  
-diff --git i/osfmk/arm/commpage/commpage_asm.s w/osfmk/arm/commpage/commpage_asm.s
-index 4a74130..14f1a6b 100644
---- i/osfmk/arm/commpage/commpage_asm.s
+diff --git c/osfmk/arm/commpage/commpage_asm.s w/osfmk/arm/commpage/commpage_asm.s
+index da0bbba..8fc36ac 100644
+--- c/osfmk/arm/commpage/commpage_asm.s
 +++ w/osfmk/arm/commpage/commpage_asm.s
-@@ -275,7 +275,19 @@ _pfz_trylock_and_enqueue:
+@@ -273,7 +273,19 @@ _pfz_trylock_and_enqueue:
  	mov		w11, #1			 // locked value = w11 = 1
  
  	// Try to grab the lock
@@ -5814,7 +5719,7 @@ index 4a74130..14f1a6b 100644
  	cbz		w10, Ltrylock_enqueue_success
  
  	mov		x0, #-1			// Failed
-@@ -325,7 +337,19 @@ _pfz_trylock_and_dequeue:
+@@ -323,7 +335,19 @@ _pfz_trylock_and_dequeue:
  	mov		w10, wzr		 // unlock value = w10 = 0
  	mov		w11, #1			 // locked value = w11 = 1
  
@@ -5834,23 +5739,9 @@ index 4a74130..14f1a6b 100644
  	cbz		w10, Ltrylock_dequeue_success
  
  	mov		x0, #-1			// Failed
-diff --git i/osfmk/arm/machine_routines_common.c w/osfmk/arm/machine_routines_common.c
-index b65f76c..d24dd17 100644
---- i/osfmk/arm/machine_routines_common.c
-+++ w/osfmk/arm/machine_routines_common.c
-@@ -51,7 +51,9 @@
- #include <machine/monotonic.h>
- #include <pexpert/pexpert.h>
- #include <pexpert/device_tree.h>
-+#if defined(APPLE_ARM64_ARCH_FAMILY)
- #include <pexpert/arm64/apple_arm64_cpu.h>
-+#endif
- 
- #include <mach/machine.h>
- #include <mach/machine/sdt.h>
-diff --git i/osfmk/arm/pmap/pmap.c w/osfmk/arm/pmap/pmap.c
-index 19e7e67..03d86ba 100644
---- i/osfmk/arm/pmap/pmap.c
+diff --git c/osfmk/arm/pmap/pmap.c w/osfmk/arm/pmap/pmap.c
+index fc2096f..0a38e92 100644
+--- c/osfmk/arm/pmap/pmap.c
 +++ w/osfmk/arm/pmap/pmap.c
 @@ -84,8 +84,10 @@
  
@@ -5861,18 +5752,26 @@ index 19e7e67..03d86ba 100644
  #include <arm64/ppl/uat.h>
 +#endif
  
- #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
+ #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR)
  #include <arm64/amcc_rorgn.h>
-@@ -113,6 +115,8 @@
+@@ -109,6 +111,8 @@
  #include <IOKit/IOHibernatePrivate.h>
  #endif /* HIBERNATION */
  
 +MARK_AS_PMAP_TEXT static void pmap_phys_write_disable(vm_address_t va);
 +
- #define PMAP_L1_MAX_ENTRY (ARM_PTE_T1_REGION_MASK(TCR_EL1_BOOT) >> ARM_TT_L1_SHIFT)
- #define PMAP_ROOT_ALLOC_SIZE ((PMAP_L1_MAX_ENTRY + 1) * sizeof(tt_entry_t))
+ #ifdef __ARM64_PMAP_SUBPAGE_L1__
+ #define PMAP_ROOT_ALLOC_SIZE (((ARM_TT_L1_INDEX_MASK >> ARM_TT_L1_SHIFT) + 1) * sizeof(tt_entry_t))
+ #else
+@@ -2183,13 +2187,17 @@ pmap_bootstrap(
+ 	/**
+ 	 * Bootstrap any necessary UAT data structures and values needed from the device tree.
+ 	 */
++#if !A6PLTE
+ 	uat_bootstrap();
++#endif
  
-@@ -2334,7 +2338,9 @@ pmap_bootstrap(
+ 
  	/**
  	 * Bootstrap any necessary SART data structures and values needed from the device tree.
  	 */
@@ -5882,7 +5781,7 @@ index 19e7e67..03d86ba 100644
  
  	/**
  	 * Don't make any assumptions about the alignment of avail_start before this
-@@ -4952,8 +4958,13 @@ pmap_page_protect_options_with_flush_range(
+@@ -4676,8 +4684,13 @@ pmap_page_protect_options_with_flush_range(
  			}
  #endif
  			if (remove && (options & PMAP_OPTIONS_COMPRESSOR)) {
@@ -5896,7 +5795,7 @@ index 19e7e67..03d86ba 100644
  			}
  			goto protect_skip_pve_pass1;
  		}
-@@ -12237,6 +12248,7 @@ pmap_unpin_kernel_pages(vm_offset_t kva __unused, size_t nbytes __unused)
+@@ -11617,6 +11630,7 @@ pmap_unpin_kernel_pages(vm_offset_t kva __unused, size_t nbytes __unused)
  #endif /* !XNU_MONITOR */
  
  
@@ -5904,7 +5803,7 @@ index 19e7e67..03d86ba 100644
  MARK_AS_PMAP_TEXT static inline void
  pmap_cs_lockdown_pages(vm_address_t kva, vm_size_t size, bool ppl_writable)
  {
-@@ -12257,6 +12269,8 @@ pmap_cs_unlockdown_pages(vm_address_t kva, vm_size_t size, bool ppl_writable)
+@@ -11637,6 +11651,8 @@ pmap_cs_unlockdown_pages(vm_address_t kva, vm_size_t size, bool ppl_writable)
  #endif
  }
  
@@ -5913,11 +5812,20 @@ index 19e7e67..03d86ba 100644
  /**
   * Perform basic validation checks on the destination only and
   * corresponding offset/sizes prior to writing to a read only allocation.
-diff --git i/osfmk/arm/pmap/pmap.h w/osfmk/arm/pmap/pmap.h
-index f9e841f..2cea66d 100644
---- i/osfmk/arm/pmap/pmap.h
+diff --git c/osfmk/arm/pmap/pmap.h w/osfmk/arm/pmap/pmap.h
+index df672c6..b5dce9e 100644
+--- c/osfmk/arm/pmap/pmap.h
 +++ w/osfmk/arm/pmap/pmap.h
-@@ -773,7 +773,7 @@ _pmap_pending_preemption_real(void)
+@@ -419,7 +419,7 @@ struct pmap {
+ 	/* Whether the pmap is used for Rosetta. */
+ 	bool is_rosetta;
+ #else
+-	bool reserved10;
++	bool a6_reserved_cs;
+ #endif /* defined(CONFIG_ROSETTA) */
+ 
+ #if DEVELOPMENT || DEBUG
+@@ -747,7 +747,7 @@ _pmap_pending_preemption_real(void)
  	return !!(*((volatile ast_t*)ast_pending()) & AST_URGENT);
  }
  
@@ -5926,7 +5834,7 @@ index f9e841f..2cea66d 100644
  bool pmap_pending_preemption(void); // more complicated, so externally defined
  #else /* SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT) */
  #define pmap_pending_preemption _pmap_pending_preemption_real
-diff --git i/osfmk/arm64/a6plte_interrupts.c w/osfmk/arm64/a6plte_interrupts.c
+diff --git c/osfmk/arm64/a6plte_interrupts.c w/osfmk/arm64/a6plte_interrupts.c
 new file mode 100644
 index 0000000..8570b16
 --- /dev/null
@@ -5969,11 +5877,11 @@ index 0000000..8570b16
 +    a6_gic_end(&gic,token);
 +}
 +#endif
-diff --git i/osfmk/arm64/arm_vm_init.c w/osfmk/arm64/arm_vm_init.c
-index 756af52..d8f196a 100644
---- i/osfmk/arm64/arm_vm_init.c
+diff --git c/osfmk/arm64/arm_vm_init.c w/osfmk/arm64/arm_vm_init.c
+index d89b0f1..a61c59e 100644
+--- c/osfmk/arm64/arm_vm_init.c
 +++ w/osfmk/arm64/arm_vm_init.c
-@@ -357,6 +357,9 @@ SECURITY_READ_ONLY_LATE(vm_offset_t) arm_vm_kernelcache_phys_end;
+@@ -352,6 +352,9 @@ SECURITY_READ_ONLY_LATE(vm_offset_t) arm_vm_kernelcache_phys_end;
  
  #if __ARM_KERNEL_PROTECT__
  extern void ExceptionVectorsBase;
@@ -5983,9 +5891,9 @@ index 756af52..d8f196a 100644
  extern void ExceptionVectorsEnd;
  #endif /* __ARM_KERNEL_PROTECT__ */
  
-@@ -1841,6 +1844,10 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
- 	 */
+@@ -1847,6 +1850,10 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	gPhysSize = mem_size = ((gPhysBase + args->memSize) & ~PAGE_MASK) - gPhysBase;
+ 
  	mem_actual = args->memSizeActual ? args->memSizeActual : mem_size;
 +#if defined(A6PLTE)
 +	kprintf("arm_vm_init: RAM PA=%llx size=%llx top=%llx\n",
@@ -5994,7 +5902,7 @@ index 756af52..d8f196a 100644
  
  	if ((memory_size != 0) && (mem_size > memory_size)) {
  		mem_size = memory_size;
-@@ -1862,7 +1869,13 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1866,7 +1873,13 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  
  	// Slide the physical aperture to a random page-aligned location within the slide range
@@ -6008,7 +5916,7 @@ index 756af52..d8f196a 100644
  	assert(physmap_slide < ARM64_PHYSMAP_SLIDE_RANGE);
  
  	physmap_base += physmap_slide;
-@@ -1945,6 +1958,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1944,6 +1957,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  
  	/* Initialize invalid tte page */
@@ -6018,7 +5926,7 @@ index 756af52..d8f196a 100644
  	invalid_tte = (tt_entry_t *)alloc_ptpage(TRUE);
  	invalid_ttep = kvtophys((vm_offset_t)invalid_tte);
  	bzero(invalid_tte, ARM_PGBYTES);
-@@ -1991,6 +2007,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1990,6 +2006,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	/*
  	 * Now retrieve addresses for various segments from kernel mach-o header
  	 */
@@ -6028,7 +5936,7 @@ index 756af52..d8f196a 100644
  	segPRELINKTEXTB  = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PRELINK_TEXT", &segSizePRELINKTEXT);
  	segPLKDATACONSTB = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PLK_DATA_CONST", &segSizePLKDATACONST);
  	segPLKTEXTEXECB  = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PLK_TEXT_EXEC", &segSizePLKTEXTEXEC);
-@@ -2121,6 +2140,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2094,6 +2113,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	vm_prelink_sdata = segPRELINKDATAB;
  	vm_prelink_edata = segPRELINKDATAB + segSizePRELINKDATA;
  
@@ -6038,11 +5946,11 @@ index 756af52..d8f196a 100644
  	arm_vm_prot_init(args);
  
  	/*
-@@ -2161,14 +2183,32 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
- 	kasan_init();
- #endif /* KASAN */
+@@ -2140,14 +2162,32 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  
-+#if defined(A6PLTE)
+ 	arm_set_user_tbi();
+ 
++#if A6PLTE
 +	kprintf("arm_vm_init: building physical aperture\n");
 +#endif
  	arm_vm_physmap_init(args);
@@ -6071,38 +5979,36 @@ index 756af52..d8f196a 100644
  	kva_active = TRUE;
  	// global table pointers may need to be different due to physical aperture remapping
  	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
-diff --git i/osfmk/arm64/caches_asm.s w/osfmk/arm64/caches_asm.s
-index 1588830..ff2b64e 100644
---- i/osfmk/arm64/caches_asm.s
+diff --git c/osfmk/arm64/caches_asm.s w/osfmk/arm64/caches_asm.s
+index f2c2a00..a087ede 100644
+--- c/osfmk/arm64/caches_asm.s
 +++ w/osfmk/arm64/caches_asm.s
-@@ -213,6 +213,7 @@ L_ipui_loop:
+@@ -212,6 +212,7 @@ L_ipui_loop:
  	.globl EXT(CleanPoC_Dcache)
  	.globl EXT(clean_mmu_dcache)
  LEXT(CleanPoC_Dcache)
 +LEXT(clean_mmu_dcache)
- 	ARM64_PROLOG
  #if  defined(APPLE_ARM64_ARCH_FAMILY)
  	dsb		sy
-@@ -304,6 +305,14 @@ L_cpudr_loop:
+ 	ret
+@@ -276,6 +277,12 @@ L_cpudr_loop:
   */
  	.text
  	.align 2
-+#if defined(A6PLTE)
-+	/* Cortex-A53 has no Apple HID cache-maintenance override. These entry
-+	 * points use the same architectural DC CVAC + DSB implementation. */
++#if A6PLTE
 +	.globl EXT(CleanPoC_DcacheRegion_Force_nopreempt)
 +	.globl EXT(CleanPoC_DcacheRegion_Force_nopreempt_nohid)
 +LEXT(CleanPoC_DcacheRegion_Force_nopreempt)
 +LEXT(CleanPoC_DcacheRegion_Force_nopreempt_nohid)
 +#endif
  LEXT(CleanPoC_DcacheRegion_internal)
- 	dsb		sy
- 	CLEANPOC_DCACHEREGION
-diff --git i/osfmk/arm64/corecrypto/arm64_isa_compatibility.h w/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
-index 8800687..cdfcbb0 100644
---- i/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
+ 	#define CLINE_FLUSH_STRIDE MMU_CLINE
+ 
+diff --git c/osfmk/arm64/corecrypto/arm64_isa_compatibility.h w/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
+index b9549da..b5f5756 100644
+--- c/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
 +++ w/osfmk/arm64/corecrypto/arm64_isa_compatibility.h
-@@ -37,7 +37,7 @@
+@@ -28,7 +28,7 @@
  // #include <Availability.h>
  #include <sys/cdefs.h>
  
@@ -6111,27 +6017,13 @@ index 8800687..cdfcbb0 100644
  #define __USES_V_CRYPTO_INTRINSICS 1
  #else
  #define __USES_V_CRYPTO_INTRINSICS 0
-diff --git i/osfmk/arm64/pcb.c w/osfmk/arm64/pcb.c
-index 4538d50..818047a 100644
---- i/osfmk/arm64/pcb.c
-+++ w/osfmk/arm64/pcb.c
-@@ -71,7 +71,9 @@
- 
- #include <IOKit/IOBSD.h>
- 
-+#if defined(APPLE_ARM64_ARCH_FAMILY)
- #include <pexpert/arm64/apple_arm64_cpu.h>
-+#endif
- #include <pexpert/pexpert.h>
- 
- // fixme: rdar://114299113 tracks resolving the supportlib issue with hwtrace features
-diff --git i/osfmk/arm64/proc_reg.h w/osfmk/arm64/proc_reg.h
-index f4d148b..a0b2687 100644
---- i/osfmk/arm64/proc_reg.h
+diff --git c/osfmk/arm64/proc_reg.h w/osfmk/arm64/proc_reg.h
+index 133b07f..576e2e5 100644
+--- c/osfmk/arm64/proc_reg.h
 +++ w/osfmk/arm64/proc_reg.h
-@@ -243,6 +243,12 @@
- /* D-Cache, 128KB for Acc8 PCore, 8-way. 64KB for ECore, 8-way. */
- #define MMU_CLINE   6                      /* cache line size is 1<<MMU_CLINE (64) */
+@@ -213,6 +213,12 @@
+ /* D-Cache. */
+ #define MMU_CLINE   6
  
 +#elif defined (A6PLTE)
 +
@@ -6142,23 +6034,22 @@ index f4d148b..a0b2687 100644
  #elif defined (VMAPPLE)
  
  /* I-Cache. */
-diff --git i/osfmk/arm64/sleh.c w/osfmk/arm64/sleh.c
-index 0554aa8..56a8898 100644
---- i/osfmk/arm64/sleh.c
+diff --git c/osfmk/arm64/sleh.c w/osfmk/arm64/sleh.c
+index c40c6ea..88f2300 100644
+--- c/osfmk/arm64/sleh.c
 +++ w/osfmk/arm64/sleh.c
-@@ -55,8 +55,10 @@
- #include <machine/machine_cpc.h>
+@@ -52,7 +52,9 @@
+ #include <machine/limits.h>
  
  #include <pexpert/arm/protos.h>
 +#if defined(APPLE_ARM64_ARCH_FAMILY)
- #include <pexpert/arm64/apple_arm64_cpu.h>
  #include <pexpert/arm64/apple_arm64_regs.h>
 +#endif
  #include <pexpert/arm64/board_config.h>
  
  #include <vm/vm_page.h>
-@@ -644,6 +646,9 @@ panic_with_thread_kernel_state(const char *msg, arm_saved_state_t *ss)
- 
+@@ -482,6 +484,9 @@ panic_with_thread_kernel_state(const char *msg, arm_saved_state_t *ss)
+ 	}
  
  	panic_plain("%s at pc 0x%016llx, lr 0x%016llx (saved state: %p%s)\n"
 +#if A6PLTE
@@ -6167,17 +6058,17 @@ index 0554aa8..56a8898 100644
  	    "\t  x0:  0x%016llx x1:  0x%016llx  x2:  0x%016llx  x3:  0x%016llx\n"
  	    "\t  x4:  0x%016llx x5:  0x%016llx  x6:  0x%016llx  x7:  0x%016llx\n"
  	    "\t  x8:  0x%016llx x9:  0x%016llx  x10: 0x%016llx  x11: 0x%016llx\n"
-@@ -654,6 +659,9 @@ panic_with_thread_kernel_state(const char *msg, arm_saved_state_t *ss)
+@@ -492,6 +497,9 @@ panic_with_thread_kernel_state(const char *msg, arm_saved_state_t *ss)
  	    "\t  x28: 0x%016llx fp:  0x%016llx  lr:  0x%016llx  sp:  0x%016llx\n"
- 	    "\t  pc:  0x%016llx cpsr: 0x%08x         esr: 0x%016llx  far: 0x%016llx\n",
+ 	    "\t  pc:  0x%016llx cpsr: 0x%08x         esr: 0x%08x          far: 0x%016llx\n",
  	    msg, state->pc, state->lr, ss, (ss_valid ? "" : " INVALID"),
 +#if A6PLTE
-+	    state->esr, state->far,
++	    (uint64_t)state->esr, state->far,
 +#endif
  	    state->x[0], state->x[1], state->x[2], state->x[3],
  	    state->x[4], state->x[5], state->x[6], state->x[7],
  	    state->x[8], state->x[9], state->x[10], state->x[11],
-@@ -3010,7 +3018,10 @@ sleh_irq(arm_saved_state_t *state)
+@@ -1857,7 +1865,10 @@ sleh_irq(arm_saved_state_t *state)
  
  	sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_OTHER);
  
@@ -6189,14 +6080,14 @@ index 0554aa8..56a8898 100644
  	PE_handle_ext_interrupt();
  #else
  	/* Run the registered interrupt handler. */
-diff --git i/osfmk/arm64/start.s w/osfmk/arm64/start.s
-index 6aa6fe4..94980ee 100644
---- i/osfmk/arm64/start.s
+diff --git c/osfmk/arm64/start.s w/osfmk/arm64/start.s
+index e5336e5..9ce3051 100644
+--- c/osfmk/arm64/start.s
 +++ w/osfmk/arm64/start.s
 @@ -33,7 +33,9 @@
- #include <pexpert/arm64/board_config.h>
  #include <mach_assert.h>
  #include <machine/asm.h>
+ #include "assym.s"
 +#if defined(APPLE_ARM64_ARCH_FAMILY)
  #include <arm64/tunables/tunables.s>
 +#endif
@@ -6232,7 +6123,7 @@ index 6aa6fe4..94980ee 100644
  /*
   * Checks the reset handler for global and CPU-specific reset-assist functions,
   * then jumps to the reset handler with boot args and cpu data. This is copied
-@@ -207,8 +231,8 @@ Lskip_cpu_reset_handler:
+@@ -198,8 +222,8 @@ Lskip_cpu_reset_handler:
  	.align 3
  	.global EXT(LowResetVectorEnd)
  LEXT(LowResetVectorEnd)
@@ -6242,7 +6133,7 @@ index 6aa6fe4..94980ee 100644
  LEXT(SleepToken)
  	.space	(stSize_NUM),0
  #endif
-@@ -242,6 +266,38 @@ LEXT(_start)
+@@ -232,6 +256,38 @@ LEXT(_start)
  	.align 12, 0
  	.global	EXT(LowExceptionVectorBase)
  LEXT(LowExceptionVectorBase)
@@ -6281,16 +6172,16 @@ index 6aa6fe4..94980ee 100644
  	/* EL1 SP 0 */
  	b		.
  	.align	7
-@@ -277,6 +333,7 @@ LEXT(LowExceptionVectorBase)
+@@ -267,6 +323,7 @@ LEXT(LowExceptionVectorBase)
  	b		.
  	.align	7
  	b		.
 +#endif /* A6PLTE */
  	.align 12, 0
  
- #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR)
-@@ -291,6 +348,28 @@ LEXT(bootstrap_instructions)
- #endif /* defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR) */
+ #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR)
+@@ -281,6 +338,28 @@ LEXT(bootstrap_instructions)
+ #endif /* defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) */
  	.align 2
  	.globl EXT(resume_idle_cpu)
 +#if defined(A6PLTE)
@@ -6318,7 +6209,7 @@ index 6aa6fe4..94980ee 100644
  LEXT(resume_idle_cpu)
  	adrp	lr, EXT(arm_init_idle_cpu)@page
  	add		lr, lr, EXT(arm_init_idle_cpu)@pageoff
-@@ -393,13 +472,14 @@ start_cpu:
+@@ -383,13 +462,15 @@ start_cpu:
   *   arg5 - Scratch register
   *   arg6 - Scratch register
   *   arg7 - Scratch register
@@ -6329,12 +6220,13 @@ index 6aa6fe4..94980ee 100644
  	lsr		$4, $4, #(ARM_TTE_BLOCK_L2_SHIFT)	// Get index in L2 table for block entry
  	lsl		$4, $4, #(TTE_SHIFT)				// Convert index into pointer offset
  	add		$4, $2, $4							// Get L2 entry pointer
--	mov		$5, #(ARM_TTE_BOOT_BLOCK_LOWER)		// Get L2 block entry template
-+	mov		$5, x8							// L2 attributes supplied by the mapping caller
- 	orr		$5, $5, #(ARM_TTE_BOOT_BLOCK_UPPER)
+-	mov		$5, #(ARM_TTE_BOOT_BLOCK)			// Get L2 block entry template
++	mov		$5, x8			// Mapping caller supplies RAM/device attributes
++	/* 8796 ARM_TTE_BOOT_BLOCK includes all bootstrap RAM attributes. */
  	and		$6, $1, #(ARM_TTE_BLOCK_L2_MASK)	// Get address bits of block mapping
  	orr		$6, $5, $6
-@@ -467,8 +547,18 @@ start_cpu:
+ 	mov		$5, $3
+@@ -456,8 +537,18 @@ start_cpu:
  	.globl EXT(start_first_cpu)
  LEXT(start_first_cpu)
  
@@ -6355,7 +6247,7 @@ index 6aa6fe4..94980ee 100644
  	msr		DAIFSet, #(DAIFSC_ALL)				// Disable all interrupts
  
  	mov		x20, x0
-@@ -479,6 +569,12 @@ LEXT(start_first_cpu)
+@@ -468,6 +559,12 @@ LEXT(start_first_cpu)
  	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
  	MSR_VBAR_EL1_X0
  
@@ -6368,7 +6260,7 @@ index 6aa6fe4..94980ee 100644
  
  	// Get the kernel memory parameters from the boot args
  	ldr		x22, [x20, BA_VIRT_BASE]			// Get the kernel virt base
-@@ -536,7 +632,11 @@ LEXT(start_first_cpu)
+@@ -525,7 +622,11 @@ LEXT(start_first_cpu)
  	mov		x0, #(ARM_TTE_EMPTY)				// Load invalid entry template
  	mov		x1, x25								// Start at V=P pagetable root
  	mov		x2, #(TTE_PGENTRIES)				// Load number of entries per page
@@ -6380,15 +6272,15 @@ index 6aa6fe4..94980ee 100644
  
  Linvalidate_bootstrap:							// do {
  	str		x0, [x1], #(1 << TTE_SHIFT)			//   Invalidate and advance
-@@ -613,6 +713,7 @@ Lkernelcache_base_found:
+@@ -602,6 +703,7 @@ Lkernelcache_base_found:
  	 * x5 - total number of L2 entries to allocate
  	 */
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
-+	mov x8, #(ARM_TTE_BOOT_BLOCK_LOWER)
++	mov x8, #(ARM_TTE_BOOT_BLOCK)
  	/* create_bootstrap_mapping(vbase, pbase, num_ents, L1 table, freeptr) */
  	create_bootstrap_mapping x0,  x4,  x5, x1, x2, x6, x10, x11, x12, x13
  
-@@ -620,6 +721,30 @@ Lkernelcache_base_found:
+@@ -609,6 +711,30 @@ Lkernelcache_base_found:
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
  	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
  
@@ -6419,7 +6311,7 @@ index 6aa6fe4..94980ee 100644
  	/* Ensure TTEs are visible */
  	dsb		ish
  
-@@ -727,6 +852,11 @@ common_start:
+@@ -720,6 +846,11 @@ common_start:
  1:
  
  	// Set up the exception vectors
@@ -6431,7 +6323,7 @@ index 6aa6fe4..94980ee 100644
  #if __ARM_KERNEL_PROTECT__
  	/* If this is not the first reset of the boot CPU, the alternate mapping
  	 * for the exception vectors will be set up, so use it.  Otherwise, we
-@@ -740,6 +870,7 @@ common_start:
+@@ -733,6 +864,7 @@ common_start:
  	add		x0, x0, EXT(ExceptionVectorsBase)@pageoff
  	add		x0, x0, x22									// Convert exception vector address to KVA
  	sub		x0, x0, x23
@@ -6439,7 +6331,7 @@ index 6aa6fe4..94980ee 100644
  1:
  	MSR_VBAR_EL1_X0
  
-@@ -770,6 +901,9 @@ common_start:
+@@ -763,6 +895,9 @@ common_start:
  	msr		CPACR_EL1, x0
  #endif
  
@@ -6449,7 +6341,7 @@ index 6aa6fe4..94980ee 100644
  	// Clear thread pointer
  	msr		TPIDR_EL1, xzr						// Set thread register
  
-@@ -781,10 +915,11 @@ common_start:
+@@ -774,10 +909,11 @@ common_start:
  	// Initialization common to all non-virtual Apple targets
  #endif  // APPLE_ARM64_ARCH_FAMILY
  
@@ -6461,9 +6353,9 @@ index 6aa6fe4..94980ee 100644
  	APPLY_TUNABLES x12, x13, x14
 +#endif
  
- #if HAS_CLUSTER && !NO_CPU_OVRD
- 	// Unmask external IRQs if we're restarting from non-retention WFI
-@@ -796,6 +931,15 @@ common_start:
+ 
+ #if HAS_CLUSTER
+@@ -790,6 +926,15 @@ common_start:
  	// If x21 != 0, we're doing a warm reset, so we need to trampoline to the kernel pmap.
  	cbnz	x21, Ltrampoline
  
@@ -6479,40 +6371,36 @@ index 6aa6fe4..94980ee 100644
  	// Set KVA of boot args as first arg
  	add		x0, x20, x22
  	sub		x0, x0, x23
-diff --git i/osfmk/conf/files.arm64 w/osfmk/conf/files.arm64
-index 878b515..f90a83f 100644
---- i/osfmk/conf/files.arm64
+diff --git c/osfmk/conf/files.arm64 w/osfmk/conf/files.arm64
+index c40d57b..66c6da3 100644
+--- c/osfmk/conf/files.arm64
 +++ w/osfmk/conf/files.arm64
 @@ -1,3 +1,4 @@
 +OPTIONS/a6plte optional a6plte
- OPTIONS/config_ecc_logging	optional config_ecc_logging
  OPTIONS/fb			optional fb
  
-@@ -37,8 +38,8 @@ osfmk/arm64/lz4_decode_arm64.s  standard
+ OPTIONS/debug			optional debug
+@@ -26,7 +27,7 @@ osfmk/arm64/WKdmData.s		standard
+ osfmk/arm64/lz4_decode_arm64.s  standard
  osfmk/arm64/lz4_encode_arm64.s  standard
  osfmk/arm64/amcc_rorgn_ppl.c optional nos_arm_asm config_pmap_ppl
- osfmk/arm64/amcc_rorgn_ppl_amcc.c optional nos_arm_asm config_pmap_ppl
 -osfmk/arm64/amcc_rorgn_common.c optional nos_arm_asm
--osfmk/arm64/amcc_rorgn_pv_ctrr.c optional nos_arm_asm
 +osfmk/arm64/amcc_rorgn_common.c optional nos_arm_asm not a6plte
-+osfmk/arm64/amcc_rorgn_pv_ctrr.c optional nos_arm_asm not a6plte
  osfmk/arm64/bcopy.s standard
  osfmk/arm64/bzero.s standard
  osfmk/arm/caches.c		standard
-@@ -129,3 +130,10 @@ osfmk/kern/ecc_init.c		standard
- osfmk/kern/ecc_logging.c	optional config_ecc_logging
+@@ -104,3 +105,8 @@ osfmk/arm64/machine_remote_time.c optional config_mach_bridge_recv_time
+ osfmk/arm64/corecrypto/sha256_compress_arm64.s	standard
  
- osfmk/kern/memory_error_logging.c	standard
+ osfmk/arm/counter.c	standard
 +
-+osfmk/arm64/a6plte_interrupts.c       standard
-+
-+# Generic EL1 startup for the Cortex-A53 board, without the Apple PPL monitor.
++osfmk/arm64/a6plte_interrupts.c standard
 +osfmk/arm/arm_init.c optional a6plte
 +osfmk/arm64/arm_vm_init.c optional a6plte
 +osfmk/arm64/start.s optional a6plte
-diff --git i/osfmk/console/serial_console.c w/osfmk/console/serial_console.c
-index 7784e72..9aafe75 100644
---- i/osfmk/console/serial_console.c
+diff --git c/osfmk/console/serial_console.c w/osfmk/console/serial_console.c
+index e5b23f2..99b447b 100644
+--- c/osfmk/console/serial_console.c
 +++ w/osfmk/console/serial_console.c
 @@ -130,7 +130,10 @@ SECURITY_READ_ONLY_EARLY(struct console_ops) cons_ops[] = {
  
@@ -6526,11 +6414,11 @@ index 7784e72..9aafe75 100644
  uint32_t cons_ops_index = VC_CONS_OPS;
  #else
  SECURITY_READ_ONLY_LATE(uint32_t) cons_ops_index = VC_CONS_OPS;
-diff --git i/osfmk/console/video_console.c w/osfmk/console/video_console.c
-index 648cb70..f27df27 100644
---- i/osfmk/console/video_console.c
+diff --git c/osfmk/console/video_console.c w/osfmk/console/video_console.c
+index 384118e..3feadcc 100644
+--- c/osfmk/console/video_console.c
 +++ w/osfmk/console/video_console.c
-@@ -2796,6 +2796,11 @@ vc_initialize(__unused struct vc_info * vinfo_p)
+@@ -2791,6 +2791,11 @@ vc_initialize(__unused struct vc_info * vinfo_p)
  void
  initialize_screen(PE_Video * boot_vinfo, unsigned int op)
  {
@@ -6542,7 +6430,7 @@ index 648cb70..f27df27 100644
  	unsigned int newMapSize = 0;
  	vm_offset_t newVideoVirt = 0;
  	boolean_t graphics_now;
-@@ -3048,6 +3053,7 @@ initialize_screen(PE_Video * boot_vinfo, unsigned int op)
+@@ -3043,6 +3048,7 @@ initialize_screen(PE_Video * boot_vinfo, unsigned int op)
  	}
  #endif
  	}
@@ -6550,48 +6438,42 @@ index 648cb70..f27df27 100644
  }
  
  void vcattach(void); /* XXX gcc 4 warning cleanup */
-diff --git i/osfmk/kern/debug.c w/osfmk/kern/debug.c
-index 48f9405..d8228a0 100644
---- i/osfmk/kern/debug.c
+diff --git c/osfmk/kern/debug.c w/osfmk/kern/debug.c
+index 0a00656..4c65112 100644
+--- c/osfmk/kern/debug.c
 +++ w/osfmk/kern/debug.c
-@@ -82,6 +82,9 @@
+@@ -80,6 +80,9 @@
  #include <vm/vm_map.h>
  #include <vm/pmap.h>
- #include <vm/vm_compressor_xnu.h>
+ #include <vm/vm_compressor.h>
 +#if A6PLTE
 +#include <arm/caches_internal.h>
 +#endif
  #include <stdarg.h>
  #include <stdatomic.h>
  #include <sys/pgo.h>
-@@ -194,7 +197,12 @@ _Atomic(unsigned int)   panic_stop_count;
-  * More than enough for any typical format string passed to panic();
-  * anything longer will be truncated but that's better than nothing.
-  */
-+#if A6PLTE
-+/* A full ARM64 saved state must fit before the debug infrastructure starts. */
-+#define EARLY_PANIC_BUFLEN 2048
-+#else
- #define EARLY_PANIC_BUFLEN 256
-+#endif
+@@ -1069,6 +1072,19 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
+ {
+ #pragma clang diagnostic pop
  
- struct debugger_state {
- 	uint64_t        db_panic_options;
-@@ -1261,6 +1269,12 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
- 	if (PE_kputc == NULL) {
- 		char buf[EARLY_PANIC_BUFLEN];
- 		vsnprintf(buf, EARLY_PANIC_BUFLEN, panic_format_str, *panic_args);
-+#if defined(A6PLTE)
-+		extern void a6_xnu_puts(const char *);
-+		a6_xnu_puts("\nXNU EARLY PANIC: ");
-+		a6_xnu_puts(buf);
-+		a6_xnu_puts("\n");
++#if A6PLTE
++	/* Report before entering optional Apple panic infrastructure. */
++	extern void a6_xnu_puts(const char *);
++	char early_message[2048];
++	va_list early_args;
++	va_copy(early_args, *panic_args);
++	vsnprintf(early_message, sizeof(early_message), panic_format_str, early_args);
++	va_end(early_args);
++	a6_xnu_puts("\nXNU PANIC: ");
++	a6_xnu_puts(early_message);
++	a6_xnu_puts("\n");
 +#endif
- 		paniclog_append_noflush("panic: %s\n", buf);
- 		paniclog_append_noflush("Kernel panicked very early before serial init, spinning forever...\n");
- 		panic_spin_forever();
-@@ -1370,6 +1384,12 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
- void __attribute__((noinline, optnone))
++
+ #if defined(__x86_64__) && (DEVELOPMENT || DEBUG)
+ 	read_lbr();
+ #endif
+@@ -1150,6 +1166,12 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
+ void
  panic_spin_forever(void)
  {
 +#if A6PLTE
@@ -6603,11 +6485,25 @@ index 48f9405..d8228a0 100644
  	for (;;) {
  #if defined(__arm__) || defined(__arm64__)
  		/* On arm32, which doesn't have a WFE timeout, this may not return.  But that should be OK on this path. */
-diff --git i/osfmk/kern/printf.c w/osfmk/kern/printf.c
-index 2fc6931..c3a04a3 100644
---- i/osfmk/kern/printf.c
+diff --git c/osfmk/kern/kpc.h w/osfmk/kern/kpc.h
+index 8637608..7420815 100644
+--- c/osfmk/kern/kpc.h
++++ w/osfmk/kern/kpc.h
+@@ -263,7 +263,9 @@ extern void kpc_idle_exit(void);
+  * KPC PRIVATE
+  */
+ 
++#if !A6PLTE
+ extern uint32_t kpc_actionid[KPC_MAX_COUNTERS];
++#endif
+ 
+ /* handler for mp operations */
+ struct kpc_config_remote {
+diff --git c/osfmk/kern/printf.c w/osfmk/kern/printf.c
+index e44008f..d55b7ec 100644
+--- c/osfmk/kern/printf.c
 +++ w/osfmk/kern/printf.c
-@@ -877,6 +877,17 @@ static int
+@@ -869,6 +869,17 @@ static int
  vprintf_internal(const char *fmt, va_list ap_in, void *caller)
  {
  	if (fmt) {
@@ -6625,11 +6521,11 @@ index 2fc6931..c3a04a3 100644
  		struct console_printbuf_state info_data;
  
  		va_list ap;
-diff --git i/osfmk/kern/startup.c w/osfmk/kern/startup.c
-index c977c98..22519db 100644
---- i/osfmk/kern/startup.c
+diff --git c/osfmk/kern/startup.c w/osfmk/kern/startup.c
+index bec97fb..acaf04a 100644
+--- c/osfmk/kern/startup.c
 +++ w/osfmk/kern/startup.c
-@@ -460,11 +460,17 @@ void
+@@ -396,11 +396,17 @@ void
  kernel_startup_initialize_upto(startup_subsystem_id_t upto)
  {
  	struct startup_entry *cur = startup_entry_cur;
@@ -6648,11 +6544,11 @@ index c977c98..22519db 100644
  		    startup_phase >= STARTUP_SUB_KPRINTF) {
  			kprintf("%s[%d, rank %d]: %p(%p)\n", __func__,
  			    cur->subsystem, cur->rank, cur->func, cur->arg);
-diff --git i/osfmk/kern/startup.h w/osfmk/kern/startup.h
-index 5243b5d..0b5d000 100644
---- i/osfmk/kern/startup.h
+diff --git c/osfmk/kern/startup.h w/osfmk/kern/startup.h
+index 4a1a582..2a0eec7 100644
+--- c/osfmk/kern/startup.h
 +++ w/osfmk/kern/startup.h
-@@ -96,6 +96,10 @@ extern startup_subsystem_id_t startup_phase;
+@@ -93,6 +93,10 @@ extern startup_subsystem_id_t startup_phase;
  __options_decl(startup_debug_t, uint32_t, {
  	STARTUP_DEBUG_NONE    = 0x00000000,
  	STARTUP_DEBUG_VERBOSE = 0x00000001,
@@ -6662,10 +6558,10 @@ index 5243b5d..0b5d000 100644
 +#endif
  });
  
- /*!
-diff --git i/osfmk/mach/vm_map.defs w/osfmk/mach/vm_map.defs
-index c941237..1607619 100644
---- i/osfmk/mach/vm_map.defs
+ extern startup_debug_t startup_debug;
+diff --git c/osfmk/mach/vm_map.defs w/osfmk/mach/vm_map.defs
+index 1967192..5d4906e 100644
+--- c/osfmk/mach/vm_map.defs
 +++ w/osfmk/mach/vm_map.defs
 @@ -65,6 +65,9 @@ subsystem
  #if	KERNEL_SERVER || KOBJECT_SERVER
@@ -6676,12 +6572,12 @@ index c941237..1607619 100644
 +#endif
  	  vm_map 3800;
  
- #if KERNEL_SERVER
-diff --git i/osfmk/prng/prng_random.c w/osfmk/prng/prng_random.c
-index 504b3fa..dff3c27 100644
---- i/osfmk/prng/prng_random.c
+ #include <mach/std_types.defs>
+diff --git c/osfmk/prng/prng_random.c w/osfmk/prng/prng_random.c
+index c52f0ab..80367cb 100644
+--- c/osfmk/prng/prng_random.c
 +++ w/osfmk/prng/prng_random.c
-@@ -197,6 +197,22 @@ static struct {
+@@ -145,6 +145,22 @@ static struct {
  		     .strictFIPS = 0,
  	     }};
  
@@ -6701,110 +6597,89 @@ index 504b3fa..dff3c27 100644
 +STARTUP(LOCKS, STARTUP_RANK_LAST, a6_boot_random_enable_lock);
 +#endif
 +
- __attribute__((noinline))
- static void
- early_random_init(void)
-@@ -292,6 +308,21 @@ read_erandom_generate(void * buf, size_t nbytes)
+ static void read_erandom(void * buf, size_t nbytes);
+ 
+ /*
+@@ -229,10 +245,14 @@ read_erandom(void * buf, size_t nbytes)
  	size_t n;
  	int rc;
  
-+#if defined(A6PLTE)
+-	// We defer to the kernel PRNG after it has been installed and
+-	// initialized. This happens during corecrypto kext
+-	// initialization.
++#if A6PLTE
 +	bool locked = a6_boot_random_lock_ready;
-+	if (locked) {
-+		lck_spin_lock(&a6_boot_random_lock);
-+	}
-+	/* Registration may have finished while this caller waited for the lock. */
-+	if (prng_ready) {
-+		if (locked) {
-+			lck_spin_unlock(&a6_boot_random_lock);
-+		}
-+		read_random_generate(buf, nbytes);
-+		return;
-+	}
++	if (locked) lck_spin_lock(&a6_boot_random_lock);
 +#endif
-+
- 	// The DBRG request size is limited, so we break the request into
- 	// chunks.
- 	while (nbytes > 0) {
-@@ -307,6 +338,11 @@ read_erandom_generate(void * buf, size_t nbytes)
+ 	if (prng_ready) {
++#if A6PLTE
++		if (locked) lck_spin_unlock(&a6_boot_random_lock);
++#endif
+ 		read_random_generate(buf, nbytes);
+ 		return;
+ 	}
+@@ -252,6 +272,9 @@ read_erandom(void * buf, size_t nbytes)
  		buffer_bytes += n;
  		nbytes -= n;
  	}
-+#if defined(A6PLTE)
-+	if (locked) {
-+		lck_spin_unlock(&a6_boot_random_lock);
-+	}
-+#endif
- }
- 
- __static_testable __mockable void
-@@ -342,7 +378,9 @@ register_and_init_prng(struct cckprng_ctx *ctx, const struct cckprng_funcs *func
- 	uint64_t nonce = ml_get_timebase();
- 	prng_funcs.init_with_getentropy(prng_ctx, MAX_CPUS, sizeof(kprngseed), kprngseed, sizeof(nonce), &nonce, entropy_provide, NULL);
- 	prng_funcs.initgen(prng_ctx, boot_cpu_id);
-+#if !defined(A6PLTE)
- 	prng_ready = 1;
-+#endif
- 
- 	// Reseed with a key that has been securely combined with kernel-sourced platform randomness, where it was available.
- 	// Otherwise this is just more randomness from the bootloader.
-@@ -351,7 +389,21 @@ register_and_init_prng(struct cckprng_ctx *ctx, const struct cckprng_funcs *func
- 	cc_clear(sizeof(entropyseed), entropyseed);
- 	cc_clear(sizeof(kprngseed), kprngseed);
- 	cc_clear(sizeof(kprng_reseed), kprng_reseed);
-+#if defined(A6PLTE)
-+	/* Publish the full provider and retire the boot DRBG under the same lock
-+	 * used by bootstrap readers. Never hold that lock across provider calls. */
-+	bool locked = a6_boot_random_lock_ready;
-+	if (locked) {
-+		lck_spin_lock(&a6_boot_random_lock);
-+	}
-+	prng_ready = 1;
-+#endif
- 	cc_clear(sizeof(erandom), &erandom);
-+#if defined(A6PLTE)
-+	if (locked) {
-+		lck_spin_unlock(&a6_boot_random_lock);
-+	}
++#if A6PLTE
++	if (locked) lck_spin_unlock(&a6_boot_random_lock);
 +#endif
  }
  
  void
-@@ -370,6 +422,12 @@ random_cpu_init(int cpu)
- __mockable void
+@@ -274,10 +297,17 @@ register_and_init_prng(struct cckprng_ctx *ctx, const struct cckprng_funcs *func
+ 	uint64_t nonce = ml_get_timebase();
+ 	prng_funcs.init_with_getentropy(prng_ctx, MAX_CPUS, sizeof(bootseed), bootseed, sizeof(nonce), &nonce, entropy_provide, NULL);
+ 	prng_funcs.initgen(prng_ctx, master_cpu);
++#if A6PLTE
++	bool locked = a6_boot_random_lock_ready;
++	if (locked) lck_spin_lock(&a6_boot_random_lock);
++#endif
+ 	prng_ready = 1;
+ 
+ 	cc_clear(sizeof(bootseed), bootseed);
+ 	cc_clear(sizeof(erandom), &erandom);
++#if A6PLTE
++	if (locked) lck_spin_unlock(&a6_boot_random_lock);
++#endif
+ }
+ 
+ void
+@@ -296,6 +326,13 @@ random_cpu_init(int cpu)
+ void
  read_random(void * buffer, u_int numbytes)
  {
-+#if defined(A6PLTE)
++#if A6PLTE
 +	if (!prng_ready) {
-+		read_erandom_generate(buffer, numbytes);
++		(void)early_random();
++		read_erandom(buffer, numbytes);
 +		return;
 +	}
 +#endif
  	prng_funcs.refresh(prng_ctx);
  	read_random_generate(buffer, numbytes);
  }
-@@ -420,14 +478,48 @@ write_random(void * buffer, u_int numbytes)
- 
- 	if (numbytes > SHA512_DIGEST_LENGTH) {
- 		/* hash the input to minimize the time we need to hold the lock */
-+#if defined(A6PLTE)
-+		/* The bootstrap provider does not install g_crypto_funcs. */
-+		const struct ccdigest_info *di = &ccsha512_ltc_di;
-+		ccdigest_di_decl(di, ctx);
-+		ccdigest_init(di, ctx);
-+		ccdigest_update(di, ctx, numbytes, buffer);
-+		ccdigest_final(di, ctx, seed);
-+		ccdigest_di_clear(di, ctx);
+@@ -339,13 +376,43 @@ int
+ write_random(void * buffer, u_int numbytes)
+ {
+ 	uint8_t seed[SHA256_DIGEST_LENGTH];
++#if A6PLTE
++	const struct ccdigest_info *di = &ccsha256_ltc_di;
++	ccdigest_di_decl(di, ctx);
++	ccdigest_init(di, ctx);
++	ccdigest_update(di, ctx, numbytes, buffer);
++	ccdigest_final(di, ctx, seed);
++	ccdigest_di_clear(di, ctx);
 +#else
- 		SHA512_CTX ctx;
- 		SHA512_Init(&ctx);
- 		SHA512_Update(&ctx, buffer, numbytes);
- 		SHA512_Final(seed, &ctx);
+ 	SHA256_CTX ctx;
+-
+-	/* hash the input to minimize the time we need to hold the lock */
+ 	SHA256_Init(&ctx);
+ 	SHA256_Update(&ctx, buffer, numbytes);
+ 	SHA256_Final(seed, &ctx);
+-
 +#endif
- 	} else {
- 		memcpy(seed, buffer, numbytes);
- 	}
- 
 +#if defined(A6PLTE)
 +	if (!prng_ready) {
 +		bool locked = a6_boot_random_lock_ready;
@@ -6832,19 +6707,11 @@ index 504b3fa..dff3c27 100644
  	prng_funcs.reseed(prng_ctx, sizeof(seed), seed);
  	cc_clear(sizeof(seed), seed);
  
-diff --git i/osfmk/vm/pmap_cs.h w/osfmk/vm/pmap_cs.h
-index aa02107..297a09f 100644
---- i/osfmk/vm/pmap_cs.h
+diff --git c/osfmk/vm/pmap_cs.h w/osfmk/vm/pmap_cs.h
+index f04b72f..12364c4 100644
+--- c/osfmk/vm/pmap_cs.h
 +++ w/osfmk/vm/pmap_cs.h
-@@ -79,7 +79,6 @@ pmap_ce_free_acceleration_buffer(
- #include <vm/pmap.h>
- #include <kern/lock_rw.h>
- #include <libkern/image4/dlxk.h>
--#include <TrustCache/API.h>
- 
- 
- #if PMAP_CS
-@@ -95,6 +94,7 @@ pmap_ce_free_acceleration_buffer(
+@@ -65,6 +65,7 @@ __BEGIN_DECLS
  #endif
  
  #if PMAP_CS_PPL_MONITOR
@@ -6852,35 +6719,9 @@ index aa02107..297a09f 100644
  
  /*
   * XNU_MONITOR and PMAP_CS are both defined for the same targets in board_config.h.
-diff --git i/osfmk/vm/vm_resident.c w/osfmk/vm/vm_resident.c
-index 8bebebb..d609fde 100644
---- i/osfmk/vm/vm_resident.c
-+++ w/osfmk/vm/vm_resident.c
-@@ -3276,6 +3276,16 @@ vm_page_hash_lookup_data_dependent_locked(
- 	vm_page_packed_t *prev   = &bucket->page_list;
- 
- 	while (*prev) {
-+#if A6PLTE
-+		/* Keep the packed index and its owner visible in an early framebuffer
-+		 * panic.  The generic unpack assertion otherwise loses both values. */
-+		vm_page_packed_t raw = *prev;
-+		if ((raw & VM_PAGE_PACKED_FROM_ARRAY) &&
-+		    (raw & ~VM_PAGE_PACKED_FROM_ARRAY) >= vm_pages_count) {
-+			panic("A6PLTE VM hash: packed=%x count=%x bucket=%p prev=%p object=%p offset=%llx",
-+			    raw, vm_pages_count, bucket, prev, object, offset);
-+		}
-+#endif
- 		vm_page_t mem = (vm_page_t)(VM_PAGE_UNPACK_PTR(*prev));
- 
- 		if (mem->vmp_object == packed && mem->vmp_offset == offset) {
-@@ -12112,4 +12122,3 @@ vm_retire_boot_pages(void)
-  * SMC will store it in PMU SRAM under the 'sECC' key.
-  */
- uint64_t ecc_panic_physical_address = 0;
--
-diff --git i/pexpert/arm/a6plte/boot_abi.h w/pexpert/arm/a6plte/boot_abi.h
+diff --git c/pexpert/arm/a6plte/boot_abi.h w/pexpert/arm/a6plte/boot_abi.h
 new file mode 100644
-index 0000000..b06c269
+index 0000000..731e33d
 --- /dev/null
 +++ w/pexpert/arm/a6plte/boot_abi.h
 @@ -0,0 +1,25 @@
@@ -6889,7 +6730,7 @@ index 0000000..b06c269
 +#define A6_BOOT_ABI_H
 +#include <stdint.h>
 +#include <stddef.h>
-+/* Exact LP64 layout of rel/xnu-12377 pexpert/pexpert/arm64/boot.h. */
++/* Exact LP64 layout of rel/xnu-8796 pexpert/pexpert/arm64/boot.h. */
 +struct a6_boot_video { uint64_t base, display, stride, width, height, depth; };
 +struct a6_boot_args {
 +    uint16_t revision, version;
@@ -6899,19 +6740,19 @@ index 0000000..b06c269
 +    uint32_t machine_type, pad1;
 +    uint64_t device_tree;
 +    uint32_t device_tree_length;
-+    char command_line[1024];
++    char command_line[608];
 +    uint32_t pad2;
 +    uint64_t boot_flags, mem_size_actual;
 +};
 +_Static_assert(offsetof(struct a6_boot_args,video)==40,"Video ABI");
 +_Static_assert(offsetof(struct a6_boot_args,device_tree)==96,"DeviceTree ABI");
 +_Static_assert(offsetof(struct a6_boot_args,command_line)==108,"CommandLine ABI");
-+_Static_assert(offsetof(struct a6_boot_args,boot_flags)==1136,"BootFlags ABI");
-+_Static_assert(sizeof(struct a6_boot_args)==1152,"boot_args ABI");
++_Static_assert(offsetof(struct a6_boot_args,boot_flags)==720,"BootFlags ABI");
++_Static_assert(sizeof(struct a6_boot_args)==736,"boot_args ABI");
 +#endif
-diff --git i/pexpert/arm/a6plte/early.c w/pexpert/arm/a6plte/early.c
+diff --git c/pexpert/arm/a6plte/early.c w/pexpert/arm/a6plte/early.c
 new file mode 100644
-index 0000000..5de74aa
+index 0000000..1c855df
 --- /dev/null
 +++ w/pexpert/arm/a6plte/early.c
 @@ -0,0 +1,130 @@
@@ -6983,7 +6824,7 @@ index 0000000..5de74aa
 +    a6_xnu_bootstrap_video[1]=video.stride*video.height;
 +    state=BOOTSTRAP; written=0;
 +    a6_fb_clear(&screen);
-+    a6_xnu_puts("XNU 12377 / SM-A605FN\nstart_first_cpu: MMU OFF\nFramebuffer online. No UART.\n");
++    a6_xnu_puts("XNU 8796 / SM-A605FN\nstart_first_cpu: MMU OFF\nFramebuffer online. No UART.\n");
 +}
 +void a6_xnu_suspend_console(void) {
 +    /* Stop physical stores before a caller removes the identity mapping. */
@@ -7045,7 +6886,7 @@ index 0000000..5de74aa
 +    return 1;
 +}
 +#endif
-diff --git i/pexpert/arm/a6plte/early.h w/pexpert/arm/a6plte/early.h
+diff --git c/pexpert/arm/a6plte/early.h w/pexpert/arm/a6plte/early.h
 new file mode 100644
 index 0000000..1727b0b
 --- /dev/null
@@ -7064,7 +6905,7 @@ index 0000000..1727b0b
 +void a6_xnu_early_fault(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 +int a6_xnu_map_console(uintptr_t (*)(uintptr_t, uintptr_t));
 +#endif
-diff --git i/pexpert/arm/a6plte/fb.c w/pexpert/arm/a6plte/fb.c
+diff --git c/pexpert/arm/a6plte/fb.c w/pexpert/arm/a6plte/fb.c
 new file mode 100644
 index 0000000..b2dc3e1
 --- /dev/null
@@ -7163,7 +7004,7 @@ index 0000000..b2dc3e1
 +}
 +
 +#endif
-diff --git i/pexpert/arm/a6plte/fb.h w/pexpert/arm/a6plte/fb.h
+diff --git c/pexpert/arm/a6plte/fb.h w/pexpert/arm/a6plte/fb.h
 new file mode 100644
 index 0000000..2545a31
 --- /dev/null
@@ -7186,7 +7027,7 @@ index 0000000..2545a31
 +void a6_fb_hex(struct a6_fb *, uint64_t);
 +void a6_fb_clear(struct a6_fb *);
 +#endif
-diff --git i/pexpert/arm/a6plte/font5x12.h w/pexpert/arm/a6plte/font5x12.h
+diff --git c/pexpert/arm/a6plte/font5x12.h w/pexpert/arm/a6plte/font5x12.h
 new file mode 100644
 index 0000000..504e307
 --- /dev/null
@@ -7318,7 +7159,7 @@ index 0000000..504e307
 +    0x0004d640, 0x00000000,
 +    0x00000000, 0x00000000,
 +};
-diff --git i/pexpert/arm/a6plte/gic.c w/pexpert/arm/a6plte/gic.c
+diff --git c/pexpert/arm/a6plte/gic.c w/pexpert/arm/a6plte/gic.c
 new file mode 100644
 index 0000000..cfe3527
 --- /dev/null
@@ -7371,7 +7212,7 @@ index 0000000..cfe3527
 +    g->barrier();
 +}
 +#endif
-diff --git i/pexpert/arm/a6plte/gic.h w/pexpert/arm/a6plte/gic.h
+diff --git c/pexpert/arm/a6plte/gic.h w/pexpert/arm/a6plte/gic.h
 new file mode 100644
 index 0000000..5f57270
 --- /dev/null
@@ -7397,11 +7238,11 @@ index 0000000..5f57270
 +void a6_gic_end(struct a6_gic *,uint32_t);
 +void a6_gic_mask(struct a6_gic *,unsigned);
 +#endif
-diff --git i/pexpert/arm/pe_identify_machine.c w/pexpert/arm/pe_identify_machine.c
-index 937ce42..deffc98 100644
---- i/pexpert/arm/pe_identify_machine.c
+diff --git c/pexpert/arm/pe_identify_machine.c w/pexpert/arm/pe_identify_machine.c
+index aa75c0a..be1600c 100644
+--- c/pexpert/arm/pe_identify_machine.c
 +++ w/pexpert/arm/pe_identify_machine.c
-@@ -233,6 +233,12 @@ pe_arm_init_interrupts(void *args)
+@@ -563,6 +563,12 @@ pe_arm_init_interrupts(void *args)
  {
  	kprintf("pe_arm_init_interrupts: args: %p\n", args);
  
@@ -7414,13 +7255,13 @@ index 937ce42..deffc98 100644
  	/* Set up mappings for interrupt controller and possibly timers (if they haven't been set up already) */
  	if (args != NULL) {
  		if (!pe_arm_map_interrupt_controller()) {
-diff --git i/pexpert/arm/pe_init.c w/pexpert/arm/pe_init.c
-index db1c4a0..ccbdd8c 100644
---- i/pexpert/arm/pe_init.c
+diff --git c/pexpert/arm/pe_init.c w/pexpert/arm/pe_init.c
+index 04dda53..bd2eec1 100644
+--- c/pexpert/arm/pe_init.c
 +++ w/pexpert/arm/pe_init.c
-@@ -66,6 +66,14 @@ uint32_t        gPlatformMemoryID;
- uint32_t        gPlatformChipRole = UINT32_MAX;
- #endif /* not XNU_TARGET_OS_XR */
+@@ -54,6 +54,14 @@ SECURITY_READ_ONLY_LATE(volatile uint32_t) debug_enabled = FALSE;
+ uint8_t         gPlatformECID[8];
+ uint32_t        gPlatformMemoryID;
  static boolean_t vc_progress_initialized = FALSE;
 +#if A6PLTE
 +uintptr_t a6_emmc_map_sdhci(void) {
@@ -7431,9 +7272,9 @@ index db1c4a0..ccbdd8c 100644
 +uint64_t a6_usb_physical(uintptr_t address) { return ml_static_vtop(address); }
 +#endif
  uint64_t    last_hwaccess_thread = 0;
- uint8_t last_hwaccess_type = 0;
- uint8_t last_hwaccess_size = 0;
-@@ -218,6 +226,21 @@ check_for_panic_log(void)
+ char     gTargetTypeBuffer[16];
+ char     gModelTypeBuffer[32];
+@@ -182,6 +190,21 @@ check_for_panic_log(void)
  int
  PE_initialize_console(PE_Video * info, int op)
  {
@@ -7455,7 +7296,7 @@ index db1c4a0..ccbdd8c 100644
  	static int last_console = -1;
  
  	if (info && (info != &PE_state.video)) {
-@@ -266,6 +289,7 @@ PE_initialize_console(PE_Video * info, int op)
+@@ -230,6 +253,7 @@ PE_initialize_console(PE_Video * info, int op)
  	}
  
  	return 0;
@@ -7463,7 +7304,7 @@ index db1c4a0..ccbdd8c 100644
  }
  
  void
-@@ -311,7 +335,10 @@ PE_init_iokit(void)
+@@ -275,7 +299,10 @@ PE_init_iokit(void)
  	scale = PE_state.video.v_scale;
  	flip = 1;
  
@@ -7475,9 +7316,9 @@ index db1c4a0..ccbdd8c 100644
  	int notused;
  	show_progress = TRUE;
  	if (PE_parse_boot_argn("-restore", &notused, sizeof(notused))) {
-diff --git i/pexpert/arm/pe_kprintf.c w/pexpert/arm/pe_kprintf.c
-index 7a4bbd3..a7e8dae 100644
---- i/pexpert/arm/pe_kprintf.c
+diff --git c/pexpert/arm/pe_kprintf.c w/pexpert/arm/pe_kprintf.c
+index 65144c7..5902519 100644
+--- c/pexpert/arm/pe_kprintf.c
 +++ w/pexpert/arm/pe_kprintf.c
 @@ -12,6 +12,9 @@
  #include <kern/simple_lock.h>
@@ -7489,19 +7330,19 @@ index 7a4bbd3..a7e8dae 100644
  
  /* Globals */
  typedef void (*PE_kputc_t)(char);
-@@ -41,6 +44,11 @@ PE_init_kprintf_config(void)
+@@ -38,6 +41,11 @@ PE_init_kprintf_config(void)
  		panic("Platform Expert not initialized");
  	}
  
-+#if defined(A6PLTE)
-+	/* These legacy flags also gate our framebuffer sink; they do not enable UART. */
++#if A6PLTE
++	/* Enable the framebuffer sinks; no UART is implemented. */
 +	disable_serial_output = false;
 +	disable_kprintf_output = false;
 +#endif
- 	if (debug_boot_arg & (DB_KPRT | DB_PRT)) {
+ 	if (debug_boot_arg & DB_KPRT) {
  		disable_serial_output = false;
  	}
-@@ -105,6 +113,16 @@ kprintf(const char *fmt, ...)
+@@ -102,6 +110,16 @@ kprintf(const char *fmt, ...)
  	boolean_t       state;
  	void           *caller = __builtin_return_address(0);
  
@@ -7518,11 +7359,11 @@ index 7a4bbd3..a7e8dae 100644
  	if (!disable_serial_output && !disable_kprintf_output) {
  		va_start(listp, fmt);
  		va_copy(listp2, listp);
-diff --git i/pexpert/arm/pe_serial.c w/pexpert/arm/pe_serial.c
-index 032d9e0..620f945 100644
---- i/pexpert/arm/pe_serial.c
+diff --git c/pexpert/arm/pe_serial.c w/pexpert/arm/pe_serial.c
+index 997a4ab..0edb1fc 100644
+--- c/pexpert/arm/pe_serial.c
 +++ w/pexpert/arm/pe_serial.c
-@@ -35,6 +35,23 @@
+@@ -32,6 +32,23 @@
  #include <machine/pal_hibernate.h>
  #endif /* HIBERNATION */
  
@@ -7546,17 +7387,17 @@ index 032d9e0..620f945 100644
  struct pe_serial_functions {
  	/* Initialize the underlying serial hardware. */
  	void (*init) (void);
-@@ -1257,3 +1274,5 @@ serial_go_to_sleep(void)
+@@ -1187,3 +1204,5 @@ serial_go_to_sleep(void)
  	}
  #endif /* APPLE_UART */
  }
 +
 +#endif /* A6PLTE */
-diff --git i/pexpert/conf/Makefile.template w/pexpert/conf/Makefile.template
-index 3711a92..5377b96 100644
---- i/pexpert/conf/Makefile.template
+diff --git c/pexpert/conf/Makefile.template w/pexpert/conf/Makefile.template
+index 2d65891..b489bd9 100644
+--- c/pexpert/conf/Makefile.template
 +++ w/pexpert/conf/Makefile.template
-@@ -111,3 +111,7 @@ do_build_all:: do_all
+@@ -107,3 +107,7 @@ do_build_all:: do_all
  
  include $(MakeInc_rule)
  include $(MakeInc_dir)
@@ -7564,23 +7405,23 @@ index 3711a92..5377b96 100644
 +# Early physical console must not use canaries, tracing, or vector registers.
 +early.o_CFLAGS_ADD += -fno-stack-protector -fno-builtin -mgeneral-regs-only
 +fb.o_CFLAGS_ADD += -fno-stack-protector -fno-builtin -mgeneral-regs-only
-diff --git i/pexpert/conf/files.arm64 w/pexpert/conf/files.arm64
-index 9191100..872a0d1 100644
---- i/pexpert/conf/files.arm64
+diff --git c/pexpert/conf/files.arm64 w/pexpert/conf/files.arm64
+index 20b9ae7..3b8499d 100644
+--- c/pexpert/conf/files.arm64
 +++ w/pexpert/conf/files.arm64
-@@ -9,3 +9,7 @@ pexpert/arm/pe_serial.c                standard
- pexpert/arm/hwtrace/hwtrace.c         standard
- pexpert/arm/hwtrace/apt_msg.c         standard
- 
+@@ -5,3 +5,7 @@ pexpert/arm/pe_identify_machine.c      standard
+ pexpert/arm/pe_init.c                  standard
+ pexpert/arm/pe_kprintf.c               standard
+ pexpert/arm/pe_serial.c                standard
 +
-+pexpert/arm/a6plte/early.c              standard
-+pexpert/arm/a6plte/fb.c                 standard
-+pexpert/arm/a6plte/gic.c               standard
-diff --git i/pexpert/gen/pe_gen.c w/pexpert/gen/pe_gen.c
-index 6740cb0..a4f9b49 100644
---- i/pexpert/gen/pe_gen.c
++pexpert/arm/a6plte/early.c standard
++pexpert/arm/a6plte/fb.c standard
++pexpert/arm/a6plte/gic.c standard
+diff --git c/pexpert/gen/pe_gen.c w/pexpert/gen/pe_gen.c
+index e1d1571..126638e 100644
+--- c/pexpert/gen/pe_gen.c
 +++ w/pexpert/gen/pe_gen.c
-@@ -123,7 +123,10 @@ extern void vcattach(void);
+@@ -119,7 +119,10 @@ extern void vcattach(void);
  /* Globals */
  typedef void (*PE_putc_t)(char);
  
@@ -7592,7 +7433,7 @@ index 6740cb0..a4f9b49 100644
  PE_putc_t PE_putc;
  #else
  SECURITY_READ_ONLY_LATE(PE_putc_t) PE_putc;
-@@ -134,11 +137,16 @@ extern void console_write_char(char);
+@@ -130,11 +133,16 @@ extern void console_write_char(char);
  void
  PE_init_printf(boolean_t vm_initialized)
  {
@@ -7608,8 +7449,8 @@ index 6740cb0..a4f9b49 100644
 +#endif
  }
  
- __mockable uint32_t
-diff --git i/pexpert/pexpert/arm64/A6PLTE.h w/pexpert/pexpert/arm64/A6PLTE.h
+ uint32_t
+diff --git c/pexpert/pexpert/arm64/A6PLTE.h w/pexpert/pexpert/arm64/A6PLTE.h
 new file mode 100644
 index 0000000..8f22a22
 --- /dev/null
@@ -7638,23 +7479,25 @@ index 0000000..8f22a22
 +#define PLATFORM_PANIC_LOG_DISABLED 1
 +/* Intentionally absent: Apple PAC/AIC/CTRR/SPTM, PAN, LSE, 16K pages, SME. */
 +#endif
-diff --git i/pexpert/pexpert/arm64/Makefile w/pexpert/pexpert/arm64/Makefile
-index 75938b5..d1a33e6 100644
---- i/pexpert/pexpert/arm64/Makefile
+diff --git c/pexpert/pexpert/arm64/Makefile w/pexpert/pexpert/arm64/Makefile
+index 8226b8c..77a674d 100644
+--- c/pexpert/pexpert/arm64/Makefile
 +++ w/pexpert/pexpert/arm64/Makefile
-@@ -33,6 +33,7 @@ PRIVATE_KERNELFILES = \
- 	H15.h \
- 	H16.h \
- 	H17.h \
-+	A6PLTE.h \
- 	VMAPPLE.h
+@@ -17,7 +17,8 @@ PRIVATE_KERNELFILES = \
+ 	boot.h \
+ 	H13.h \
+ 	VMAPPLE.h \
+-	BCM2837.h
++	BCM2837.h \
++	A6PLTE.h
  
  
-diff --git i/pexpert/pexpert/arm64/board_config.h w/pexpert/pexpert/arm64/board_config.h
-index 5a6cd33..576e7cd 100644
---- i/pexpert/pexpert/arm64/board_config.h
+ # Headers installed into System.framework/PrivateHeaders (userspace internal SDK only).
+diff --git c/pexpert/pexpert/arm64/board_config.h w/pexpert/pexpert/arm64/board_config.h
+index 9454534..6498041 100644
+--- c/pexpert/pexpert/arm64/board_config.h
 +++ w/pexpert/pexpert/arm64/board_config.h
-@@ -49,6 +49,10 @@
+@@ -25,6 +25,10 @@
   * across all clusters.
   */
  

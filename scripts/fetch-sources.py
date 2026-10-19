@@ -3,9 +3,9 @@
 from pathlib import Path
 import subprocess
 r=Path(__file__).resolve().parents[1]
-sources=[('reference/hfs','apple-oss-distributions/hfs','124b970fd5390f1c2cd6f985478616a04f6eeb1f','hfs-a6plte.patch'),('reference/libpthread','apple-oss-distributions/libpthread','1f4f5265b319111142f1bf3a27d4484ef5a98314','libpthread-a6plte.patch'),('reference/libdispatch','apple-oss-distributions/libdispatch','2361ffb78a76f7ee488cd052eb0bc5c767118bf9',None),('reference/platform-headers','theo-os/xnu','54ea37c23af20f9d0354c0d758eb51dc68dbcd81',None),('lk2nd','msm8916-mainline/lk2nd','dd6c1db1c085b419ac5dfffbd429aadb994ac094','lk2nd-a6plte-xnu.patch'),
- ('xnu','apple-oss-distributions/xnu','ac9718fb1af618d5ce8678d0dc6e8a58f252216f','xnu-a6plte-framebuffer.patch'),
- ('reference/bootstrap_cmds','apple-oss-distributions/bootstrap_cmds','c71d2d72f48995baaea76148f61002e5299841de',None),
+sources=[('reference/hfs','apple-oss-distributions/hfs','31d5ec238dfab485e78a9a30b8b92d13e8914f03','hfs-a6plte.patch'),('reference/libpthread','apple-oss-distributions/libpthread','a6c70ca0e544347a0377babf748f831577ec24f9','libpthread-a6plte.patch'),('reference/libdispatch','apple-oss-distributions/libdispatch','cdb61e93e803d0093635f356753a9a30c09836db',None),('reference/platform-headers','theo-os/xnu','54ea37c23af20f9d0354c0d758eb51dc68dbcd81',None),('lk2nd','msm8916-mainline/lk2nd','dd6c1db1c085b419ac5dfffbd429aadb994ac094','lk2nd-a6plte-xnu.patch'),
+ ('xnu','apple-oss-distributions/xnu','1b191cb58250d0705d8a51287127505aa4bc0789','xnu-a6plte-framebuffer.patch'),
+ ('reference/bootstrap_cmds','apple-oss-distributions/bootstrap_cmds','fc3180f320239c85da79fc30a281a8830f1301f1',None),
  ('reference/PureDarwin','PureDarwin/PureDarwin','1bbaeb2ee6aa41e6f792a0b1e2943cc295b3b290',None)]
 for directory,repo,commit,patch in sources:
     dest=r/directory

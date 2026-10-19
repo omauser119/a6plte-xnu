@@ -1,6 +1,6 @@
-diff --git i/kern/kern_init.c w/kern/kern_init.c
+diff --git c/kern/kern_init.c w/kern/kern_init.c
 index 871b0d8..9fc0450 100644
---- i/kern/kern_init.c
+--- c/kern/kern_init.c
 +++ w/kern/kern_init.c
 @@ -10,6 +10,11 @@
  #include <kern/debug.h>
@@ -14,9 +14,9 @@ index 871b0d8..9fc0450 100644
  kern_return_t pthread_start(kmod_info_t * ki, void *d);
  kern_return_t pthread_stop(kmod_info_t *ki, void *d);
  
-diff --git i/kern/kern_internal.h w/kern/kern_internal.h
-index 156ad74..3e932cd 100644
---- i/kern/kern_internal.h
+diff --git c/kern/kern_internal.h w/kern/kern_internal.h
+index d78a613..cea0810 100644
+--- c/kern/kern_internal.h
 +++ w/kern/kern_internal.h
 @@ -26,8 +26,8 @@
   * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
@@ -29,7 +29,7 @@ index 156ad74..3e932cd 100644
  
  #include <TargetConditionals.h>
  
-@@ -138,6 +138,7 @@ struct _pthread_registration_data {
+@@ -133,6 +133,7 @@ struct _pthread_registration_data {
  
  extern pthread_callbacks_t pthread_kern;
  
@@ -37,7 +37,7 @@ index 156ad74..3e932cd 100644
  struct ksyn_waitq_element {
  	TAILQ_ENTRY(ksyn_waitq_element) kwe_list;	/* link to other list members */
  	void *          kwe_kwqqueue;			/* queue blocked on */
-@@ -149,13 +150,16 @@ struct ksyn_waitq_element {
+@@ -144,13 +145,16 @@ struct ksyn_waitq_element {
  	uint32_t	kwe_psynchretval;		/* thread retval */
  	void		*kwe_uth;			/* uthread */
  };
@@ -54,16 +54,16 @@ index 156ad74..3e932cd 100644
  
  /* function declarations for pthread_kext.c */
  void pthread_init(void);
-@@ -235,5 +239,4 @@ workq_markfree_threadstack(proc_t p, thread_t th, vm_map_t vmap,
+@@ -230,5 +234,4 @@ workq_markfree_threadstack(proc_t p, thread_t th, vm_map_t vmap,
  // magical `nkevents` values for _pthread_wqthread
  #define WORKQ_EXIT_THREAD_NKEVENT   (-1)
  
 -#endif /* _SYS_PTHREAD_INTERNAL_H_ */
 -
 +#endif /* _LIBPTHREAD_KEC_INTERNAL_H_ */
-diff --git i/kern/kern_support.c w/kern/kern_support.c
-index bdb04ab..bbd8068 100644
---- i/kern/kern_support.c
+diff --git c/kern/kern_support.c w/kern/kern_support.c
+index f8dfc31..7e7b5ab 100644
+--- c/kern/kern_support.c
 +++ w/kern/kern_support.c
 @@ -50,7 +50,9 @@
  #include <os/log.h>
@@ -75,7 +75,7 @@ index bdb04ab..bbd8068 100644
  
  #include <sys/param.h>
  #include <sys/queue.h>
-@@ -706,13 +708,15 @@ workq_create_threadstack(proc_t p, vm_map_t vmap, mach_vm_offset_t *out_addr)
+@@ -703,13 +705,15 @@ workq_create_threadstack(proc_t p, vm_map_t vmap, mach_vm_offset_t *out_addr)
  	kern_return_t kret;
  
  	th_allocsize = workq_thread_allocsize(p, vmap, &guardsize);
@@ -93,7 +93,7 @@ index bdb04ab..bbd8068 100644
  	}
  
  	if (kret != KERN_SUCCESS) {
-@@ -816,7 +820,7 @@ workq_set_register_state(proc_t p, thread_t th,
+@@ -813,7 +817,7 @@ workq_set_register_state(proc_t p, thread_t th,
  
  		int error = pthread_kern->thread_set_wq_state32(th, (thread_state_t)&state);
  		if (error != KERN_SUCCESS) {
@@ -102,7 +102,7 @@ index bdb04ab..bbd8068 100644
  		}
  	} else {
  		x86_thread_state64_t state64 = {
-@@ -834,7 +838,7 @@ workq_set_register_state(proc_t p, thread_t th,
+@@ -831,7 +835,7 @@ workq_set_register_state(proc_t p, thread_t th,
  
  		int error = pthread_kern->thread_set_wq_state64(th, (thread_state_t)&state64);
  		if (error != KERN_SUCCESS) {
@@ -111,7 +111,7 @@ index bdb04ab..bbd8068 100644
  		}
  	}
  #elif defined(__arm__) || defined(__arm64__)
-@@ -854,7 +858,7 @@ workq_set_register_state(proc_t p, thread_t th,
+@@ -851,7 +855,7 @@ workq_set_register_state(proc_t p, thread_t th,
  
  		int error = pthread_kern->thread_set_wq_state32(th, (thread_state_t)&state);
  		if (error != KERN_SUCCESS) {
@@ -120,7 +120,7 @@ index bdb04ab..bbd8068 100644
  		}
  	} else {
  #if defined(__arm64__)
-@@ -872,7 +876,7 @@ workq_set_register_state(proc_t p, thread_t th,
+@@ -869,7 +873,7 @@ workq_set_register_state(proc_t p, thread_t th,
  
  		int error = pthread_kern->thread_set_wq_state64(th, (thread_state_t)&state);
  		if (error != KERN_SUCCESS) {
@@ -129,7 +129,7 @@ index bdb04ab..bbd8068 100644
  		}
  #else /* defined(__arm64__) */
  		panic("Shouldn't have a 64-bit thread on a 32-bit kernel...");
-@@ -902,7 +906,7 @@ workq_kevent(proc_t p, struct workq_thread_addrs *th_addrs,
+@@ -899,7 +903,7 @@ workq_kevent(proc_t p, struct workq_thread_addrs *th_addrs,
  
  	// squash any errors into just empty output
  	if (ret != 0 || *kevent_count_out == -1) {
@@ -138,7 +138,7 @@ index bdb04ab..bbd8068 100644
  		*kevent_count_out = 0;
  		return ret;
  	}
-@@ -943,7 +947,7 @@ workq_setup_thread(proc_t p, thread_t th, vm_map_t map, user_addr_t stackaddr,
+@@ -940,7 +944,7 @@ workq_setup_thread(proc_t p, thread_t th, vm_map_t map, user_addr_t stackaddr,
  {
  	struct workq_thread_addrs th_addrs;
  	bool first_use = (setup_flags & WQ_SETUP_FIRST_USE);
@@ -147,7 +147,7 @@ index bdb04ab..bbd8068 100644
  	int kevent_count = 0;
  
  	workq_thread_get_addrs(map, stackaddr, &th_addrs);
-@@ -967,16 +971,16 @@ workq_setup_thread(proc_t p, thread_t th, vm_map_t map, user_addr_t stackaddr,
+@@ -964,16 +968,16 @@ workq_setup_thread(proc_t p, thread_t th, vm_map_t map, user_addr_t stackaddr,
  		vm_map_offset_t th_page = vm_map_trunc_page_mask(th_addrs.self, mask);
  		vm_map_offset_t stk_page = vm_map_trunc_page_mask(th_addrs.stack_top - 1, mask);
  		if (th_page != stk_page) {
@@ -167,7 +167,7 @@ index bdb04ab..bbd8068 100644
  	}
  
  	workq_set_register_state(p, th, &th_addrs, kport,
-@@ -996,7 +1000,7 @@ workq_handle_stack_events(proc_t p, thread_t th, vm_map_t map,
+@@ -993,7 +997,7 @@ workq_handle_stack_events(proc_t p, thread_t th, vm_map_t map,
  		user_addr_t events, int nevents, int upcall_flags)
  {
  	struct workq_thread_addrs th_addrs;
@@ -176,7 +176,7 @@ index bdb04ab..bbd8068 100644
  	int kevent_count = 0, error;
  	__assert_only kern_return_t kr;
  
-@@ -1049,5 +1053,8 @@ _pthread_init(void)
+@@ -1046,5 +1050,8 @@ _pthread_init(void)
  		pthread_mutex_default_policy = policy_bootarg;
  	}
  
@@ -185,11 +185,11 @@ index bdb04ab..bbd8068 100644
 +#endif
 +	/* A6PLTE links this component in-kernel: SYSCTL_INT is registered at STARTUP(SYSCTL). */
  }
-diff --git i/kern/kern_synch.c w/kern/kern_synch.c
-index 2eb0489..52b3555 100644
---- i/kern/kern_synch.c
+diff --git c/kern/kern_synch.c w/kern/kern_synch.c
+index 97343a3..2c31c89 100644
+--- c/kern/kern_synch.c
 +++ w/kern/kern_synch.c
-@@ -561,7 +561,7 @@ redrive:
+@@ -559,7 +559,7 @@ redrive:
  			// we have no way of knowing who it is. When it arrives, the lock
  			// path will update the turnstile owner and return it to userspace.
  			old_owner = _kwq_clear_owner(kwq);
@@ -198,7 +198,7 @@ index 2eb0489..52b3555 100644
  					&kwq->kw_turnstile);
  			PTHREAD_TRACE(psynch_mutex_kwqprepost, kwq->kw_addr,
  					kwq->kw_prepost.lseq, count, 0);
-@@ -625,7 +625,7 @@ redrive:
+@@ -623,7 +623,7 @@ redrive:
  						0);
  			}
  			old_owner = _kwq_clear_owner(kwq);
@@ -207,7 +207,7 @@ index 2eb0489..52b3555 100644
  					&kwq->kw_turnstile);
  		}
  	}
-@@ -684,7 +684,7 @@ again:
+@@ -682,7 +682,7 @@ again:
  
  	if (_kwq_handle_interrupted_wakeup(kwq, KWQ_INTR_WRITE, lseq, retval)) {
  		old_owner = _kwq_set_owner(kwq, current_thread(), 0);
@@ -216,7 +216,7 @@ index 2eb0489..52b3555 100644
  				&kwq->kw_turnstile);
  		ksyn_wqunlock(kwq);
  		goto out;
-@@ -721,7 +721,7 @@ again:
+@@ -719,7 +719,7 @@ again:
  				kwq->kw_prepost.lseq, kwq->kw_prepost.count, 1);
  
  		old_owner = _kwq_set_owner(kwq, current_thread(), 0);
@@ -225,7 +225,7 @@ index 2eb0489..52b3555 100644
  				&kwq->kw_turnstile);
  
  		ksyn_wqunlock(kwq);
-@@ -807,7 +807,7 @@ psynch_mtxcontinue(void *parameter, wait_result_t result)
+@@ -805,7 +805,7 @@ psynch_mtxcontinue(void *parameter, wait_result_t result)
  		}
  	}
  
@@ -234,7 +234,7 @@ index 2eb0489..52b3555 100644
  
  	ksyn_wqunlock(kwq);
  	pthread_kern->psynch_wait_cleanup();
-@@ -1069,7 +1069,7 @@ __psynch_cvsignal(user_addr_t cv, uint32_t cgen, uint32_t cugen,
+@@ -1067,7 +1067,7 @@ __psynch_cvsignal(user_addr_t cv, uint32_t cgen, uint32_t cugen,
  	}
  	
  	if (threadport != 0) {
@@ -243,7 +243,7 @@ index 2eb0489..52b3555 100644
  		if (th == THREAD_NULL) {
  			return ESRCH;
  		}
-@@ -2012,7 +2012,7 @@ ksyn_signal_thread(ksyn_wait_queue_t kwq, kwq_queue_type_t kqi,
+@@ -2009,7 +2009,7 @@ ksyn_signal_thread(ksyn_wait_queue_t kwq, kwq_queue_type_t kqi,
  		tstore = &kwq->kw_turnstile;
  	}
  
@@ -252,7 +252,7 @@ index 2eb0489..52b3555 100644
  
  	if (ret != KERN_SUCCESS && ret != KERN_NOT_WAITING) {
  		panic("ksyn_signal: panic waking up thread %x\n", ret);
-@@ -2056,7 +2056,7 @@ ksyn_signal(ksyn_wait_queue_t kwq, kwq_queue_type_t kqi,
+@@ -2053,7 +2053,7 @@ ksyn_signal(ksyn_wait_queue_t kwq, kwq_queue_type_t kqi,
  		tstore = &kwq->kw_turnstile;
  	}
  
@@ -261,9 +261,9 @@ index 2eb0489..52b3555 100644
  
  	if (ret != KERN_SUCCESS && ret != KERN_NOT_WAITING) {
  		panic("ksyn_signal: panic waking up thread %x\n", ret);
-diff --git i/kern/kern_trace.h w/kern/kern_trace.h
+diff --git c/kern/kern_trace.h w/kern/kern_trace.h
 index ce87532..bf0f90d 100644
---- i/kern/kern_trace.h
+--- c/kern/kern_trace.h
 +++ w/kern/kern_trace.h
 @@ -62,7 +62,7 @@ static __unused void*
  VM_UNSLIDE(void* ptr)
