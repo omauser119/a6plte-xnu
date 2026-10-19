@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-2-Clause
-"""Exercise native signature-context setup without granting unavailable entitlements."""
+"""Ignore raw entitlement blobs without granting rights or inventing a provider."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -47,7 +47,7 @@ int main() {
     for (unsigned mask = 1; mask != 8; ++mask) {
         blob = {mask & 1 ? &blob : nullptr, mask & 2 ? &blob : nullptr,
                 mask & 4 ? &blob : nullptr};
-        assert(accelerate_entitlement_queries(&blob) == ENOTSUP);
+        assert(accelerate_entitlement_queries(&blob) == (mask & 1 ? ENOTSUP : 0));
     }
     assert(calls == 0);
     blob = {};
@@ -76,4 +76,4 @@ with tempfile.TemporaryDirectory(prefix='amfi-signature-', dir=ROOT / 'artifacts
                         '-fsanitize=address,undefined', '-g', '-DCODE_SIGNING_MONITOR=0',
                         f'-DA6PLTE={a6}', str(temp / 'signature.cpp'), '-o', binary], check=True)
         subprocess.run([binary], check=True)
-print('Signature context: entitlement-free fallback, XML/DER/object rejection and provider dispatch passed')
+print('Signature context: raw XML/DER ignored, orphaned context rejected, provider dispatch passed')

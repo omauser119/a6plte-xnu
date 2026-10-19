@@ -149,24 +149,22 @@ index 4b1e8a9..706f289 100644
  	ret = txm_query_trust_cache(query_type, cdhash, query_token);
  #elif PMAP_CS_PPL_MONITOR
 diff --git i/bsd/kern/ubc_subr.c w/bsd/kern/ubc_subr.c
-index 79bf0cb..aed8107 100644
+index 79bf0cb..fd0a00e 100644
 --- i/bsd/kern/ubc_subr.c
 +++ w/bsd/kern/ubc_subr.c
-@@ -4484,6 +4484,27 @@ accelerate_entitlement_queries(
+@@ -4484,6 +4484,25 @@ accelerate_entitlement_queries(
  	 */
  	assert(ret == KERN_NOT_SUPPORTED);
  
 +#if A6PLTE
 +	/*
-+	 * The standalone image has no AMFI provider to create or accelerate an
-+	 * entitlement context. Entitlement-free signatures need no such context;
-+	 * reject any XML, DER or already-created entitlement object without one.
++	 * With no AMFI provider, this experimental port treats raw XML/DER
++	 * entitlements as absent. No entitlement context is created or rights
++	 * granted. An existing context without its provider is inconsistent.
 +	 * Structural signature validation and executable-page hashes still run.
 +	 */
 +	if (amfi == NULL) {
-+		if (cs_blob->csb_entitlements != NULL ||
-+		    cs_blob->csb_entitlements_blob != NULL ||
-+		    cs_blob->csb_der_entitlements_blob != NULL) {
++		if (cs_blob->csb_entitlements != NULL) {
 +			return ENOTSUP;
 +		}
 +		return 0;
