@@ -52,8 +52,12 @@ an unrelated allocator after an uncertain hardware failure.
 
 ## Validation status
 
-All three jobs passed in [Actions 39251328230](https://github.com/omauser119/a6plte-xnu/actions/runs/39251328230),
-source `0a5b7de`. Physical USB enumeration and network delivery are pending.
+All three jobs passed in [Actions 39255213878](https://github.com/omauser119/a6plte-xnu/actions/runs/39255213878),
+source `5d32313`. The USB-disabled image was temporarily booted through lk2nd;
+its linked console IRQ/FIQ guard, complete package CRC and exact PID1/rootfs
+contents were checked before loading. PID1 stability after this fix awaits
+hardware confirmation. Physical USB enumeration and networking remain unproven
+and further USB work is deferred at the user's request.
 
 The first hardware failure was a zero transfer-resource index for initial EP0
 SETUP before RUN_STOP on DWC3 2.70a. Accepting that deferred allocation reached
