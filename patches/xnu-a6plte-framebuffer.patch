@@ -6409,10 +6409,33 @@ index 648cb70..f27df27 100644
  
  void vcattach(void); /* XXX gcc 4 warning cleanup */
 diff --git i/osfmk/kern/debug.c w/osfmk/kern/debug.c
-index 48f9405..8e7ad1e 100644
+index 48f9405..d8228a0 100644
 --- i/osfmk/kern/debug.c
 +++ w/osfmk/kern/debug.c
-@@ -1261,6 +1261,12 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
+@@ -82,6 +82,9 @@
+ #include <vm/vm_map.h>
+ #include <vm/pmap.h>
+ #include <vm/vm_compressor_xnu.h>
++#if A6PLTE
++#include <arm/caches_internal.h>
++#endif
+ #include <stdarg.h>
+ #include <stdatomic.h>
+ #include <sys/pgo.h>
+@@ -194,7 +197,12 @@ _Atomic(unsigned int)   panic_stop_count;
+  * More than enough for any typical format string passed to panic();
+  * anything longer will be truncated but that's better than nothing.
+  */
++#if A6PLTE
++/* A full ARM64 saved state must fit before the debug infrastructure starts. */
++#define EARLY_PANIC_BUFLEN 2048
++#else
+ #define EARLY_PANIC_BUFLEN 256
++#endif
+ 
+ struct debugger_state {
+ 	uint64_t        db_panic_options;
+@@ -1261,6 +1269,12 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
  	if (PE_kputc == NULL) {
  		char buf[EARLY_PANIC_BUFLEN];
  		vsnprintf(buf, EARLY_PANIC_BUFLEN, panic_format_str, *panic_args);
@@ -6425,6 +6448,19 @@ index 48f9405..8e7ad1e 100644
  		paniclog_append_noflush("panic: %s\n", buf);
  		paniclog_append_noflush("Kernel panicked very early before serial init, spinning forever...\n");
  		panic_spin_forever();
+@@ -1370,6 +1384,12 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
+ void __attribute__((noinline, optnone))
+ panic_spin_forever(void)
+ {
++#if A6PLTE
++	/* Preserve the page tables and fault state for read-only USB inspection
++	 * from lk2nd after a warm reset.  No serial transport is available. */
++	(void)ml_set_interrupts_enabled(FALSE);
++	CleanPoC_Dcache();
++#endif
+ 	for (;;) {
+ #if defined(__arm__) || defined(__arm64__)
+ 		/* On arm32, which doesn't have a WFE timeout, this may not return.  But that should be OK on this path. */
 diff --git i/osfmk/kern/printf.c w/osfmk/kern/printf.c
 index 2fc6931..c3a04a3 100644
 --- i/osfmk/kern/printf.c
@@ -6674,6 +6710,32 @@ index aa02107..297a09f 100644
  
  /*
   * XNU_MONITOR and PMAP_CS are both defined for the same targets in board_config.h.
+diff --git i/osfmk/vm/vm_resident.c w/osfmk/vm/vm_resident.c
+index 8bebebb..d609fde 100644
+--- i/osfmk/vm/vm_resident.c
++++ w/osfmk/vm/vm_resident.c
+@@ -3276,6 +3276,16 @@ vm_page_hash_lookup_data_dependent_locked(
+ 	vm_page_packed_t *prev   = &bucket->page_list;
+ 
+ 	while (*prev) {
++#if A6PLTE
++		/* Keep the packed index and its owner visible in an early framebuffer
++		 * panic.  The generic unpack assertion otherwise loses both values. */
++		vm_page_packed_t raw = *prev;
++		if ((raw & VM_PAGE_PACKED_FROM_ARRAY) &&
++		    (raw & ~VM_PAGE_PACKED_FROM_ARRAY) >= vm_pages_count) {
++			panic("A6PLTE VM hash: packed=%x count=%x bucket=%p prev=%p object=%p offset=%llx",
++			    raw, vm_pages_count, bucket, prev, object, offset);
++		}
++#endif
+ 		vm_page_t mem = (vm_page_t)(VM_PAGE_UNPACK_PTR(*prev));
+ 
+ 		if (mem->vmp_object == packed && mem->vmp_offset == offset) {
+@@ -12112,4 +12122,3 @@ vm_retire_boot_pages(void)
+  * SMC will store it in PMU SRAM under the 'sECC' key.
+  */
+ uint64_t ecc_panic_physical_address = 0;
+-
 diff --git i/pexpert/arm/a6plte/boot_abi.h w/pexpert/arm/a6plte/boot_abi.h
 new file mode 100644
 index 0000000..b06c269
