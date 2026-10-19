@@ -52,8 +52,10 @@ package format or a flash operation for this profile.
 
 ## Verification status
 
-Local driver/format tests with ASan/UBSan pass. Native platform compilation,
-including start/exception assembly, memory initialization, framebuffer/GIC and
-the BootArgs ABI comparison, passes. Full Apple Clang compilation and linking
-are the next checks. This 8796 build has not yet been booted on the phone.
-Historical hardware reports in `docs/` and `ROADMAP.md` describe the 12377 port.
+All three jobs in [Actions run 39299095063](https://github.com/omauser119/a6plte-xnu/actions/runs/39299095063)
+passed for source `9caba04`. Native Apple Clang compilation and NOUNDEFS linking,
+Linux ASan/UBSan tests and packaging all passed. The downloaded userdata-root
+image also passed the complete kernel/payload/CRC/version/profile verification.
+See [the build receipt](docs/STORAGE.md#root-volume-on-userdata) for hashes and
+local paths. The image is **not yet tested on the phone**; hardware boot still
+waits for **«паста»**. Historical hardware reports elsewhere describe XNU 12377.

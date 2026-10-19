@@ -75,10 +75,10 @@ as a command. Mentioning that word while defining this rule is not activation.
 USB stays disabled and UART remains prohibited.
 
 `scripts/package-boot.sh --root=userdata artifacts/kernel.a6plte` produces
-`artifacts/xnu-userdata-boot.img`. It contains the kernel and bridge, no rootfs.
+`artifacts/xnu-8796-userdata-boot.img`. It contains the kernel and bridge, no rootfs.
 The bridge donates a checked 256 MiB RAM arena and supplies
 `rd=a6userdata launchdsuffix=release`. The ramdisk image and `a6-init` remain
-available separately as `artifacts/xnu-boot.img`.
+available separately as `artifacts/xnu-8796-boot.img`.
 
 The native BSD root path uses the dynamically assigned userdata device number;
 it does not guess a major number or wait for an absent IOStorageFamily driver.
@@ -97,12 +97,17 @@ partition. A read-only fetch of the current first 4 KiB found no HFS+/HFSX
 signature at byte 1024; mounting the prepared volume and running launchd are
 still hardware checks. Raw partition contents stay in private artifacts.
 
-The candidate from source `d65d1fb` is available in the `xnu-boot-image`
-artifact of [Actions run 39278476097](https://github.com/omauser119/a6plte-xnu/actions/runs/39278476097).
-The downloaded `xnu-userdata-boot.img` is 20,875,264 bytes, SHA-256
-`cda18b60930bf040621b36d5e4a9bbe7376e22a336f2529b3f0cd54d8df4d9eb`.
-`check-userdata-boot.py` passed on both the locally packaged image and the
-downloaded CI image: complete CRC, expected kernel payload and native root
-symbols, explicit launchd selection, no embedded rootfs or USB enable argument.
-The CI image is saved locally as `build/userdata-d65d1fb/xnu-userdata-boot.img`.
+The candidate from source `9caba04` is available in the `xnu-8796-boot-image`
+artifact of [Actions run 39299095063](https://github.com/omauser119/a6plte-xnu/actions/runs/39299095063).
+All three jobs completed successfully. The native XNU 8796.141.3 / Darwin 22.6.0
+kernel links as ARM64 MH_EXECUTE with NOUNDEFS; SHA-256 is `8e7c6fa6b69f735092c4cb7250b5e1548f269e478d3ed6c26b50c08d677bb5b2`.
+The downloaded `xnu-8796-userdata-boot.img` is 16,992,256 bytes, SHA-256
+`71ae2dbf0c4b150eb70b37e22de139e7a53ac24500f1bf6d62468e9767c73ec8`.
+`check-userdata-boot.py` passed on the downloaded image: complete CRC, exact
+kernel payload, native root symbols, Darwin/XNU version, explicit launchd
+selection, no embedded rootfs and no USB enable argument. The native BootArgs
+ABI is checked against the 8796 header (736 bytes, 608-byte command line).
+The image is saved locally as
+`build/verified-9caba04/images/xnu-8796-userdata-boot.img` and
+`artifacts/xnu-8796-userdata-boot.img`.
 This candidate has not been booted on the phone; the **«паста»** gate still applies.
