@@ -52,3 +52,5 @@ clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_ae
 clang -DKERNEL=1 -DA6PLTE=1 -I"$ROOT/xnu/libkern" -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_md5.c" "$ROOT/xnu/libkern/crypto/a6plte_md5.c" -o "$ROOT/artifacts/test-md5"
 "$ROOT/artifacts/test-md5"
 clang --target=arm64-apple-darwin -mcpu=cortex-a53 -ffreestanding -fno-builtin -mgeneral-regs-only -mstrict-align -O2 -DA6PLTE=1 -Wall -Wextra -Werror -c "$ROOT/xnu/libkern/crypto/a6plte_kmem_rng.c" -o "$ROOT/artifacts/xnu-kmem-rng.macho.o"
+
+python3 "$ROOT/tests/test_sha512.py"

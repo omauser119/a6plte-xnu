@@ -28,6 +28,9 @@ The boot bridge uses the native 8796 BootArgs layout (608-byte command line,
 The port keeps GICv2, the architectural timer, bounded userdata eMMC I/O,
 HFS+ preflight, framebuffer locking and the board platform services.
 The Apple performance-counter/profiling drivers are disabled for this board.
+Provider-free SHA-384/SHA-512 uses an original scalar implementation of
+FIPS 180-4, checked against hashlib across 666 streaming and alignment cases;
+the adapter checks the native 8796 digest-context layout at compile time.
 
 ## Pinned sources
 

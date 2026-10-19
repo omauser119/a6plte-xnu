@@ -65,7 +65,7 @@ if source.endswith(('.cpp', '.cc')):
     flags += ['-idirafter',str(sdk/'usr/include/c++/v1')]
 assembly=source.endswith('/genassym.c')
 if assembly: flags+=['-fno-integrated-as']
-if source in ('pexpert/arm/a6plte/early.c','pexpert/arm/a6plte/fb.c','libkern/crypto/a6plte_kmem_rng.c','iokit/Kernel/arm/A6PlatformServices.cpp','iokit/Kernel/arm/A6GraphicsLayout.c') or source.startswith(('libkern/crypto/a6plte_aes/','bsd/dev/a6plte/')):
+if source in ('pexpert/arm/a6plte/early.c','pexpert/arm/a6plte/fb.c','libkern/crypto/a6plte_kmem_rng.c','libkern/crypto/a6plte_sha512.c','libkern/crypto/a6plte_sha512_digest.c','iokit/Kernel/arm/A6PlatformServices.cpp','iokit/Kernel/arm/A6GraphicsLayout.c') or source.startswith(('libkern/crypto/a6plte_aes/','bsd/dev/a6plte/')):
     flags+=['-mgeneral-regs-only','-mstrict-align'] # Early console and bootstrap crypto: scalar, alignment-safe accesses.
 if source.endswith('.s'):
     flags+=['-x','assembler-with-cpp','-DASSEMBLER']

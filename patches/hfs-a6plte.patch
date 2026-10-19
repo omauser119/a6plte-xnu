@@ -122,10 +122,10 @@ index 557430b..d04c5fb 100644
  #if HFS_LEAK_DEBUG && TARGET_OS_OSX
  	if (hfs_active_mounts == 0) {
 diff --git c/core/kext-config.h w/core/kext-config.h
-index 59088a5..1f7e702 100644
+index 59088a5..1799853 100644
 --- c/core/kext-config.h
 +++ w/core/kext-config.h
-@@ -30,6 +30,24 @@
+@@ -30,6 +30,23 @@
  #define _hfs_config_
  
  #include <TargetConditionals.h>
@@ -145,7 +145,6 @@ index 59088a5..1f7e702 100644
 +__END_DECLS
 +#define sysctlbyname kernel_sysctlbyname
 +#define ubc_create_upl ubc_create_upl_external
-+#define proc_ucred proc_ucred_unsafe
 +#endif
  
  #define HFS_COMPRESSION 1
