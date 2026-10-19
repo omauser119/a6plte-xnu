@@ -1,0 +1,152 @@
+diff --git i/core/hfs_iokit.cpp w/core/hfs_iokit.cpp
+index 34be23f..d328907 100644
+--- i/core/hfs_iokit.cpp
++++ w/core/hfs_iokit.cpp
+@@ -38,6 +38,9 @@
+ #include <IOKit/IOPlatformExpert.h>
+ 
+ #include "hfs_iokit.h"
++#if A6PLTE
++#include "../hfs_encodings/hfs_encodings_internal.h"
++#endif
+ #include "hfs.h"
+ #include "hfs_dbg.h"
+ #include "hfs_cnode.h"
+@@ -110,6 +113,9 @@ bool com_apple_filesystems_hfs::start(IOService *provider)
+ 					  | VFS_TBLNATIVEXATTR)
+ 	};
+ 
++	#if A6PLTE
++	hfs_converterinit();
++#endif
+ 	int ret = vfs_fsadd(&vfe, &vfs_handle);
+ 
+ 	if (ret) {
+@@ -120,7 +126,9 @@ bool com_apple_filesystems_hfs::start(IOService *provider)
+ 
+ 	hfs_init_zones();
+ 	
++#if !A6PLTE
+ 	hfs_sysctl_register();
++#endif
+ 
+ 	uint32_t num_cpus;
+ 	size_t sz = sizeof(num_cpus);
+@@ -134,6 +142,9 @@ bool com_apple_filesystems_hfs::start(IOService *provider)
+ 		}
+ 	}
+ 
++#if A6PLTE
++	IOLog("A6PLTE: Apple HFS+ filesystem registered\n");
++#endif
+ 	return true;
+ }
+ 
+@@ -141,7 +152,9 @@ void com_apple_filesystems_hfs::stop(IOService *provider)
+ {
+ 	if (vfs_handle) {
+ 		vfs_fsremove(vfs_handle);
++#if !A6PLTE
+ 		hfs_sysctl_unregister();
++#endif
+ 		vfs_handle = NULL;
+ 	}
+ 
+@@ -253,6 +266,7 @@ kern_return_t hfs_get_platform_serial_number(char *serial_number_str,
+ }
+ 
+ // Interface with AKS
++#if CONFIG_PROTECT
+ 
+ static aks_file_system_key_services_t *
+ key_services(void)
+@@ -308,3 +322,5 @@ int hfs_backup_key(aks_cred_t access, const aks_wrapped_key_t wrapped_key_in,
+ 		return ENXIO;
+ 	return ks->backup_key(access, wrapped_key_in, wrapped_key_out);
+ }
++
++#endif /* CONFIG_PROTECT */
+diff --git i/core/hfs_iokit.h w/core/hfs_iokit.h
+index d31a062..f31575f 100644
+--- i/core/hfs_iokit.h
++++ w/core/hfs_iokit.h
+@@ -30,7 +30,9 @@
+ #define hfs_iokit_h
+ 
+ #include <sys/cdefs.h>
++#if CONFIG_PROTECT
+ #include <AppleKeyStore/AppleKeyStoreFSServices.h>
++#endif
+ 
+ __BEGIN_DECLS
+ 
+@@ -42,6 +44,7 @@ void hfs_iterate_media_with_content(const char *content_uuid_cstring,
+ 									void *arg);
+ kern_return_t hfs_get_platform_serial_number(char *serial_number_str,
+ 											 uint32_t len);
++#if CONFIG_PROTECT
+ int hfs_unwrap_key(aks_cred_t access, const aks_wrapped_key_t wrapped_key_in,
+ 				   aks_raw_key_t key_out);
+ int hfs_rewrap_key(aks_cred_t access, cp_key_class_t dp_class,
+@@ -51,6 +54,7 @@ int hfs_new_key(aks_cred_t access, cp_key_class_t dp_class,
+ 				aks_raw_key_t key_out, aks_wrapped_key_t wrapped_key_out);
+ int hfs_backup_key(aks_cred_t access, const aks_wrapped_key_t wrapped_key_in,
+ 				   aks_wrapped_key_t wrapped_key_out);
++#endif
+ 
+ __END_DECLS
+ 
+diff --git i/core/hfs_vfsops.c w/core/hfs_vfsops.c
+index c7ff05f..3cc05a2 100644
+--- i/core/hfs_vfsops.c
++++ w/core/hfs_vfsops.c
+@@ -515,7 +515,9 @@ hfs_mount(struct mount *mp, vnode_t devvp, user_addr_t data, vfs_context_t conte
+ #if	TARGET_OS_OSX 
+ 		// increment kext retain count
+ 		OSIncrementAtomic(&hfs_active_mounts);
++		#if !A6PLTE
+ 		OSKextRetainKextWithLoadTag(OSKextGetCurrentLoadTag());
++#endif
+ 		if (hfs_active_mounts <= 0 && panic_on_assert)
+ 			panic("hfs_mount: error - kext resource count is non-positive: %d but at least one active mount\n", hfs_active_mounts);
+ #endif
+@@ -2102,8 +2104,10 @@ hfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
+ 	// decrement kext retain count
+ #if	TARGET_OS_OSX
+ 	OSDecrementAtomic(&hfs_active_mounts);
++	#if !A6PLTE
+ 	OSKextReleaseKextWithLoadTag(OSKextGetCurrentLoadTag());
+ #endif
++#endif
+ 
+ #if HFS_LEAK_DEBUG && TARGET_OS_OSX
+ 	if (hfs_active_mounts == 0) {
+diff --git i/core/kext-config.h w/core/kext-config.h
+index 59088a5..1f7e702 100644
+--- i/core/kext-config.h
++++ w/core/kext-config.h
+@@ -30,6 +30,24 @@
+ #define _hfs_config_
+ 
+ #include <TargetConditionals.h>
++#if A6PLTE
++/* The standalone port uses XNU's macOS BSD profile and unencrypted HFS+. */
++#undef TARGET_OS_IPHONE
++#define TARGET_OS_IPHONE 0
++#undef TARGET_OS_OSX
++#define TARGET_OS_OSX 1
++#undef TARGET_OS_EMBEDDED
++#define TARGET_OS_EMBEDDED 0
++#undef CONFIG_PROTECT
++#define CONFIG_PROTECT 0
++#include <sys/types.h>
++__BEGIN_DECLS
++int kernel_sysctlbyname(const char *, void *, size_t *, void *, size_t);
++__END_DECLS
++#define sysctlbyname kernel_sysctlbyname
++#define ubc_create_upl ubc_create_upl_external
++#define proc_ucred proc_ucred_unsafe
++#endif
+ 
+ #define HFS_COMPRESSION 1
+ #define FIFO 1

@@ -20,8 +20,17 @@ component_defines = {
     'security': ['BSD_KERNEL_PRIVATE'],
     'san': [],
     'pthread': ['BSD_KERNEL_PRIVATE', 'DRIVER_PRIVATE', '_KERNEL_BUILD', 'KERNEL_BUILD', 'MACH_KERNEL', 'BSD_BUILD', 'ABSOLUTETIME_SCALAR_TYPE', 'NEEDS_SCHED_CALL_T', '__PTHREAD_EXPOSE_INTERNALS__'],
+    'hfs': ['BSD_KERNEL_PRIVATE', 'DRIVER_PRIVATE', '_KERNEL_BUILD', 'KERNEL_BUILD', 'MACH_KERNEL', 'BSD_BUILD', 'ABSOLUTETIME_SCALAR_TYPE', 'NEEDS_SCHED_CALL_T'],
 }
+if component=='hfs' and source.endswith('.cpp'):
+    component_defines['hfs'] = component_defines['iokit']
+config_component = 'iokit' if component=='hfs' and source.endswith('.cpp') else ('bsd' if component in ('pthread','hfs') else component)
 flags += ['-D'+name+'=1' for name in component_defines[component]]
+if component=='hfs':
+    flags += ['-I'+str(r/'reference/hfs/core'), '-I'+str(r/'reference/hfs/hfs_encodings')]
+    flags += ['-include',str(r/'reference/hfs/core/kext-config.h'),'-ferror-limit=0']
+    if not source.endswith('.cpp'):
+        flags += ['-include','sys/param.h','-include','sys/proc_internal.h','-include','sys/vnode_internal.h']
 if component=='pthread':
     # Separate kext globals need private names when linked into the kernel image.
     flags += ['-Dpthread_kern=a6_pthread_kern', '-Dcurrent_uthread=a6_pthread_current_uthread']
@@ -34,11 +43,14 @@ if source.endswith(('.cpp', '.cc')):
     flags += ['-std=gnu++2b', '-nostdinc++', '-fsized-deallocation', '-fapple-kext', '-fno-rtti', '-I'+str(r/'build/cxx-support')]
 
 if component != 'osfmk': flags += ['-I'+str(r/'build/export-headers')]
-for path in [out/('bsd' if component=='pthread' else component),out/'osfmk',out/'pexpert',out/'bsd',out/'iokit',r/'build/kernel-headers',x/'osfmk',x/'bsd',x/'pexpert',x/'iokit',x/'libkern',x/'libsa',x/'EXTERNAL_HEADERS',x,r/'reference/libdispatch']: flags+=['-I'+str(path)]
+for path in [out/config_component,out/'osfmk',out/'pexpert',out/'bsd',out/'iokit',r/'build/kernel-headers',x/'osfmk',x/'bsd',x/'pexpert',x/'iokit',x/'libkern',x/'libsa',x/'EXTERNAL_HEADERS',x,r/'reference/libdispatch']: flags+=['-I'+str(path)]
 for line in (out/'pexpert/config.DEVELOPMENT_ARM64').read_text().splitlines():
     p=shlex.split(line,comments=True)
     if p and p[0]=='options': flags+=['-D'+p[1]]
-flags+=['-include',str(out/('bsd' if component=='pthread' else component)/'meta_features.h')]
+flags+=['-include',str(out/config_component/'meta_features.h')]
+if component=='hfs':
+    # Public macOS HFS profile: unencrypted HFS+, without Apple's private key-roll sources.
+    flags += ['-UCONFIG_PROTECT','-DCONFIG_PROTECT=0']
 if component=='osfmk': flags+=['-DMACH_KERNEL=1']
 if (source.startswith(('osfmk/vm/', 'bsd/vm/')) and source.endswith('.c')) or source == 'bsd/kern/kern_mman.c': flags+=['-DVM_UNSAFE_TYPES=1']
 if source.startswith('reference/libdispatch/'):

@@ -57,7 +57,7 @@ jobs:
         if: always() && hashFiles('build/xnu/bsd/Makefile') != ''
         run: |
           failed=0
-          for component in pexpert bsd libkern iokit libsa security san pthread; do
+          for component in pexpert bsd libkern iokit libsa security san pthread hfs; do
             python3 scripts/check-component.py "$component" 2>&1 | tee "$component.log" || failed=1
           done
           exit "$failed"

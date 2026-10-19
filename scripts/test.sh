@@ -31,4 +31,6 @@ clang -DA6PLTE=1 -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/te
 "$ROOT/artifacts/test-kmem-rng"
 clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_aes.c" "$ROOT"/xnu/libkern/crypto/a6plte_aes/gen/*.c -o "$ROOT/artifacts/test-aes"
 "$ROOT/artifacts/test-aes"
+clang -DKERNEL=1 -DA6PLTE=1 -I"$ROOT/xnu/libkern" -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_md5.c" "$ROOT/xnu/libkern/crypto/a6plte_md5.c" -o "$ROOT/artifacts/test-md5"
+"$ROOT/artifacts/test-md5"
 clang --target=arm64-apple-darwin -mcpu=cortex-a53 -ffreestanding -fno-builtin -mgeneral-regs-only -mstrict-align -O2 -DA6PLTE=1 -Wall -Wextra -Werror -c "$ROOT/xnu/libkern/crypto/a6plte_kmem_rng.c" -o "$ROOT/artifacts/xnu-kmem-rng.macho.o"

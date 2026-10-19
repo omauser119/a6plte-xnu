@@ -3,7 +3,7 @@
 from pathlib import Path
 import json, os, re, shlex, subprocess
 root=Path(__file__).resolve().parents[1]
-components=('osfmk','mig','pexpert','bsd','libkern','iokit','libsa','security','san','pthread')
+components=('osfmk','mig','pexpert','bsd','libkern','iokit','libsa','security','san','pthread','hfs')
 objects=[]
 for component in components:
     out=root/'artifacts/components'/component
