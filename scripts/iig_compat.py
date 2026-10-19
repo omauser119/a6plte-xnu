@@ -13,7 +13,7 @@ def legacy_rpc(source):
     def content(match):
         indent, kind, name = match.groups()
         return (f'{indent}{kind} * {name} = ({kind} *)'
-                'IORPCMessageFromMach(rpc.message, false);')
+                'IORPCMessageFromMach((IORPCMessageMach *)rpc.message, false);')
 
     source = re.sub(pattern, content, source, flags=re.M)
     # CheckForWork uses the reply buffer as the returned one-way message.
