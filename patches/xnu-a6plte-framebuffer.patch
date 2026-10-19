@@ -6769,7 +6769,7 @@ index 0000000..b06c269
 +#endif
 diff --git i/pexpert/arm/a6plte/early.c w/pexpert/arm/a6plte/early.c
 new file mode 100644
-index 0000000..41b5f74
+index 0000000..5de74aa
 --- /dev/null
 +++ w/pexpert/arm/a6plte/early.c
 @@ -0,0 +1,130 @@
@@ -6795,7 +6795,7 @@ index 0000000..41b5f74
 +static uint64_t console_enter(void) {
 +#ifdef __aarch64__
 +    uint64_t flags;
-+    __asm__ volatile("mrs %0,daif; msr daifset,#3" : "=r"(flags) :: "memory");
++    __asm__ volatile("mrs %0,daif\n\tmsr daifset,#3" : "=r"(flags) :: "memory");
 +    return flags;
 +#else
 +    return 0;
