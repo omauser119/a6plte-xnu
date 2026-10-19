@@ -48,8 +48,13 @@ least once. The next photographed fault is `aes_encrypt_key128+0xc`, called by
 `tcp_init` while setting the TCP Fast Open key: the full crypto provider is absent.
 The current source supplies the scalar AES CBC implementation from Apple's older
 XNU release and uses XNU's existing SHA-256/SHA-512 primitives for their legacy
-APIs while no provider is registered. The image has been temporarily loaded;
-progress beyond the AES abort still needs hardware validation.
+APIs while no provider is registered. Hardware confirms passage beyond the AES
+abort, the displayed Skywalk copy/zero/memcmp self-tests, and entry into
+`bsd_autoconf`. The next stop is `ml_unsafe_kernel_text` asserting because the
+Apple DT omitted `kernel-ctrr-to-be-enabled`. The bridge now reports that property
+as a 32-bit zero, matching the absence of Apple CTRR on Cortex-A53, so native XNU
+startup can initialize the queried state. The image has been temporarily loaded;
+progress beyond that assertion still needs hardware validation.
 Native `startup_debug=1` tracing is enabled in the bridge's boot arguments.
 On A6PLTE this now prints startup stages without logging every startup callback.
 `startup_debug=3` also enables per-callback addresses for targeted diagnosis;
@@ -90,7 +95,7 @@ sustained scheduling and userspace are not yet confirmed.
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download the AES and native SHA-2 update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup10).
+[Download the Darwin version and CTRR metadata update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup11).
 
 ## GitHub Actions
 
@@ -101,8 +106,8 @@ framebuffer physical address 0x90001000. GIC integration is not hardware-validat
 - **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
 Artifacts include the linked XNU kernel, packaged boot image, lk2nd image and
-build diagnostics. All three jobs passed for the AES and native SHA-2 update
-([run 39210047340](https://github.com/omauser119/a6plte-xnu/actions/runs/39210047340), source `bb5a818`).
+build diagnostics. All three jobs passed for the Darwin version and CTRR metadata update
+([run 39212080339](https://github.com/omauser119/a6plte-xnu/actions/runs/39212080339), source `85afdec`).
 A successful build does not establish runtime progress on hardware. No workflow
 flashes a device.
 
