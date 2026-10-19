@@ -474,10 +474,10 @@ index 0000000..8091a9a
 +}
 diff --git i/bsd/dev/a6plte/usb_dwc3.c w/bsd/dev/a6plte/usb_dwc3.c
 new file mode 100644
-index 0000000..012bf9f
+index 0000000..1f6e76c
 --- /dev/null
 +++ w/bsd/dev/a6plte/usb_dwc3.c
-@@ -0,0 +1,300 @@
+@@ -0,0 +1,303 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* DWC3 USB2 device mode. Original bounded polling/DMA core for the A6 port.
 + * Register/command sequence reference: lk2nd usb30_dwc*.c, Linux Foundation BSD.
@@ -519,7 +519,10 @@ index 0000000..012bf9f
 +    if (result&0xf000) return fail(d,r,result);
 +    if ((cmd&15)==6) {
 +        d->resource[ep]=(uint8_t)((result>>16)&127);
-+        if (!d->resource[ep]) return fail(d,r,result);
++        /* Before RUN_STOP, initial EP0 setup is queued but no resource index
++         * is returned yet (observed DEPCMD=6 on this DWC3 2.70a). lk2nd also
++         * enters transfer state directly in this case, without a command IRQ. */
++        if (!d->resource[ep] && (ep!=0 || (rd(d,DCTL)&(1u<<31)))) return fail(d,r,result);
 +    }
 +    return 0;
 +}

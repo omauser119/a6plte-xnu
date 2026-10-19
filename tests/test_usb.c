@@ -20,7 +20,11 @@ static void write_reg(void *cookie,unsigned r,uint32_t v) {
     if (r>=0xc80c && r<=0xc85c && (r-0xc80c)%16==0 && !m->stuck) {
         unsigned ep=(r-0xc80c)/16,cmd=v&15;
         v&=~(1u<<10);
-        if (cmd==6) { assert(m->registers[(r-4)/4]==0);assert((m->registers[(r-8)/4]&15)==0);v|=(ep+1)<<16; }
+        if (cmd==6) {
+            assert(m->registers[(r-4)/4]==0);assert((m->registers[(r-8)/4]&15)==0);
+            /* Real 2.70a trace: initial SETUP before RUN_STOP returns index 0. */
+            if (m->registers[0xc704/4]&(1u<<31)) v|=(ep+1)<<16;
+        }
         if (cmd==m->error_command) v|=1u<<12;
     }
     m->registers[r/4]=v;
@@ -94,6 +98,7 @@ static void descriptor_tests(void) {
 int main(void) {
     descriptor_tests();struct mock m;struct a6_dwc3 d;initialize(&m,&d);
     assert(!a6_dwc3_start(&d) && d.active[0] && d.online);
+    assert(d.resource[0]==0);
     assert(m.registers[0xc408/4]==(4096u | 1u<<31));
     control(&m,&d,0x80,6,0x100,0,18);assert(d.active[0]);
     { /* Logical state changes only after the status completion event. */
