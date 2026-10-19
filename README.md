@@ -42,8 +42,14 @@ initialization: the MAC framework and network buffer pools initialize. The next
 photographed panic is `pthread kernel extension not loaded (function table is
 NULL)`. The source now builds Apple's actual libpthread kernel component into
 the image, registers its function table before lockdown, and adapts its private
-ABI to this XNU revision. The image was temporarily loaded; progress beyond the
-previous panic still needs hardware validation.
+ABI to this XNU revision. Hardware confirms provider registration, successful
+DLIL SUM16 self-tests, and scheduling of every created DLIL kernel thread at
+least once. The next photographed fault is `aes_encrypt_key128+0xc`, called by
+`tcp_init` while setting the TCP Fast Open key: the full crypto provider is absent.
+The current source supplies the scalar AES CBC implementation from Apple's older
+XNU release and uses XNU's existing SHA-256/SHA-512 primitives for their legacy
+APIs while no provider is registered. The image has been temporarily loaded;
+progress beyond the AES abort still needs hardware validation.
 Native `startup_debug=1` tracing is enabled in the bridge's boot arguments.
 On A6PLTE this now prints startup stages without logging every startup callback.
 `startup_debug=3` also enables per-callback addresses for targeted diagnosis;
@@ -53,7 +59,8 @@ a byte fallback for unaligned geometry. Host tests compare 648 configurations
 against a byte-exact reference under address and undefined-behavior sanitizers;
 the speed improvement has not yet been measured on the phone.
 The random changes do not register a full corecrypto provider.
-Timer interrupts, sustained scheduling and userspace are not yet confirmed.
+Initial scheduling is observed through DLIL's startup check. Hardware timer IRQs,
+sustained scheduling and userspace are not yet confirmed.
 
 ## Implemented
 
@@ -75,12 +82,15 @@ Timer interrupts, sustained scheduling and userspace are not yet confirmed.
   device-tree nub publication for the bridge's CPU and SoC nodes.
 - Built-in Apple libpthread kernel sources for native thread and synchronization
   callbacks, with a shared wait-queue layout and early provider registration.
+- Bootstrap AES CBC/ECB from Apple XNU's legacy C implementation, tested against
+  NIST vectors for 128/192/256-bit keys, including unaligned and in-place buffers;
+  SHA-256/SHA-512 legacy APIs use native primitives without a provider.
 - Pinned upstream patches, native config/MIG tools and component compilation probes.
 
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download the pthread and framebuffer-scroll update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup9).
+[Download the AES and native SHA-2 update](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup10).
 
 ## GitHub Actions
 
@@ -91,8 +101,8 @@ framebuffer physical address 0x90001000. GIC integration is not hardware-validat
 - **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
 Artifacts include the linked XNU kernel, packaged boot image, lk2nd image and
-build diagnostics. All three jobs passed for the pthread and framebuffer-scroll update
-([run 39166107962](https://github.com/omauser119/a6plte-xnu/actions/runs/39166107962), source `af76c83`).
+build diagnostics. All three jobs passed for the AES and native SHA-2 update
+([run 39210047340](https://github.com/omauser119/a6plte-xnu/actions/runs/39210047340), source `bb5a818`).
 A successful build does not establish runtime progress on hardware. No workflow
 flashes a device.
 
@@ -170,6 +180,11 @@ Upstream sources are fetched at fixed commits; this repository stores patches:
   `ac9718fb1af618d5ce8678d0dc6e8a58f252216f` (12377.121.6).
 - [libpthread-539.100.4](https://github.com/apple-oss-distributions/libpthread/tree/libpthread-539.100.4),
   `1f4f5265b319111142f1bf3a27d4484ef5a98314`, kernel component.
+- [XNU xnu-1699.32.7 AES C implementation](https://github.com/apple-oss-distributions/xnu/tree/161efb48ee9912c6935f205e7ac9c370edb09318/bsd/crypto/aes),
+  `161efb48ee9912c6935f205e7ac9c370edb09318`, with Brian Gladman's license retained
+  in source and [licenses/legacy-aes.txt](licenses/legacy-aes.txt).
+  This table-based bootstrap path does not provide constant-time AES or a full
+  corecrypto provider; see `libkern/crypto/a6plte_aes/SOURCE.txt` in the patched XNU.
 - [bootstrap_cmds](https://github.com/apple-oss-distributions/bootstrap_cmds),
   `c71d2d72f48995baaea76148f61002e5299841de`, native MIG.
 - [PureDarwin](https://github.com/PureDarwin/PureDarwin),
