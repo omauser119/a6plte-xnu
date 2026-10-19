@@ -1,10 +1,11 @@
 diff --git i/bsd/conf/files.arm64 w/bsd/conf/files.arm64
-index a77bd10..21ebe09 100644
+index a77bd10..5fc6f17 100644
 --- i/bsd/conf/files.arm64
 +++ w/bsd/conf/files.arm64
-@@ -1,4 +1,11 @@
+@@ -1,4 +1,12 @@
  bsd/dev/arm64/conf.c		standard
 +bsd/dev/a6plte/gpt.c              optional a6plte
++bsd/dev/a6plte/hfs_volume.c       optional a6plte
 +bsd/dev/a6plte/sdhci.c            optional a6plte
 +bsd/dev/a6plte/userdata.c         optional a6plte
 +bsd/dev/a6plte/services.c         optional a6plte
@@ -128,6 +129,53 @@ index 0000000..c8c1346
 +    }
 +    if (!p->disk->read) return A6_IO_OFFLINE;
 +    return p->disk->read(p->disk->cookie,p->first+lba,count,buf);
++}
+diff --git i/bsd/dev/a6plte/hfs_volume.c w/bsd/dev/a6plte/hfs_volume.c
+new file mode 100644
+index 0000000..b15d1b9
+--- /dev/null
++++ w/bsd/dev/a6plte/hfs_volume.c
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* Read-only validation of a bare HFS+/HFSX volume inside the userdata slice. */
++#include "storage.h"
++static uint16_t be16(const uint8_t *p) { return (uint16_t)((unsigned)p[0]<<8 | p[1]); }
++static uint32_t be32(const uint8_t *p) {
++    return (uint32_t)p[0]<<24 | (uint32_t)p[1]<<16 | (uint32_t)p[2]<<8 | p[3];
++}
++static int header(const uint8_t *h,uint64_t capacity,struct a6_hfs_volume *v) {
++    v->signature=be16(h);v->version=be16(h+2);
++    if (!((v->signature==0x482b && v->version==4) ||
++          (v->signature==0x4858 && v->version==5))) return A6_IO_INVALID;
++    v->attributes=be32(h+4);v->block_size=be32(h+40);v->blocks=be32(h+44);
++    if (v->block_size<512 || v->block_size>1048576 ||
++        (v->block_size&(v->block_size-1)) || !v->blocks || be32(h+48)>v->blocks)
++        return A6_IO_INVALID;
++    v->bytes=(uint64_t)v->block_size*v->blocks;
++    if (v->bytes<4096 || v->bytes>capacity ||
++        ((v->attributes&(1u<<13)) && (!be32(h+12) || be32(h+12)>=v->blocks)))
++        return A6_IO_INVALID;
++    return 0;
++}
++int a6_hfs_volume_check(struct a6_slice *slice,struct a6_hfs_volume *out) {
++    uint8_t bytes[512];struct a6_hfs_volume primary,alternate;
++    if (!out) return A6_IO_INVALID;
++    *out=(struct a6_hfs_volume){0};
++    if (!slice || !slice->disk || slice->count<8 || slice->count>UINT64_MAX/512)
++        return A6_IO_INVALID;
++    int error=a6_slice_io(slice,0,2,1,bytes);
++    if (error) return error;
++    error=header(bytes,slice->count*512,&primary);
++    if (error) return error;
++    /* A copied volume may be smaller than userdata: use its own geometry. */
++    error=a6_slice_io(slice,0,primary.bytes/512-2,1,bytes);
++    if (error) return error;
++    error=header(bytes,slice->count*512,&alternate);
++    if (error || primary.signature!=alternate.signature || primary.version!=alternate.version ||
++        primary.block_size!=alternate.block_size || primary.blocks!=alternate.blocks)
++        return A6_IO_INVALID;
++    *out=primary;
++    return 0;
 +}
 diff --git i/bsd/dev/a6plte/sdhci.c w/bsd/dev/a6plte/sdhci.c
 new file mode 100644
@@ -266,10 +314,10 @@ index 0000000..f265e07
 +    NULL,0,service_status,"I","A6 platform service readiness and diagnostic watchdog expiry");
 diff --git i/bsd/dev/a6plte/storage.h w/bsd/dev/a6plte/storage.h
 new file mode 100644
-index 0000000..752cd70
+index 0000000..f7a48ec
 --- /dev/null
 +++ w/bsd/dev/a6plte/storage.h
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,51 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#ifndef A6PLTE_STORAGE_H
 +#define A6PLTE_STORAGE_H
@@ -294,6 +342,12 @@ index 0000000..752cd70
 +uint32_t a6_storage_crc32(const void *, size_t);
 +int a6_gpt_userdata(struct a6_blockdev *, struct a6_slice *);
 +int a6_slice_io(struct a6_slice *, int, uint64_t, uint32_t, void *);
++struct a6_hfs_volume {
++    uint64_t bytes;
++    uint32_t block_size, blocks, attributes;
++    uint16_t signature, version;
++};
++int a6_hfs_volume_check(struct a6_slice *, struct a6_hfs_volume *);
 +
 +/* Register accesses are injectable for host tests. No DMA or firmware calls. */
 +struct a6_sdhci_ops {
@@ -969,10 +1023,10 @@ index 0000000..d9a45df
 +#endif
 diff --git i/bsd/dev/a6plte/userdata.c w/bsd/dev/a6plte/userdata.c
 new file mode 100644
-index 0000000..1cc441b
+index 0000000..90bea63
 --- /dev/null
 +++ w/bsd/dev/a6plte/userdata.c
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,168 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Native BSD block/raw devices exposing only the GPT userdata slice. */
 +#include <sys/param.h>
@@ -992,7 +1046,7 @@ index 0000000..1cc441b
 +static struct a6_emmc host;
 +static struct a6_blockdev disk;
 +static struct a6_slice userdata;
-+static int published;
++static int published,block_major=-1,selected_root;
 +static LCK_GRP_DECLARE(a6_emmc_group,"a6plte eMMC");
 +static LCK_MTX_DECLARE(a6_emmc_lock,&a6_emmc_group);
 +
@@ -1079,10 +1133,13 @@ index 0000000..1cc441b
 +    default:return ENOTTY; /* No whole-disk, erase, format or discard interface. */
 +    }
 +}
-+static int block_size(__unused dev_t dev) { return 512; }
++static int device_size(dev_t dev) {
++    if (minor(dev)!=0 || !published || userdata.count>INT_MAX) return -1;
++    return (int)userdata.count; /* Legacy d_psize reports 512-byte blocks. */
++}
 +static const struct bdevsw block_ops={
 +    .d_open=device_open,.d_close=device_close,.d_strategy=strategy,.d_ioctl=device_ioctl,
-+    .d_dump=eno_dump,.d_psize=block_size,.d_type=D_DISK,
++    .d_dump=eno_dump,.d_psize=device_size,.d_type=D_DISK,
 +};
 +static const struct cdevsw raw_ops={
 +    .d_open=device_open,.d_close=device_close,.d_read=raw_io,.d_write=raw_io,.d_ioctl=device_ioctl,
@@ -1117,16 +1174,54 @@ index 0000000..1cc441b
 +        if (bn) devfs_remove(bn);if (cn) devfs_remove(cn);
 +        cdevsw_remove(cm,&raw_ops);bdevsw_remove(bm,&block_ops);return;
 +    }
-+    published=1;
++    block_major=bm;published=1;
 +    printf("A6PLTE eMMC: userdata LBA %llu..%llu, %llu bytes, %s\n",(unsigned long long)userdata.first,
 +        (unsigned long long)(userdata.first+userdata.count-1),(unsigned long long)(userdata.count*512),userdata.writable?"RW":"read only");
 +    printf("A6PLTE eMMC: /dev/a6userdata and /dev/ra6userdata ready\n");
 +}
++int a6_userdata_root(dev_t *root) {
++    if (!root || !published || !host.online || block_major<0) return ENXIO;
++    struct a6_hfs_volume volume;
++    lck_mtx_lock(&a6_emmc_lock);
++    int error=a6_hfs_volume_check(&userdata,&volume);
++    lck_mtx_unlock(&a6_emmc_lock);
++    if (error) {
++        printf("A6PLTE ROOT: userdata HFS+ primary/alternate validation failed (%d)\n",error);
++        return to_errno(error);
++    }
++    printf("A6PLTE ROOT: userdata HFS%s verified, %llu bytes, block size %u\n",
++        volume.signature==0x4858?"X":"+",(unsigned long long)volume.bytes,volume.block_size);
++    *root=makedev(block_major,0);selected_root=1;
++    return 0;
++}
++int a6_userdata_root_selected(void) { return selected_root; }
 diff --git i/bsd/kern/bsd_init.c w/bsd/kern/bsd_init.c
-index ffe7ce0..0f9f279 100644
+index ffe7ce0..c338d41 100644
 --- i/bsd/kern/bsd_init.c
 +++ w/bsd/kern/bsd_init.c
-@@ -1115,6 +1115,13 @@ bsd_autoconf(void)
+@@ -263,6 +263,9 @@ int darkboot = 0;
+ #endif
+ 
+ extern kern_return_t IOFindBSDRoot(char *, unsigned int, dev_t *, u_int32_t *);
++#if A6PLTE
++extern int a6_userdata_root_selected(void);
++#endif
+ extern void IOSecureBSDRoot(const char * rootName);
+ extern kern_return_t IOKitBSDInit(void );
+ extern boolean_t IOSetRecoveryBoot(bsd_bootfail_mode_t, uuid_t, boolean_t);
+@@ -944,6 +947,11 @@ bsd_init(void)
+ 		require_rootauth = TRUE;
+ #endif // XNU_TARGET_OS_OSX && defined(__arm64__)
+ 
++#if A6PLTE
++		/* A user-prepared HFS+ root has no Apple APFS seal/provider. */
++		if (a6_userdata_root_selected()) require_rootauth = FALSE;
++#endif
++
+ 		if (require_rootauth) {
+ 			/* enforce sealedness */
+ 			int autherr = VNOP_IOCTL(rootvnode, FSIOC_KERNEL_ROOTAUTH, NULL, 0, vfs_context_kernel());
+@@ -1115,6 +1123,13 @@ bsd_autoconf(void)
  	kprintf("bsd_autoconf: calling kminit\n");
  	kminit();
  
@@ -1550,28 +1645,29 @@ index 8698ba1..e5c9f47 100644
  	return error;
  }
 diff --git i/iokit/Kernel/IOService.cpp w/iokit/Kernel/IOService.cpp
-index 6824ed8..813af06 100644
+index 6824ed8..200ce57 100644
 --- i/iokit/Kernel/IOService.cpp
 +++ w/iokit/Kernel/IOService.cpp
-@@ -67,6 +67,10 @@
+@@ -67,6 +67,11 @@
  #include <sys/kdebug.h>
  #include <string.h>
  
 +#if A6PLTE
 +extern "C" bool IORamDiskBSDRoot(void);
++extern "C" bool IOA6UserdataBSDRoot(void);
 +#endif
 +
  #include <machine/pal_routines.h>
  
  #define LOG kprintf
-@@ -5396,6 +5400,16 @@ IOService::publishHiddenMedia(IOService * parent)
+@@ -5396,6 +5401,16 @@ IOService::publishHiddenMedia(IOService * parent)
  	bool                wasHiding;
  
  	iomediaClass = OSMetaClass::getMetaClassWithName(gIOMediaKey);
 +#if A6PLTE
-+	/* A native BSD memory disk has no IOMedia objects to unhide when
++	/* These native BSD roots have no IOMedia objects to unhide when
 +	 * IOStorageFamily is not linked. Preserve the normal path otherwise. */
-+	if (!iomediaClass && !parent && IORamDiskBSDRoot()) {
++	if (!iomediaClass && !parent && (IORamDiskBSDRoot() || IOA6UserdataBSDRoot())) {
 +		LOCKWRITENOTIFY();
 +		gIOServiceHideIOMedia = false;
 +		UNLOCKNOTIFY();
@@ -1581,14 +1677,13 @@ index 6824ed8..813af06 100644
  	assert(iomediaClass);
  
  	LOCKWRITENOTIFY();
-@@ -5449,7 +5463,13 @@ IOService::setRootMedia(IOService * root)
+@@ -5449,7 +5464,12 @@ IOService::setRootMedia(IOService * root)
  	bool unhide;
  
  	ioblockstoragedriverClass = OSMetaClass::getMetaClassWithName(gIOBlockStorageDriverKey);
 +#if A6PLTE
-+	/* IOFindBSDRoot selects md0 directly, without an IOService provider.
-+	 * It is valid to have no IOStorageFamily for this exact root type. */
-+	assert(ioblockstoragedriverClass || (!root && IORamDiskBSDRoot()));
++	/* These board roots are native BSD devices without IOStorageFamily. */
++	assert(ioblockstoragedriverClass || (!root && (IORamDiskBSDRoot() || IOA6UserdataBSDRoot())));
 +#else
  	assert(ioblockstoragedriverClass);
 +#endif
@@ -2191,10 +2286,53 @@ index 559a9db..4b414d8 100644
      "     'IOClass'         = IOPanicPlatform;"
      "     'IOProviderClass' = IOPlatformExpertDevice;"
 diff --git i/iokit/bsddev/IOKitBSDInit.cpp w/iokit/bsddev/IOKitBSDInit.cpp
-index 2bbd161..8c01124 100644
+index 2bbd161..f327f3e 100644
 --- i/iokit/bsddev/IOKitBSDInit.cpp
 +++ w/iokit/bsddev/IOKitBSDInit.cpp
-@@ -1578,6 +1578,13 @@ IOTaskHasStringEntitlement(task_t task, const char *entitlement, const char *val
+@@ -67,6 +67,11 @@ extern dev_t mdevadd(int devid, uint64_t base, unsigned int size, int phys);
+ extern dev_t mdevlookup(int devid);
+ extern void mdevremoveall(void);
+ extern int mdevgetrange(int devid, uint64_t *base, uint64_t *size);
++#if A6PLTE
++extern int a6_userdata_root(dev_t *root);
++extern int a6_userdata_root_selected(void);
++extern bool IOA6UserdataBSDRoot(void);
++#endif
+ extern void di_root_ramfile(IORegistryEntry * entry);
+ extern int IODTGetDefault(const char *key, void *infoAddr, unsigned int infoSize);
+ extern boolean_t cpuid_vmm_present(void);
+@@ -732,6 +737,19 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
+ 		rdBootVar[0] = 0;
+ 	}
+ 
++#if A6PLTE
++	if (strcmp(rdBootVar, "a6userdata") == 0) {
++		int error = a6_userdata_root(root);
++		if (error) {
++			panic("A6PLTE ROOT: cannot select userdata HFS+ root, errno %d", error);
++		}
++		strlcpy(rootName, "a6userdata", rootNameSize);
++		*oflags = 0;
++		IOLog("BSD root: %s, major %d, minor %d\n", rootName, major(*root), minor(*root));
++		goto iofrootx;
++	}
++#endif
++
+ 	if ((regEntry = IORegistryEntry::fromPath( "/chosen", gIODTPlane ))) {
+ 		do {
+ 			di_root_ramfile(regEntry);
+@@ -1038,6 +1056,10 @@ IORamDiskBSDRoot(void)
+ 	return false;
+ }
+ 
++#if A6PLTE
++bool IOA6UserdataBSDRoot(void) { return a6_userdata_root_selected() != 0; }
++#endif
++
+ void
+ IOSecureBSDRoot(const char * rootName)
+ {
+@@ -1578,6 +1600,13 @@ IOTaskHasStringEntitlement(task_t task, const char *entitlement, const char *val
  		return false;
  	}
  
@@ -2208,7 +2346,7 @@ index 2bbd161..8c01124 100644
  	kern_return_t ret = amfi->OSEntitlements.queryEntitlementStringWithProc(
  		proc,
  		entitlement,
-@@ -1621,6 +1628,13 @@ IOTaskHasEntitlement(task_t task, const char *entitlement)
+@@ -1621,6 +1650,13 @@ IOTaskHasEntitlement(task_t task, const char *entitlement)
  		return false;
  	}
  
@@ -2222,7 +2360,7 @@ index 2bbd161..8c01124 100644
  	kern_return_t ret = amfi->OSEntitlements.queryEntitlementBooleanWithProc(
  		proc,
  		entitlement);
-@@ -1651,6 +1665,13 @@ IOTaskGetIntegerEntitlement(task_t task, const char *entitlement, uint64_t *valu
+@@ -1651,6 +1687,13 @@ IOTaskGetIntegerEntitlement(task_t task, const char *entitlement, uint64_t *valu
  		return false;
  	}
  
@@ -2236,7 +2374,7 @@ index 2bbd161..8c01124 100644
  	kern_return_t ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
  		proc,
  		entitlement,
-@@ -1701,6 +1722,13 @@ IOTaskGetEntitlement(task_t task, const char *entitlement)
+@@ -1701,6 +1744,13 @@ IOTaskGetEntitlement(task_t task, const char *entitlement)
  		return NULL;
  	}
  
@@ -2250,7 +2388,7 @@ index 2bbd161..8c01124 100644
  	kern_return_t ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
  		proc,
  		entitlement,
-@@ -1740,6 +1768,13 @@ IOTaskHasEntitlementAsBooleanOrObject(task_t task, const char *entitlement)
+@@ -1740,6 +1790,13 @@ IOTaskHasEntitlementAsBooleanOrObject(task_t task, const char *entitlement)
  		return false;
  	}
  
@@ -2264,7 +2402,7 @@ index 2bbd161..8c01124 100644
  	kern_return_t ret = amfi->OSEntitlements.queryEntitlementBooleanWithProc(
  		proc,
  		entitlement);
-@@ -1747,6 +1782,12 @@ IOTaskHasEntitlementAsBooleanOrObject(task_t task, const char *entitlement)
+@@ -1747,6 +1804,12 @@ IOTaskHasEntitlementAsBooleanOrObject(task_t task, const char *entitlement)
  		return true;
  	}
  

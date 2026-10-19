@@ -30,6 +30,8 @@ for unit in storage sdhci; do
     clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_$unit.c" "${sources[@]}" -o "$ROOT/artifacts/test-$unit"
     "$ROOT/artifacts/test-$unit"
 done
+clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_hfs_volume.c" "$ROOT/xnu/bsd/dev/a6plte/gpt.c" "$ROOT/xnu/bsd/dev/a6plte/hfs_volume.c" -o "$ROOT/artifacts/test-hfs-volume"
+"$ROOT/artifacts/test-hfs-volume"
 python3 "$ROOT/tests/test_bootimg.py"
 python3 "$ROOT/tests/test_crc32.py"
 clang -I"$ROOT/xnu" -DA6PLTE=1 -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_xnu_early.c" "$ROOT/xnu/pexpert/arm/a6plte/early.c" "$ROOT/xnu/pexpert/arm/a6plte/fb.c" -o "$ROOT/artifacts/test-xnu-early"

@@ -98,7 +98,13 @@ jobs:
           name: xnu-build-output
       - name: Package linked kernel for lk2nd
         run: ./scripts/package-boot.sh artifacts/kernel.a6plte artifacts/ramdisk.hfs
+      - name: Package userdata HFS+ root without a ramdisk
+        run: |
+          ./scripts/package-boot.sh --root=userdata artifacts/kernel.a6plte
+          python3 scripts/check-userdata-boot.py artifacts/kernel.a6plte artifacts/xnu-userdata-boot.img
       - uses: actions/upload-artifact@v4
         with:
           name: xnu-boot-image
-          path: artifacts/xnu-boot.img
+          path: |
+            artifacts/xnu-boot.img
+            artifacts/xnu-userdata-boot.img

@@ -67,12 +67,32 @@ displayed values have not been reported separately. Actual hardware write/readba
 and HFS+ mounting on userdata remain separate acceptance checks on the user's
 prepared volume. The ramdisk is not formatted or copied onto userdata by this probe.
 
-## Future root-volume switch
+## Root volume on userdata
 
-The user's future command **«чеснок»** requests implementing and testing boot
-from the user's HFS+ userspace on the GPT `userdata` partition instead of the
-current ramdisk. The user will prepare the filesystem and its contents. Until
-that command, keep the ramdisk boot and `a6-init`; do not perform the switch now.
-The later switch must validate the actual GPT and HFS+ volume and stay within
-the userdata slice. It does not authorize formatting the volume or replacing
-the user's prepared files. USB stays disabled and UART remains prohibited.
+The user has issued **«чеснок»** and selected `/sbin/launchd`. Build the image now;
+do not run `fastboot boot` or reboot the phone until the user issues **«паста»**
+as a command. Mentioning that word while defining this rule is not activation.
+USB stays disabled and UART remains prohibited.
+
+`scripts/package-boot.sh --root=userdata artifacts/kernel.a6plte` produces
+`artifacts/xnu-userdata-boot.img`. It contains the kernel and bridge, no rootfs.
+The bridge donates a checked 256 MiB RAM arena and supplies
+`rd=a6userdata launchdsuffix=release`. The ramdisk image and `a6-init` remain
+available separately as `artifacts/xnu-boot.img`.
+
+The native BSD root path uses the dynamically assigned userdata device number;
+it does not guess a major number or wait for an absent IOStorageFamily driver.
+It checks both GPT copies, then the primary and alternate HFS+/HFSX headers,
+block geometry and partition bounds. A bare filesystem must start at offset
+zero in userdata, with its primary header at byte 1024. A copied volume may be
+smaller than the partition; its alternate header is checked at its own end.
+The preflight issues reads only and stops with a framebuffer panic if invalid.
+Apple's HFS driver performs the subsequent actual root mount. An unsealed HFS+
+root is exempted from the Apple APFS root-seal ioctl only for this validated
+board root; executable validation is unchanged.
+
+The user prepares the filesystem, `/sbin/launchd` and its runtime files.
+Preparation does not format userdata, replace those files or write another
+partition. A read-only fetch of the current first 4 KiB found no HFS+/HFSX
+signature at byte 1024; mounting the prepared volume and running launchd are
+still hardware checks. Raw partition contents stay in private artifacts.

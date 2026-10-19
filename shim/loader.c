@@ -30,6 +30,9 @@ void xnu_load(struct platform *p,const void *dtb,struct range image) {
     struct a6_xnu_package h;
     if(a6_package_parse((const void *)(uintptr_t)p->initrd_start,p->initrd_end-p->initrd_start,&h))
         FAIL("invalid package header or bounds");
+#if A6_ROOT_USERDATA
+    if(h.ramdisk_bytes) FAIL("userdata-root image must not contain a RAMDisk");
+#endif
     a6_fb_puts(fb,"PACKAGE HEADER READ\n");
     const uint8_t *src=(void *)(uintptr_t)(p->initrd_start+64);
     a6_fb_puts(fb,"CRC CHECK ");
@@ -49,6 +52,9 @@ void xnu_load(struct platform *p,const void *dtb,struct range image) {
     if(el!=4 || (sctlr&5)) FAIL("EL1 with MMU and D-cache off required");
     /* Only donate a verified contiguous free window, never all RAM across firmware carveouts. */
     uint64_t allocation,arena=h.ramdisk_bytes ? 256*1024*1024 : 128*1024*1024;
+#if A6_ROOT_USERDATA
+    arena=256*1024*1024;
+#endif
     if(p->nr_reserved>=96) FAIL("reservation table full");
     const uint8_t *d=dtb; uint32_t dtlen=(uint32_t)d[4]<<24|(uint32_t)d[5]<<16|(uint32_t)d[6]<<8|d[7];
     p->reserved[p->nr_reserved++]=(struct range){(uintptr_t)dtb,dtlen};
@@ -78,10 +84,16 @@ void xnu_load(struct platform *p,const void *dtb,struct range image) {
     args->video=(struct a6_boot_video){(uintptr_t)fb->base,0,fb->stride,fb->width,fb->height,fb->format==A6_RGB888?24:fb->format==A6_XRGB8888?32:16};
     /* XNU consumes a virtual DT pointer after its bootstrap identity -> KVA transition. */
     args->device_tree=h.virt+tree_pa-dest; args->device_tree_length=tree_size;
+#if A6_ROOT_USERDATA
+    const char cmd[]="-v debug=0x14 cpus=1 serial=1 startup_debug=1 rd=a6userdata launchdsuffix=release";
+    copy(args->command_line,cmd,sizeof(cmd));
+    a6_fb_puts(fb,"Root: userdata HFS+; PID1: /sbin/launchd\n");
+#else
     const char cmd[]="-v debug=0x14 cpus=1 serial=1 startup_debug=1";
     const char root_cmd[]="-v debug=0x14 cpus=1 serial=1 startup_debug=1 rd=md0";
     if(h.ramdisk_bytes) copy(args->command_line,root_cmd,sizeof(root_cmd));
     else copy(args->command_line,cmd,sizeof(cmd));
+#endif
     a6_fb_puts(fb,"Entering experimental XNU. Waiting for XNU marker.\n");
     a6_fb_puts(fb,"ENTRY PA: "); a6_fb_hex(fb,dest+h.entry-h.virt);
     a6_fb_puts(fb,"\nBOOT ARGS PA: "); a6_fb_hex(fb,args_pa); a6_fb_puts(fb,"\n");

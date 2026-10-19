@@ -6,6 +6,11 @@ LLD=${LLD:-$(command -v ld.lld || true)}
 LLD=${LLD:-$HOME/a6plte-uefi/toolchain/ld.lld}
 mkdir -p "$OUT"
 flags=(--target=aarch64-none-elf -mcpu=cortex-a53 -mstrict-align -mgeneral-regs-only -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -O2 -g -Wall -Wextra -Werror)
+case ${A6_BOOT_ROOT:-ramdisk} in
+    ramdisk) flags+=(-DA6_ROOT_USERDATA=0) ;;
+    userdata) flags+=(-DA6_ROOT_USERDATA=1) ;;
+    *) echo 'A6_BOOT_ROOT must be ramdisk or userdata' >&2; exit 2 ;;
+esac
 for src in console/fb.c shim/fdt.c shim/crc32.c shim/apple_dt.c shim/package.c shim/loader.c shim/main.c shim/start.S; do
     clang "${flags[@]}" -c "$ROOT/$src" -o "$OUT/$(basename "${src%.*}").o"
 done
