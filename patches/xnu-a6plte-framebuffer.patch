@@ -1077,7 +1077,7 @@ index 0000000..75ede36
 +#endif /* A6PLTE */
 diff --git i/iokit/Kernel/arm/A6PlatformServices.cpp w/iokit/Kernel/arm/A6PlatformServices.cpp
 new file mode 100644
-index 0000000..c88b819
+index 0000000..fd880ff
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PlatformServices.cpp
 @@ -0,0 +1,381 @@
@@ -1284,7 +1284,7 @@ index 0000000..c88b819
 +    A6SurfaceMemory *memory=new A6SurfaceMemory;
 +    if (!memory) { owner->unreserve(bytes);return nullptr; }
 +    memory->root=owner;owner->retain();memory->charge=bytes;
-+    if (!memory->initWithPhysicalMask(kernel_task,kIODirectionInOut | kIOMemoryKernelUserShared,bytes,4096,0)) {
++    if (!memory->initWithPhysicalMask(kernel_task,IOOptionBits(kIODirectionInOut) | IOOptionBits(kIOMemoryKernelUserShared),bytes,4096,0)) {
 +        memory->release();return nullptr;
 +    }
 +    bzero(memory->getBytesNoCopy(),bytes);
@@ -1362,7 +1362,7 @@ index 0000000..c88b819
 +    if (surfaceRoot) surfaceRoot->retain();
 +    if (framebuffer) {
 +        framebuffer->retain();const struct a6_display *d=framebuffer->getDisplay();
-+        aperture=IODeviceMemory::withRange(d->physical_address,d->info.size).detach();
++        aperture=IODeviceMemory::withRange(d->physical_address,d->info.size);
 +        if (!aperture) return false;
 +    }
 +    return true;
