@@ -456,17 +456,2465 @@ index c72c690..6aa4089 100644
  
  iokit/Kernel/IOCPU.cpp					optional iokitcpp
 diff --git i/libkern/conf/files w/libkern/conf/files
-index c4684c2..a3d38b1 100644
+index c4684c2..2c23b71 100644
 --- i/libkern/conf/files
 +++ w/libkern/conf/files
-@@ -99,6 +99,7 @@ libkern/crypto/corecrypto_des.c			optional crypto
+@@ -99,6 +99,10 @@ libkern/crypto/corecrypto_des.c			optional crypto
  libkern/crypto/corecrypto_aes.c			optional crypto
  libkern/crypto/corecrypto_aesxts.c		optional crypto
  libkern/crypto/corecrypto_rand.c		optional crypto
 +libkern/crypto/a6plte_kmem_rng.c		optional crypto
++libkern/crypto/a6plte_aes/gen/aescrypt.c	optional a6plte
++libkern/crypto/a6plte_aes/gen/aeskey.c	optional a6plte
++libkern/crypto/a6plte_aes/gen/aestab.c	optional a6plte
  libkern/crypto/corecrypto_rsa.c		    optional crypto
  libkern/crypto/corecrypto_chacha20poly1305.c	optional	crypto
  
+diff --git i/libkern/crypto/a6plte_aes/SOURCE.txt w/libkern/crypto/a6plte_aes/SOURCE.txt
+new file mode 100644
+index 0000000..e5c5d5b
+--- /dev/null
++++ w/libkern/crypto/a6plte_aes/SOURCE.txt
+@@ -0,0 +1,12 @@
++Imported from Apple OSS XNU xnu-1699.32.7, commit 161efb48ee9912c6935f205e7ac9c370edb09318:
++https://github.com/apple-oss-distributions/xnu/tree/161efb48ee9912c6935f205e7ac9c370edb09318/bsd/crypto/aes
++
++Original Brian Gladman license notices are retained in each file.
++Changes: private a6_legacy_ symbols/context names and header guard; local header
++include; SAFE_IO for byte-aligned buffers; NULL IV means zero IV, matching the
++current XNU CBC API; zero-block operations return without accessing buffers;
++decryption avoids forming a pointer before the output object after its last block.
++
++This supplies AES CBC/ECB for the standalone bootstrap image. It does not register
++or claim to implement a full corecrypto provider. The legacy AES implementation
++uses lookup tables; it is not a constant-time crypto provider for production use.
+diff --git i/libkern/crypto/a6plte_aes/aes.h w/libkern/crypto/a6plte_aes/aes.h
+new file mode 100644
+index 0000000..9a1d04b
+--- /dev/null
++++ w/libkern/crypto/a6plte_aes/aes.h
+@@ -0,0 +1,219 @@
++/*
++ ---------------------------------------------------------------------------
++ Copyright (c) 2003, Dr Brian Gladman, Worcester, UK.   All rights reserved.
++
++ LICENSE TERMS
++
++ The free distribution and use of this software in both source and binary
++ form is allowed (with or without changes) provided that:
++
++   1. distributions of this source code include the above copyright
++      notice, this list of conditions and the following disclaimer;
++
++   2. distributions in binary form include the above copyright
++      notice, this list of conditions and the following disclaimer
++      in the documentation and/or other associated materials;
++
++   3. the copyright holder's name is not used to endorse products
++      built using this software without specific written permission.
++
++ ALTERNATIVELY, provided that this notice is retained in full, this product
++ may be distributed under the terms of the GNU General Public License (GPL),
++ in which case the provisions of the GPL apply INSTEAD OF those given above.
++
++ DISCLAIMER
++
++ This software is provided 'as is' with no explicit or implied warranties
++ in respect of its properties, including, but not limited to, correctness
++ and/or fitness for purpose.
++ ---------------------------------------------------------------------------
++ Issue 31/01/2006
++
++ This file contains the definitions required to use AES in C. See aesopt.h
++ for optimisation details.
++*/
++
++#ifndef _A6_LEGACY_AES_H
++#define _A6_LEGACY_AES_H
++
++
++#if defined(__cplusplus)
++extern "C"
++{
++#endif
++
++#define AES_128     /* define if AES with 128 bit keys is needed    */
++#define AES_192     /* define if AES with 192 bit keys is needed    */
++#define AES_256     /* define if AES with 256 bit keys is needed    */
++#define AES_VAR     /* define if a variable key size is needed      */
++#define AES_MODES   /* define if support is needed for modes        */
++
++/* The following must also be set in assembler files if being used  */
++
++#define AES_ENCRYPT /* if support for encryption is needed          */
++#define AES_DECRYPT /* if support for decryption is needed          */
++#define AES_ERR_CHK /* for parameter checks & error return codes    */
++#define AES_REV_DKS /* define to reverse decryption key schedule    */
++
++#define AES_BLOCK_SIZE  16  /* the AES block size in bytes          */
++#define N_COLS           4  /* the number of columns in the state   */
++
++typedef	unsigned int    uint_32t;
++typedef unsigned char   uint_8t;
++typedef unsigned short  uint_16t;
++typedef unsigned char   aes_08t;
++typedef	unsigned int    aes_32t;
++
++#define void_ret  void
++#define int_ret   int
++
++/* The key schedule length is 11, 13 or 15 16-byte blocks for 128,  */
++/* 192 or 256-bit keys respectively. That is 176, 208 or 240 bytes  */
++/* or 44, 52 or 60 32-bit words.                                    */
++
++#if defined( AES_VAR ) || defined( AES_256 )
++#define KS_LENGTH       60
++#elif defined( AES_192 )
++#define KS_LENGTH       52
++#else
++#define KS_LENGTH       44
++#endif
++
++
++#if 0 // defined (__i386__) || defined (__x86_64__)
++
++/* 
++	looks like no other code for (i386/x86_64) is using the following definitions any more.
++	I comment this out, so the C code in the directory gen/ can be used to compile for test/development purpose.
++	Note : this is not going to change anything in the i386/x86_64 kernel. 
++			(source code in i386/, mostly in assembly, does not reference to this header file.) 
++
++	cclee	10-20-2010
++*/
++
++/* the character array 'inf' in the following structures is used    */
++/* to hold AES context information. This AES code uses cx->inf.b[0] */
++/* to hold the number of rounds multiplied by 16. The other three   */
++/* elements can be used by code that implements additional modes    */
++
++#if defined( AES_ERR_CHK )
++#define aes_rval     int_ret
++#else
++#define aes_rval     void_ret
++#endif
++
++typedef union
++{   uint_32t l;
++    uint_8t b[4];
++} aes_inf;
++
++typedef struct
++{   uint_32t ks[KS_LENGTH];
++    aes_inf inf;
++} a6_legacy_aes_encrypt_ctx;
++
++typedef struct
++{   uint_32t ks[KS_LENGTH];
++    aes_inf inf;
++} a6_legacy_aes_decrypt_ctx;
++
++#else
++
++#if defined( AES_ERR_CHK )
++#define aes_ret     int
++#define aes_good    0
++#define aes_error  -1
++#else
++#define aes_ret     void
++#endif
++
++#define aes_rval    aes_ret
++
++typedef struct
++{   aes_32t ks[KS_LENGTH];
++    aes_32t rn;
++} a6_legacy_aes_encrypt_ctx;
++
++typedef struct
++{   aes_32t ks[KS_LENGTH];
++    aes_32t rn;
++} a6_legacy_aes_decrypt_ctx;
++
++#endif
++
++typedef struct
++{   
++	a6_legacy_aes_decrypt_ctx decrypt;
++    a6_legacy_aes_encrypt_ctx encrypt;
++} a6_legacy_aes_ctx;
++
++
++/* implemented in case of wrong call for fixed tables */
++
++void a6_legacy_gen_tabs(void);
++
++
++/* Key lengths in the range 16 <= key_len <= 32 are given in bytes, */
++/* those in the range 128 <= key_len <= 256 are given in bits       */
++
++#if defined( AES_ENCRYPT )
++
++#if defined(AES_128) || defined(AES_VAR)
++aes_rval a6_legacy_aes_encrypt_key128(const unsigned char *key, a6_legacy_aes_encrypt_ctx cx[1]);
++#endif
++
++#if defined(AES_192) || defined(AES_VAR)
++aes_rval a6_legacy_aes_encrypt_key192(const unsigned char *key, a6_legacy_aes_encrypt_ctx cx[1]);
++#endif
++
++#if defined(AES_256) || defined(AES_VAR)
++aes_rval a6_legacy_aes_encrypt_key256(const unsigned char *key, a6_legacy_aes_encrypt_ctx cx[1]);
++#endif
++
++#if defined(AES_VAR)
++aes_rval a6_legacy_aes_encrypt_key(const unsigned char *key, int key_len, a6_legacy_aes_encrypt_ctx cx[1]);
++#endif
++
++#if defined (__i386__) || defined (__x86_64__)
++aes_rval a6_legacy_aes_encrypt(const unsigned char *in, unsigned char *out, const a6_legacy_aes_encrypt_ctx cx[1]);
++#endif
++
++aes_rval a6_legacy_aes_encrypt_cbc(const unsigned char *in_blk, const unsigned char *in_iv, unsigned int num_blk,
++					 unsigned char *out_blk, const a6_legacy_aes_encrypt_ctx cx[1]);
++
++#endif
++
++#if defined( AES_DECRYPT )
++
++#if defined(AES_128) || defined(AES_VAR)
++aes_rval a6_legacy_aes_decrypt_key128(const unsigned char *key, a6_legacy_aes_decrypt_ctx cx[1]);
++#endif
++
++#if defined(AES_192) || defined(AES_VAR)
++aes_rval a6_legacy_aes_decrypt_key192(const unsigned char *key, a6_legacy_aes_decrypt_ctx cx[1]);
++#endif
++
++#if defined(AES_256) || defined(AES_VAR)
++aes_rval a6_legacy_aes_decrypt_key256(const unsigned char *key, a6_legacy_aes_decrypt_ctx cx[1]);
++#endif
++
++#if defined(AES_VAR)
++aes_rval a6_legacy_aes_decrypt_key(const unsigned char *key, int key_len, a6_legacy_aes_decrypt_ctx cx[1]);
++#endif
++
++#if defined (__i386__) || defined (__x86_64__)
++aes_rval a6_legacy_aes_decrypt(const unsigned char *in, unsigned char *out, const a6_legacy_aes_decrypt_ctx cx[1]);
++#endif
++
++aes_rval a6_legacy_aes_decrypt_cbc(const unsigned char *in_blk, const unsigned char *in_iv, unsigned int num_blk,
++					 unsigned char *out_blk, const a6_legacy_aes_decrypt_ctx cx[1]);
++
++
++#endif
++
++
++#if defined(__cplusplus)
++}
++#endif
++
++#endif
+diff --git i/libkern/crypto/a6plte_aes/gen/aescrypt.c w/libkern/crypto/a6plte_aes/gen/aescrypt.c
+new file mode 100644
+index 0000000..387fe81
+--- /dev/null
++++ w/libkern/crypto/a6plte_aes/gen/aescrypt.c
+@@ -0,0 +1,420 @@
++/*
++ ---------------------------------------------------------------------------
++ Copyright (c) 2003, Dr Brian Gladman, Worcester, UK.   All rights reserved.
++
++ LICENSE TERMS
++
++ The free distribution and use of this software in both source and binary
++ form is allowed (with or without changes) provided that:
++
++   1. distributions of this source code include the above copyright
++      notice, this list of conditions and the following disclaimer;
++
++   2. distributions in binary form include the above copyright
++      notice, this list of conditions and the following disclaimer
++      in the documentation and/or other associated materials;
++
++   3. the copyright holder's name is not used to endorse products
++      built using this software without specific written permission.
++
++ ALTERNATIVELY, provided that this notice is retained in full, this product
++ may be distributed under the terms of the GNU General Public License (GPL),
++ in which case the provisions of the GPL apply INSTEAD OF those given above.
++
++ DISCLAIMER
++
++ This software is provided 'as is' with no explicit or implied warranties
++ in respect of its properties, including, but not limited to, correctness
++ and/or fitness for purpose.
++ ---------------------------------------------------------------------------
++ Issue 28/01/2004
++
++ This file contains the code for implementing encryption and decryption
++ for AES (Rijndael) for block and key sizes of 16, 24 and 32 bytes. It
++ can optionally be replaced by code written in assembler using NASM. For
++ further details see the file aesopt.h
++*/
++
++#include "aesopt.h"
++#include "aestab.h"
++
++#if defined(__cplusplus)
++extern "C"
++{
++#endif
++
++#define ki(y,x,k,c) (s(y,c) = s(x, c) ^ (k)[c])
++#define xo(y,x,c) (s(y,c) ^= s(x, c))
++#define si(y,x,c)   (s(y,c) = word_in(x, c))
++#define so(y,x,c)   word_out(y, c, s(x,c))
++
++#if defined(ARRAYS)
++#define locals(y,x)     x[4],y[4]
++#else
++#define locals(y,x)     x##0,x##1,x##2,x##3,y##0,y##1,y##2,y##3
++#endif
++
++#define dtables(tab)     const aes_32t *tab##0, *tab##1, *tab##2, *tab##3
++#define itables(tab)     tab##0 = tab[0]; tab##1 = tab[1]; tab##2 = tab[2]; tab##3 = tab[3]
++
++#define l_copy(y, x)    s(y,0) = s(x,0); s(y,1) = s(x,1); \
++                        s(y,2) = s(x,2); s(y,3) = s(x,3);
++
++#define key_in(y,x,k)   ki(y,x,k,0); ki(y,x,k,1); ki(y,x,k,2); ki(y,x,k,3)
++#define cbc(y,x)        xo(y,x,0); xo(y,x,1); xo(y,x,2); xo(y,x,3)
++#define state_in(y,x)   si(y,x,0); si(y,x,1); si(y,x,2); si(y,x,3)
++#define state_out(y,x)  so(y,x,0); so(y,x,1); so(y,x,2); so(y,x,3)
++#define round(rm,y,x,k) rm(y,x,k,0); rm(y,x,k,1); rm(y,x,k,2); rm(y,x,k,3)
++
++#if defined(ENCRYPTION) && !defined(AES_ASM)
++
++/* Visual C++ .Net v7.1 provides the fastest encryption code when using
++   Pentium optimiation with small code but this is poor for decryption
++   so we need to control this with the following VC++ pragmas
++*/
++
++#if defined(_MSC_VER)
++#pragma optimize( "s", on )
++#endif
++
++/* Given the column (c) of the output state variable, the following
++   macros give the input state variables which are needed in its
++   computation for each row (r) of the state. All the alternative
++   macros give the same end values but expand into different ways
++   of calculating these values.  In particular the complex macro
++   used for dynamically variable block sizes is designed to expand
++   to a compile time constant whenever possible but will expand to
++   conditional clauses on some branches (I am grateful to Frank
++   Yellin for this construction)
++*/
++
++#define fwd_var(x,r,c)\
++ ( r == 0 ? ( c == 0 ? s(x,0) : c == 1 ? s(x,1) : c == 2 ? s(x,2) : s(x,3))\
++ : r == 1 ? ( c == 0 ? s(x,1) : c == 1 ? s(x,2) : c == 2 ? s(x,3) : s(x,0))\
++ : r == 2 ? ( c == 0 ? s(x,2) : c == 1 ? s(x,3) : c == 2 ? s(x,0) : s(x,1))\
++ :          ( c == 0 ? s(x,3) : c == 1 ? s(x,0) : c == 2 ? s(x,1) : s(x,2)))
++
++#if defined(FT4_SET)
++#undef  dec_fmvars
++#  if defined(ENC_ROUND_CACHE_TABLES)
++#define fwd_rnd(y,x,k,c)    (s(y,c) = (k)[c] ^ four_cached_tables(x,t_fn,fwd_var,rf1,c))
++#  else
++#define fwd_rnd(y,x,k,c)    (s(y,c) = (k)[c] ^ four_tables(x,t_fn,fwd_var,rf1,c))
++#  endif
++#elif defined(FT1_SET)
++#undef  dec_fmvars
++#define fwd_rnd(y,x,k,c)    (s(y,c) = (k)[c] ^ one_table(x,upr,t_fn,fwd_var,rf1,c))
++#else
++#define fwd_rnd(y,x,k,c)    (s(y,c) = (k)[c] ^ fwd_mcol(no_table(x,t_sbox,fwd_var,rf1,c)))
++#endif
++
++#if defined(FL4_SET)
++#  if defined(LAST_ENC_ROUND_CACHE_TABLES)
++#define fwd_lrnd(y,x,k,c)   (s(y,c) = (k)[c] ^ four_cached_tables(x,t_fl,fwd_var,rf1,c))
++#  else
++#define fwd_lrnd(y,x,k,c)   (s(y,c) = (k)[c] ^ four_tables(x,t_fl,fwd_var,rf1,c))
++#  endif
++#elif defined(FL1_SET)
++#define fwd_lrnd(y,x,k,c)   (s(y,c) = (k)[c] ^ one_table(x,ups,t_fl,fwd_var,rf1,c))
++#else
++#define fwd_lrnd(y,x,k,c)   (s(y,c) = (k)[c] ^ no_table(x,t_sbox,fwd_var,rf1,c))
++#endif
++
++aes_rval a6_legacy_aes_encrypt_cbc(const unsigned char *in, const unsigned char *in_iv, unsigned int num_blk,
++					 unsigned char *out, const a6_legacy_aes_encrypt_ctx cx[1])
++{
++    static const unsigned char zero_iv[16];
++    if (!num_blk) return aes_good;
++    if (!in_iv) in_iv = zero_iv;
++   aes_32t         locals(b0, b1);
++    const aes_32t   *kp;
++    const aes_32t   *kptr = cx->ks;
++#if defined(ENC_ROUND_CACHE_TABLES)
++	dtables(t_fn);
++#endif
++#if defined(LAST_ENC_ROUND_CACHE_TABLES)
++	dtables(t_fl);
++#endif
++
++#if defined( dec_fmvars )
++    dec_fmvars; /* declare variables for fwd_mcol() if needed */
++#endif
++
++#if defined( AES_ERR_CHK )
++    if( cx->rn != 10 && cx->rn != 12 && cx->rn != 14 )
++        return aes_error;
++#endif
++
++	// Load IV into b0.
++	state_in(b0, in_iv);
++
++	for (;num_blk; in += AES_BLOCK_SIZE, out += AES_BLOCK_SIZE, --num_blk)
++	{
++		kp = kptr;
++#if 0
++		// Read the plaintext into b1
++		state_in(b1, in);
++		// Do the CBC with b0 which is either the iv or the ciphertext of the previous block.
++		cbc(b1, b0);
++
++		// Xor b1 with the key schedule to get things started.
++		key_in(b0, b1, kp);
++#else
++		// Since xor is associative we mess with the ordering here to get the loads started early
++		key_in(b1, b0, kp);  // Xor b0(IV) with the key schedule and assign to b1
++		state_in(b0, in);    // Load block into b0
++		cbc(b0, b1);         // Xor b0 with b1 and store in b0
++#endif
++
++#if defined(ENC_ROUND_CACHE_TABLES)
++		itables(t_fn);
++#endif
++
++#if (ENC_UNROLL == FULL)
++
++		switch(cx->rn)
++		{
++		case 14:
++			round(fwd_rnd,  b1, b0, kp + 1 * N_COLS);
++			round(fwd_rnd,  b0, b1, kp + 2 * N_COLS);
++			kp += 2 * N_COLS;
++		case 12:
++			round(fwd_rnd,  b1, b0, kp + 1 * N_COLS);
++			round(fwd_rnd,  b0, b1, kp + 2 * N_COLS);
++			kp += 2 * N_COLS;
++		case 10:
++		default:
++			round(fwd_rnd,  b1, b0, kp + 1 * N_COLS);
++			round(fwd_rnd,  b0, b1, kp + 2 * N_COLS);
++			round(fwd_rnd,  b1, b0, kp + 3 * N_COLS);
++			round(fwd_rnd,  b0, b1, kp + 4 * N_COLS);
++			round(fwd_rnd,  b1, b0, kp + 5 * N_COLS);
++			round(fwd_rnd,  b0, b1, kp + 6 * N_COLS);
++			round(fwd_rnd,  b1, b0, kp + 7 * N_COLS);
++			round(fwd_rnd,  b0, b1, kp + 8 * N_COLS);
++			round(fwd_rnd,  b1, b0, kp + 9 * N_COLS);
++#if defined(LAST_ENC_ROUND_CACHE_TABLES)
++			itables(t_fl);
++#endif
++			round(fwd_lrnd, b0, b1, kp +10 * N_COLS);
++		}
++
++#else
++
++		{   aes_32t    rnd;
++#if (ENC_UNROLL == PARTIAL)
++			for(rnd = 0; rnd < (cx->rn >> 1) - 1; ++rnd)
++			{
++				kp += N_COLS;
++				round(fwd_rnd, b1, b0, kp);
++				kp += N_COLS;
++				round(fwd_rnd, b0, b1, kp);
++			}
++			kp += N_COLS;
++			round(fwd_rnd,  b1, b0, kp);
++#else
++			for(rnd = 0; rnd < cx->rn - 1; ++rnd)
++			{
++				kp += N_COLS;
++				round(fwd_rnd, b1, b0, kp);
++				l_copy(b0, b1);
++			}
++#endif
++#if defined(LAST_ENC_ROUND_CACHE_TABLES)
++			itables(t_fl);
++#endif
++			kp += N_COLS;
++			round(fwd_lrnd, b0, b1, kp);
++		}
++#endif
++	
++		state_out(out, b0);
++	}
++
++#if defined( AES_ERR_CHK )
++    return aes_good;
++#endif
++}
++
++#endif
++
++#if defined(DECRYPTION) && !defined(AES_ASM)
++
++/* Visual C++ .Net v7.1 provides the fastest encryption code when using
++   Pentium optimiation with small code but this is poor for decryption
++   so we need to control this with the following VC++ pragmas
++*/
++
++#if defined(_MSC_VER)
++#pragma optimize( "t", on )
++#endif
++
++/* Given the column (c) of the output state variable, the following
++   macros give the input state variables which are needed in its
++   computation for each row (r) of the state. All the alternative
++   macros give the same end values but expand into different ways
++   of calculating these values.  In particular the complex macro
++   used for dynamically variable block sizes is designed to expand
++   to a compile time constant whenever possible but will expand to
++   conditional clauses on some branches (I am grateful to Frank
++   Yellin for this construction)
++*/
++
++#define inv_var(x,r,c)\
++ ( r == 0 ? ( c == 0 ? s(x,0) : c == 1 ? s(x,1) : c == 2 ? s(x,2) : s(x,3))\
++ : r == 1 ? ( c == 0 ? s(x,3) : c == 1 ? s(x,0) : c == 2 ? s(x,1) : s(x,2))\
++ : r == 2 ? ( c == 0 ? s(x,2) : c == 1 ? s(x,3) : c == 2 ? s(x,0) : s(x,1))\
++ :          ( c == 0 ? s(x,1) : c == 1 ? s(x,2) : c == 2 ? s(x,3) : s(x,0)))
++
++#if defined(IT4_SET)
++#undef  dec_imvars
++#  if defined(DEC_ROUND_CACHE_TABLES)
++#define inv_rnd(y,x,k,c)    (s(y,c) = (k)[c] ^ four_cached_tables(x,t_in,inv_var,rf1,c))
++#  else
++#define inv_rnd(y,x,k,c)    (s(y,c) = (k)[c] ^ four_tables(x,t_in,inv_var,rf1,c))
++#  endif
++#elif defined(IT1_SET)
++#undef  dec_imvars
++#define inv_rnd(y,x,k,c)    (s(y,c) = (k)[c] ^ one_table(x,upr,t_in,inv_var,rf1,c))
++#else
++#define inv_rnd(y,x,k,c)    (s(y,c) = inv_mcol((k)[c] ^ no_table(x,t_ibox,inv_var,rf1,c)))
++#endif
++
++#if defined(IL4_SET)
++#  if defined(LAST_DEC_ROUND_CACHE_TABLES)
++#define inv_lrnd(y,x,k,c)   (s(y,c) = (k)[c] ^ four_cached_tables(x,t_il,inv_var,rf1,c))
++#  else
++#define inv_lrnd(y,x,k,c)   (s(y,c) = (k)[c] ^ four_tables(x,t_il,inv_var,rf1,c))
++#  endif
++#elif defined(IL1_SET)
++#define inv_lrnd(y,x,k,c)   (s(y,c) = (k)[c] ^ one_table(x,ups,t_il,inv_var,rf1,c))
++#else
++#define inv_lrnd(y,x,k,c)   (s(y,c) = (k)[c] ^ no_table(x,t_ibox,inv_var,rf1,c))
++#endif
++
++aes_rval a6_legacy_aes_decrypt_cbc(const unsigned char *in, const unsigned char *in_iv, unsigned int num_blk,
++					 unsigned char *out, const a6_legacy_aes_decrypt_ctx cx[1])
++{
++    static const unsigned char zero_iv[16];
++    if (!num_blk) return aes_good;
++    if (!in_iv) in_iv = zero_iv;
++   aes_32t        locals(b0, b1);
++    const aes_32t *kptr = cx->ks + cx->rn * N_COLS;
++	const aes_32t *kp;
++#if defined(DEC_ROUND_CACHE_TABLES)
++	dtables(t_in);
++#endif
++#if defined(LAST_DEC_ROUND_CACHE_TABLES)
++	dtables(t_il);
++#endif
++
++#if defined( dec_imvars )
++    dec_imvars; /* declare variables for inv_mcol() if needed */
++#endif
++	
++#if defined( AES_ERR_CHK )
++    if( cx->rn != 10 && cx->rn != 12 && cx->rn != 14 )
++        return aes_error;
++#endif
++
++#if defined(DEC_ROUND_CACHE_TABLES)
++	itables(t_in);
++#endif	
++	
++	in += AES_BLOCK_SIZE * (num_blk - 1);
++	out += AES_BLOCK_SIZE * (num_blk - 1);
++	// Load the last block's ciphertext into b1
++	state_in(b1, in);
++
++	for (;num_blk; --num_blk)
++	{
++		kp = kptr;
++		// Do the xor part of state_in, where b1 is the previous block's ciphertext.
++		key_in(b0, b1, kp);
++
++#if (DEC_UNROLL == FULL)
++	
++		switch(cx->rn)
++		{
++		case 14:
++			round(inv_rnd,  b1, b0, kp -  1 * N_COLS);
++			round(inv_rnd,  b0, b1, kp -  2 * N_COLS);
++			kp -= 2 * N_COLS;
++		case 12:
++			round(inv_rnd,  b1, b0, kp -  1 * N_COLS);
++			round(inv_rnd,  b0, b1, kp -  2 * N_COLS);
++			kp -= 2 * N_COLS;
++		case 10:
++		default:
++			round(inv_rnd,  b1, b0, kp -  1 * N_COLS);
++			round(inv_rnd,  b0, b1, kp -  2 * N_COLS);
++			round(inv_rnd,  b1, b0, kp -  3 * N_COLS);
++			round(inv_rnd,  b0, b1, kp -  4 * N_COLS);
++			round(inv_rnd,  b1, b0, kp -  5 * N_COLS);
++			round(inv_rnd,  b0, b1, kp -  6 * N_COLS);
++			round(inv_rnd,  b1, b0, kp -  7 * N_COLS);
++			round(inv_rnd,  b0, b1, kp -  8 * N_COLS);
++			round(inv_rnd,  b1, b0, kp -  9 * N_COLS);
++#if defined(LAST_DEC_ROUND_CACHE_TABLES)
++			itables(t_il);
++#endif	
++			round(inv_lrnd, b0, b1, kp - 10 * N_COLS);
++		}
++
++#else
++	
++		{   aes_32t    rnd;
++#if (DEC_UNROLL == PARTIAL)
++			for(rnd = 0; rnd < (cx->rn >> 1) - 1; ++rnd)
++			{
++				kp -= N_COLS;
++				round(inv_rnd, b1, b0, kp);
++				kp -= N_COLS;
++				round(inv_rnd, b0, b1, kp);
++			}
++			kp -= N_COLS;
++			round(inv_rnd, b1, b0, kp);
++#else
++			for(rnd = 0; rnd < cx->rn - 1; ++rnd)
++			{
++				kp -= N_COLS;
++				round(inv_rnd, b1, b0, kp);
++				l_copy(b0, b1);
++			}
++#endif
++#if defined(LAST_DEC_ROUND_CACHE_TABLES)
++			itables(t_il);
++#endif	
++			kp -= N_COLS;
++			round(inv_lrnd, b0, b1, kp);
++		}
++#endif
++
++		if (num_blk == 1)
++		{
++			// We are doing the first block so we need the IV rather than the previous
++			// block for CBC (there is no previous block)
++			state_in(b1, in_iv);
++		}
++		else
++		{
++			in -= AES_BLOCK_SIZE;
++			state_in(b1, in);
++		}
++
++		// Do the CBC with b1 which is either the IV or the ciphertext of the previous block.
++		cbc(b0, b1);
++
++		state_out(out, b0);
++        if (num_blk > 1) out -= AES_BLOCK_SIZE;
++	}
++#if defined( AES_ERR_CHK )
++    return aes_good;
++#endif
++}
++
++#endif
++
++#if defined(__cplusplus)
++}
++#endif
+diff --git i/libkern/crypto/a6plte_aes/gen/aeskey.c w/libkern/crypto/a6plte_aes/gen/aeskey.c
+new file mode 100644
+index 0000000..3940b4d
+--- /dev/null
++++ w/libkern/crypto/a6plte_aes/gen/aeskey.c
+@@ -0,0 +1,455 @@
++/*
++ ---------------------------------------------------------------------------
++ Copyright (c) 2003, Dr Brian Gladman, Worcester, UK.   All rights reserved.
++
++ LICENSE TERMS
++
++ The free distribution and use of this software in both source and binary
++ form is allowed (with or without changes) provided that:
++
++   1. distributions of this source code include the above copyright
++      notice, this list of conditions and the following disclaimer;
++
++   2. distributions in binary form include the above copyright
++      notice, this list of conditions and the following disclaimer
++      in the documentation and/or other associated materials;
++
++   3. the copyright holder's name is not used to endorse products
++      built using this software without specific written permission.
++
++ ALTERNATIVELY, provided that this notice is retained in full, this product
++ may be distributed under the terms of the GNU General Public License (GPL),
++ in which case the provisions of the GPL apply INSTEAD OF those given above.
++
++ DISCLAIMER
++
++ This software is provided 'as is' with no explicit or implied warranties
++ in respect of its properties, including, but not limited to, correctness
++ and/or fitness for purpose.
++ ---------------------------------------------------------------------------
++ Issue Date: 26/08/2003
++
++ This file contains the code for implementing the key schedule for AES
++ (Rijndael) for block and key sizes of 16, 24, and 32 bytes. See aesopt.h
++ for further details including optimisation.
++*/
++
++#include "aesopt.h"
++#include "aestab.h"
++
++#if defined(__cplusplus)
++extern "C"
++{
++#endif
++
++/* Initialise the key schedule from the user supplied key. The key
++   length can be specified in bytes, with legal values of 16, 24
++   and 32, or in bits, with legal values of 128, 192 and 256. These
++   values correspond with Nk values of 4, 6 and 8 respectively.
++
++   The following macros implement a single cycle in the key
++   schedule generation process. The number of cycles needed
++   for each cx->n_col and nk value is:
++
++    nk =             4  5  6  7  8
++    ------------------------------
++    cx->n_col = 4   10  9  8  7  7
++    cx->n_col = 5   14 11 10  9  9
++    cx->n_col = 6   19 15 12 11 11
++    cx->n_col = 7   21 19 16 13 14
++    cx->n_col = 8   29 23 19 17 14
++*/
++
++#define ke4(k,i) \
++{   k[4*(i)+4] = ss[0] ^= ls_box(ss[3],3) ^ t_use(r,c)[i]; k[4*(i)+5] = ss[1] ^= ss[0]; \
++    k[4*(i)+6] = ss[2] ^= ss[1]; k[4*(i)+7] = ss[3] ^= ss[2]; \
++}
++#define kel4(k,i) \
++{   k[4*(i)+4] = ss[0] ^= ls_box(ss[3],3) ^ t_use(r,c)[i]; k[4*(i)+5] = ss[1] ^= ss[0]; \
++    k[4*(i)+6] = ss[2] ^= ss[1]; k[4*(i)+7] = ss[3] ^= ss[2]; \
++}
++
++#define ke6(k,i) \
++{   k[6*(i)+ 6] = ss[0] ^= ls_box(ss[5],3) ^ t_use(r,c)[i]; k[6*(i)+ 7] = ss[1] ^= ss[0]; \
++    k[6*(i)+ 8] = ss[2] ^= ss[1]; k[6*(i)+ 9] = ss[3] ^= ss[2]; \
++    k[6*(i)+10] = ss[4] ^= ss[3]; k[6*(i)+11] = ss[5] ^= ss[4]; \
++}
++#define kel6(k,i) \
++{   k[6*(i)+ 6] = ss[0] ^= ls_box(ss[5],3) ^ t_use(r,c)[i]; k[6*(i)+ 7] = ss[1] ^= ss[0]; \
++    k[6*(i)+ 8] = ss[2] ^= ss[1]; k[6*(i)+ 9] = ss[3] ^= ss[2]; \
++}
++
++#define ke8(k,i) \
++{   k[8*(i)+ 8] = ss[0] ^= ls_box(ss[7],3) ^ t_use(r,c)[i]; k[8*(i)+ 9] = ss[1] ^= ss[0]; \
++    k[8*(i)+10] = ss[2] ^= ss[1]; k[8*(i)+11] = ss[3] ^= ss[2]; \
++    k[8*(i)+12] = ss[4] ^= ls_box(ss[3],0); k[8*(i)+13] = ss[5] ^= ss[4]; \
++    k[8*(i)+14] = ss[6] ^= ss[5]; k[8*(i)+15] = ss[7] ^= ss[6]; \
++}
++#define kel8(k,i) \
++{   k[8*(i)+ 8] = ss[0] ^= ls_box(ss[7],3) ^ t_use(r,c)[i]; k[8*(i)+ 9] = ss[1] ^= ss[0]; \
++    k[8*(i)+10] = ss[2] ^= ss[1]; k[8*(i)+11] = ss[3] ^= ss[2]; \
++}
++
++#if defined(ENCRYPTION_KEY_SCHEDULE)
++
++#if defined(AES_128) || defined(AES_VAR)
++
++aes_rval a6_legacy_aes_encrypt_key128(const unsigned char *key, a6_legacy_aes_encrypt_ctx cx[1])
++{   aes_32t    ss[4];
++
++    cx->ks[0] = ss[0] = word_in(key, 0);
++    cx->ks[1] = ss[1] = word_in(key, 1);
++    cx->ks[2] = ss[2] = word_in(key, 2);
++    cx->ks[3] = ss[3] = word_in(key, 3);
++
++#if ENC_UNROLL == NONE
++    {   aes_32t i;
++
++        for(i = 0; i < ((11 * N_COLS - 5) / 4); ++i)
++            ke4(cx->ks, i);
++    }
++#else
++    ke4(cx->ks, 0);  ke4(cx->ks, 1);
++    ke4(cx->ks, 2);  ke4(cx->ks, 3);
++    ke4(cx->ks, 4);  ke4(cx->ks, 5);
++    ke4(cx->ks, 6);  ke4(cx->ks, 7);
++    ke4(cx->ks, 8);
++#endif
++    kel4(cx->ks, 9);
++    cx->rn = 10;
++#if defined( AES_ERR_CHK )
++    return aes_good;
++#endif
++}
++
++#endif
++
++#if defined(AES_192) || defined(AES_VAR)
++
++aes_rval a6_legacy_aes_encrypt_key192(const unsigned char *key, a6_legacy_aes_encrypt_ctx cx[1])
++{   aes_32t    ss[6];
++
++    cx->ks[0] = ss[0] = word_in(key, 0);
++    cx->ks[1] = ss[1] = word_in(key, 1);
++    cx->ks[2] = ss[2] = word_in(key, 2);
++    cx->ks[3] = ss[3] = word_in(key, 3);
++    cx->ks[4] = ss[4] = word_in(key, 4);
++    cx->ks[5] = ss[5] = word_in(key, 5);
++
++#if ENC_UNROLL == NONE
++    {   aes_32t i;
++
++        for(i = 0; i < (13 * N_COLS - 7) / 6; ++i)
++            ke6(cx->ks, i);
++    }
++#else
++    ke6(cx->ks, 0);  ke6(cx->ks, 1);
++    ke6(cx->ks, 2);  ke6(cx->ks, 3);
++    ke6(cx->ks, 4);  ke6(cx->ks, 5);
++    ke6(cx->ks, 6);
++#endif
++    kel6(cx->ks, 7);
++    cx->rn = 12;
++#if defined( AES_ERR_CHK )
++    return aes_good;
++#endif
++}
++
++#endif
++
++#if defined(AES_256) || defined(AES_VAR)
++
++aes_rval a6_legacy_aes_encrypt_key256(const unsigned char *key, a6_legacy_aes_encrypt_ctx cx[1])
++{   aes_32t    ss[8];
++
++    cx->ks[0] = ss[0] = word_in(key, 0);
++    cx->ks[1] = ss[1] = word_in(key, 1);
++    cx->ks[2] = ss[2] = word_in(key, 2);
++    cx->ks[3] = ss[3] = word_in(key, 3);
++    cx->ks[4] = ss[4] = word_in(key, 4);
++    cx->ks[5] = ss[5] = word_in(key, 5);
++    cx->ks[6] = ss[6] = word_in(key, 6);
++    cx->ks[7] = ss[7] = word_in(key, 7);
++
++#if ENC_UNROLL == NONE
++    {   aes_32t i;
++
++        for(i = 0; i < (15 * N_COLS - 9) / 8; ++i)
++            ke8(cx->ks,  i);
++    }
++#else
++    ke8(cx->ks, 0); ke8(cx->ks, 1);
++    ke8(cx->ks, 2); ke8(cx->ks, 3);
++    ke8(cx->ks, 4); ke8(cx->ks, 5);
++#endif
++    kel8(cx->ks, 6);
++    cx->rn = 14;
++#if defined( AES_ERR_CHK )
++    return aes_good;
++#endif
++}
++
++#endif
++
++#if defined(AES_VAR)
++
++aes_rval a6_legacy_aes_encrypt_key(const unsigned char *key, int key_len, a6_legacy_aes_encrypt_ctx cx[1])
++{
++    switch(key_len)
++    {
++#if defined( AES_ERR_CHK )
++    case 16: case 128: return a6_legacy_aes_encrypt_key128(key, cx);
++    case 24: case 192: return a6_legacy_aes_encrypt_key192(key, cx);
++    case 32: case 256: return a6_legacy_aes_encrypt_key256(key, cx);
++    default: return aes_error;
++#else
++    case 16: case 128: a6_legacy_aes_encrypt_key128(key, cx); return;
++    case 24: case 192: a6_legacy_aes_encrypt_key192(key, cx); return;
++    case 32: case 256: a6_legacy_aes_encrypt_key256(key, cx); return;
++#endif
++    }
++}
++
++#endif
++
++#endif
++
++#if defined(DECRYPTION_KEY_SCHEDULE)
++
++#if DEC_ROUND == NO_TABLES
++#define ff(x)   (x)
++#else
++#define ff(x)   inv_mcol(x)
++#if defined( dec_imvars )
++#define d_vars  dec_imvars
++#endif
++#endif
++
++#if 1
++#define kdf4(k,i) \
++{   ss[0] = ss[0] ^ ss[2] ^ ss[1] ^ ss[3]; ss[1] = ss[1] ^ ss[3]; ss[2] = ss[2] ^ ss[3]; ss[3] = ss[3]; \
++    ss[4] = ls_box(ss[(i+3) % 4], 3) ^ t_use(r,c)[i]; ss[i % 4] ^= ss[4]; \
++    ss[4] ^= k[4*(i)];   k[4*(i)+4] = ff(ss[4]); ss[4] ^= k[4*(i)+1]; k[4*(i)+5] = ff(ss[4]); \
++    ss[4] ^= k[4*(i)+2]; k[4*(i)+6] = ff(ss[4]); ss[4] ^= k[4*(i)+3]; k[4*(i)+7] = ff(ss[4]); \
++}
++#define kd4(k,i) \
++{   ss[4] = ls_box(ss[(i+3) % 4], 3) ^ t_use(r,c)[i]; ss[i % 4] ^= ss[4]; ss[4] = ff(ss[4]); \
++    k[4*(i)+4] = ss[4] ^= k[4*(i)]; k[4*(i)+5] = ss[4] ^= k[4*(i)+1]; \
++    k[4*(i)+6] = ss[4] ^= k[4*(i)+2]; k[4*(i)+7] = ss[4] ^= k[4*(i)+3]; \
++}
++#define kdl4(k,i) \
++{   ss[4] = ls_box(ss[(i+3) % 4], 3) ^ t_use(r,c)[i]; ss[i % 4] ^= ss[4]; \
++    k[4*(i)+4] = (ss[0] ^= ss[1]) ^ ss[2] ^ ss[3]; k[4*(i)+5] = ss[1] ^ ss[3]; \
++    k[4*(i)+6] = ss[0]; k[4*(i)+7] = ss[1]; \
++}
++#else
++#define kdf4(k,i) \
++{   ss[0] ^= ls_box(ss[3],3) ^ t_use(r,c)[i]; k[4*(i)+ 4] = ff(ss[0]); ss[1] ^= ss[0]; k[4*(i)+ 5] = ff(ss[1]); \
++    ss[2] ^= ss[1]; k[4*(i)+ 6] = ff(ss[2]); ss[3] ^= ss[2]; k[4*(i)+ 7] = ff(ss[3]); \
++}
++#define kd4(k,i) \
++{   ss[4] = ls_box(ss[3],3) ^ t_use(r,c)[i]; \
++    ss[0] ^= ss[4]; ss[4] = ff(ss[4]); k[4*(i)+ 4] = ss[4] ^= k[4*(i)]; \
++    ss[1] ^= ss[0]; k[4*(i)+ 5] = ss[4] ^= k[4*(i)+ 1]; \
++    ss[2] ^= ss[1]; k[4*(i)+ 6] = ss[4] ^= k[4*(i)+ 2]; \
++    ss[3] ^= ss[2]; k[4*(i)+ 7] = ss[4] ^= k[4*(i)+ 3]; \
++}
++#define kdl4(k,i) \
++{   ss[0] ^= ls_box(ss[3],3) ^ t_use(r,c)[i]; k[4*(i)+ 4] = ss[0]; ss[1] ^= ss[0]; k[4*(i)+ 5] = ss[1]; \
++    ss[2] ^= ss[1]; k[4*(i)+ 6] = ss[2]; ss[3] ^= ss[2]; k[4*(i)+ 7] = ss[3]; \
++}
++#endif
++
++#define kdf6(k,i) \
++{   ss[0] ^= ls_box(ss[5],3) ^ t_use(r,c)[i]; k[6*(i)+ 6] = ff(ss[0]); ss[1] ^= ss[0]; k[6*(i)+ 7] = ff(ss[1]); \
++    ss[2] ^= ss[1]; k[6*(i)+ 8] = ff(ss[2]); ss[3] ^= ss[2]; k[6*(i)+ 9] = ff(ss[3]); \
++    ss[4] ^= ss[3]; k[6*(i)+10] = ff(ss[4]); ss[5] ^= ss[4]; k[6*(i)+11] = ff(ss[5]); \
++}
++#define kd6(k,i) \
++{   ss[6] = ls_box(ss[5],3) ^ t_use(r,c)[i]; \
++    ss[0] ^= ss[6]; ss[6] = ff(ss[6]); k[6*(i)+ 6] = ss[6] ^= k[6*(i)]; \
++    ss[1] ^= ss[0]; k[6*(i)+ 7] = ss[6] ^= k[6*(i)+ 1]; \
++    ss[2] ^= ss[1]; k[6*(i)+ 8] = ss[6] ^= k[6*(i)+ 2]; \
++    ss[3] ^= ss[2]; k[6*(i)+ 9] = ss[6] ^= k[6*(i)+ 3]; \
++    ss[4] ^= ss[3]; k[6*(i)+10] = ss[6] ^= k[6*(i)+ 4]; \
++    ss[5] ^= ss[4]; k[6*(i)+11] = ss[6] ^= k[6*(i)+ 5]; \
++}
++#define kdl6(k,i) \
++{   ss[0] ^= ls_box(ss[5],3) ^ t_use(r,c)[i]; k[6*(i)+ 6] = ss[0]; ss[1] ^= ss[0]; k[6*(i)+ 7] = ss[1]; \
++    ss[2] ^= ss[1]; k[6*(i)+ 8] = ss[2]; ss[3] ^= ss[2]; k[6*(i)+ 9] = ss[3]; \
++}
++
++#define kdf8(k,i) \
++{   ss[0] ^= ls_box(ss[7],3) ^ t_use(r,c)[i]; k[8*(i)+ 8] = ff(ss[0]); ss[1] ^= ss[0]; k[8*(i)+ 9] = ff(ss[1]); \
++    ss[2] ^= ss[1]; k[8*(i)+10] = ff(ss[2]); ss[3] ^= ss[2]; k[8*(i)+11] = ff(ss[3]); \
++    ss[4] ^= ls_box(ss[3],0); k[8*(i)+12] = ff(ss[4]); ss[5] ^= ss[4]; k[8*(i)+13] = ff(ss[5]); \
++    ss[6] ^= ss[5]; k[8*(i)+14] = ff(ss[6]); ss[7] ^= ss[6]; k[8*(i)+15] = ff(ss[7]); \
++}
++#define kd8(k,i) \
++{   aes_32t g = ls_box(ss[7],3) ^ t_use(r,c)[i]; \
++    ss[0] ^= g; g = ff(g); k[8*(i)+ 8] = g ^= k[8*(i)]; \
++    ss[1] ^= ss[0]; k[8*(i)+ 9] = g ^= k[8*(i)+ 1]; \
++    ss[2] ^= ss[1]; k[8*(i)+10] = g ^= k[8*(i)+ 2]; \
++    ss[3] ^= ss[2]; k[8*(i)+11] = g ^= k[8*(i)+ 3]; \
++    g = ls_box(ss[3],0); \
++    ss[4] ^= g; g = ff(g); k[8*(i)+12] = g ^= k[8*(i)+ 4]; \
++    ss[5] ^= ss[4]; k[8*(i)+13] = g ^= k[8*(i)+ 5]; \
++    ss[6] ^= ss[5]; k[8*(i)+14] = g ^= k[8*(i)+ 6]; \
++    ss[7] ^= ss[6]; k[8*(i)+15] = g ^= k[8*(i)+ 7]; \
++}
++#define kdl8(k,i) \
++{   ss[0] ^= ls_box(ss[7],3) ^ t_use(r,c)[i]; k[8*(i)+ 8] = ss[0]; ss[1] ^= ss[0]; k[8*(i)+ 9] = ss[1]; \
++    ss[2] ^= ss[1]; k[8*(i)+10] = ss[2]; ss[3] ^= ss[2]; k[8*(i)+11] = ss[3]; \
++}
++
++#if defined(AES_128) || defined(AES_VAR)
++
++aes_rval a6_legacy_aes_decrypt_key128(const unsigned char *key, a6_legacy_aes_decrypt_ctx cx[1])
++{   aes_32t    ss[5];
++#if defined( d_vars )
++        d_vars;
++#endif
++    cx->ks[0] = ss[0] = word_in(key, 0);
++    cx->ks[1] = ss[1] = word_in(key, 1);
++    cx->ks[2] = ss[2] = word_in(key, 2);
++    cx->ks[3] = ss[3] = word_in(key, 3);
++
++#if DEC_UNROLL == NONE
++    {   aes_32t i;
++
++        for(i = 0; i < (11 * N_COLS - 5) / 4; ++i)
++            ke4(cx->ks, i);
++        kel4(cx->ks, 9);
++#if !(DEC_ROUND == NO_TABLES)
++        for(i = N_COLS; i < 10 * N_COLS; ++i)
++            cx->ks[i] = inv_mcol(cx->ks[i]);
++#endif
++    }
++#else
++    kdf4(cx->ks, 0);  kd4(cx->ks, 1);
++     kd4(cx->ks, 2);  kd4(cx->ks, 3);
++     kd4(cx->ks, 4);  kd4(cx->ks, 5);
++     kd4(cx->ks, 6);  kd4(cx->ks, 7);
++     kd4(cx->ks, 8); kdl4(cx->ks, 9);
++#endif
++    cx->rn = 10;
++#if defined( AES_ERR_CHK )
++    return aes_good;
++#endif
++}
++
++#endif
++
++#if defined(AES_192) || defined(AES_VAR)
++
++aes_rval a6_legacy_aes_decrypt_key192(const unsigned char *key, a6_legacy_aes_decrypt_ctx cx[1])
++{   aes_32t    ss[7];
++#if defined( d_vars )
++        d_vars;
++#endif
++    cx->ks[0] = ss[0] = word_in(key, 0);
++    cx->ks[1] = ss[1] = word_in(key, 1);
++    cx->ks[2] = ss[2] = word_in(key, 2);
++    cx->ks[3] = ss[3] = word_in(key, 3);
++
++#if DEC_UNROLL == NONE
++    cx->ks[4] = ss[4] = word_in(key, 4);
++    cx->ks[5] = ss[5] = word_in(key, 5);
++    {   aes_32t i;
++
++        for(i = 0; i < (13 * N_COLS - 7) / 6; ++i)
++            ke6(cx->ks, i);
++        kel6(cx->ks, 7);
++#if !(DEC_ROUND == NO_TABLES)
++        for(i = N_COLS; i < 12 * N_COLS; ++i)
++            cx->ks[i] = inv_mcol(cx->ks[i]);
++#endif
++    }
++#else
++    cx->ks[4] = ff(ss[4] = word_in(key, 4));
++    cx->ks[5] = ff(ss[5] = word_in(key, 5));
++    kdf6(cx->ks, 0); kd6(cx->ks, 1);
++    kd6(cx->ks, 2);  kd6(cx->ks, 3);
++    kd6(cx->ks, 4);  kd6(cx->ks, 5);
++    kd6(cx->ks, 6); kdl6(cx->ks, 7);
++#endif
++    cx->rn = 12;
++#if defined( AES_ERR_CHK )
++    return aes_good;
++#endif
++}
++
++#endif
++
++#if defined(AES_256) || defined(AES_VAR)
++
++aes_rval a6_legacy_aes_decrypt_key256(const unsigned char *key, a6_legacy_aes_decrypt_ctx cx[1])
++{   aes_32t    ss[8];
++#if defined( d_vars )
++        d_vars;
++#endif
++    cx->ks[0] = ss[0] = word_in(key, 0);
++    cx->ks[1] = ss[1] = word_in(key, 1);
++    cx->ks[2] = ss[2] = word_in(key, 2);
++    cx->ks[3] = ss[3] = word_in(key, 3);
++
++#if DEC_UNROLL == NONE
++    cx->ks[4] = ss[4] = word_in(key, 4);
++    cx->ks[5] = ss[5] = word_in(key, 5);
++    cx->ks[6] = ss[6] = word_in(key, 6);
++    cx->ks[7] = ss[7] = word_in(key, 7);
++    {   aes_32t i;
++
++        for(i = 0; i < (15 * N_COLS - 9) / 8; ++i)
++            ke8(cx->ks,  i);
++        kel8(cx->ks,  i);
++#if !(DEC_ROUND == NO_TABLES)
++        for(i = N_COLS; i < 14 * N_COLS; ++i)
++            cx->ks[i] = inv_mcol(cx->ks[i]);
++
++#endif
++    }
++#else
++    cx->ks[4] = ff(ss[4] = word_in(key, 4));
++    cx->ks[5] = ff(ss[5] = word_in(key, 5));
++    cx->ks[6] = ff(ss[6] = word_in(key, 6));
++    cx->ks[7] = ff(ss[7] = word_in(key, 7));
++    kdf8(cx->ks, 0); kd8(cx->ks, 1);
++    kd8(cx->ks, 2);  kd8(cx->ks, 3);
++    kd8(cx->ks, 4);  kd8(cx->ks, 5);
++    kdl8(cx->ks, 6);
++#endif
++    cx->rn = 14;
++#if defined( AES_ERR_CHK )
++    return aes_good;
++#endif
++}
++
++#endif
++
++#if defined(AES_VAR)
++
++aes_rval a6_legacy_aes_decrypt_key(const unsigned char *key, int key_len, a6_legacy_aes_decrypt_ctx cx[1])
++{
++    switch(key_len)
++    {
++#if defined( AES_ERR_CHK )
++    case 16: case 128: return a6_legacy_aes_decrypt_key128(key, cx);
++    case 24: case 192: return a6_legacy_aes_decrypt_key192(key, cx);
++    case 32: case 256: return a6_legacy_aes_decrypt_key256(key, cx);
++    default: return aes_error;
++#else
++    case 16: case 128: a6_legacy_aes_decrypt_key128(key, cx); return;
++    case 24: case 192: a6_legacy_aes_decrypt_key192(key, cx); return;
++    case 32: case 256: a6_legacy_aes_decrypt_key256(key, cx); return;
++#endif
++    }
++}
++
++#endif
++
++#endif
++
++#if defined(__cplusplus)
++}
++#endif
+diff --git i/libkern/crypto/a6plte_aes/gen/aesopt.h w/libkern/crypto/a6plte_aes/gen/aesopt.h
+new file mode 100644
+index 0000000..63e71d5
+--- /dev/null
++++ w/libkern/crypto/a6plte_aes/gen/aesopt.h
+@@ -0,0 +1,738 @@
++/*
++ ---------------------------------------------------------------------------
++ Copyright (c) 2003, Dr Brian Gladman, Worcester, UK.   All rights reserved.
++
++ LICENSE TERMS
++
++ The free distribution and use of this software in both source and binary
++ form is allowed (with or without changes) provided that:
++
++   1. distributions of this source code include the above copyright
++      notice, this list of conditions and the following disclaimer;
++
++   2. distributions in binary form include the above copyright
++      notice, this list of conditions and the following disclaimer
++      in the documentation and/or other associated materials;
++
++   3. the copyright holder's name is not used to endorse products
++      built using this software without specific written permission.
++
++ ALTERNATIVELY, provided that this notice is retained in full, this product
++ may be distributed under the terms of the GNU General Public License (GPL),
++ in which case the provisions of the GPL apply INSTEAD OF those given above.
++
++ DISCLAIMER
++
++ This software is provided 'as is' with no explicit or implied warranties
++ in respect of its properties, including, but not limited to, correctness
++ and/or fitness for purpose.
++ ---------------------------------------------------------------------------
++ Issue 28/01/2004
++
++ My thanks go to Dag Arne Osvik for devising the schemes used here for key
++ length derivation from the form of the key schedule
++
++ This file contains the compilation options for AES (Rijndael) and code
++ that is common across encryption, key scheduling and table generation.
++
++ OPERATION
++
++ These source code files implement the AES algorithm Rijndael designed by
++ Joan Daemen and Vincent Rijmen. This version is designed for the standard
++ block size of 16 bytes and for key sizes of 128, 192 and 256 bits (16, 24
++ and 32 bytes).
++
++ This version is designed for flexibility and speed using operations on
++ 32-bit words rather than operations on bytes.  It can be compiled with
++ either big or little endian internal byte order but is faster when the
++ native byte order for the processor is used.
++
++ THE CIPHER INTERFACE
++
++ The cipher interface is implemented as an array of bytes in which lower
++ AES bit sequence indexes map to higher numeric significance within bytes.
++
++  aes_08t                 (an unsigned  8-bit type)
++  aes_32t                 (an unsigned 32-bit type)
++  struct a6_legacy_aes_encrypt_ctx  (structure for the cipher encryption context)
++  struct a6_legacy_aes_decrypt_ctx  (structure for the cipher decryption context)
++  aes_rval                the function return type
++
++  C subroutine calls:
++
++  aes_rval a6_legacy_aes_encrypt_key128(const unsigned char *key, a6_legacy_aes_encrypt_ctx cx[1]);
++  aes_rval a6_legacy_aes_encrypt_key192(const unsigned char *key, a6_legacy_aes_encrypt_ctx cx[1]);
++  aes_rval a6_legacy_aes_encrypt_key256(const unsigned char *key, a6_legacy_aes_encrypt_ctx cx[1]);
++  aes_rval a6_legacy_aes_encrypt(const unsigned char *in, unsigned char *out,
++                                                  const a6_legacy_aes_encrypt_ctx cx[1]);
++
++  aes_rval a6_legacy_aes_decrypt_key128(const unsigned char *key, a6_legacy_aes_decrypt_ctx cx[1]);
++  aes_rval a6_legacy_aes_decrypt_key192(const unsigned char *key, a6_legacy_aes_decrypt_ctx cx[1]);
++  aes_rval a6_legacy_aes_decrypt_key256(const unsigned char *key, a6_legacy_aes_decrypt_ctx cx[1]);
++  aes_rval a6_legacy_aes_decrypt(const unsigned char *in, unsigned char *out,
++                                                  const a6_legacy_aes_decrypt_ctx cx[1]);
++
++ IMPORTANT NOTE: If you are using this C interface with dynamic tables make sure that
++ you call genTabs() before AES is used so that the tables are initialised.
++
++ C++ aes class subroutines:
++
++     Class AESencrypt  for encryption
++
++      Construtors:
++          AESencrypt(void)
++          AESencrypt(const unsigned char *key) - 128 bit key
++      Members:
++          aes_rval key128(const unsigned char *key)
++          aes_rval key192(const unsigned char *key)
++          aes_rval key256(const unsigned char *key)
++          aes_rval encrypt(const unsigned char *in, unsigned char *out) const
++
++      Class AESdecrypt  for encryption
++      Construtors:
++          AESdecrypt(void)
++          AESdecrypt(const unsigned char *key) - 128 bit key
++      Members:
++          aes_rval key128(const unsigned char *key)
++          aes_rval key192(const unsigned char *key)
++          aes_rval key256(const unsigned char *key)
++          aes_rval decrypt(const unsigned char *in, unsigned char *out) const
++
++    COMPILATION
++
++    The files used to provide AES (Rijndael) are
++
++    a. aes.h for the definitions needed for use in C.
++    b. aescpp.h for the definitions needed for use in C++.
++    c. aesopt.h for setting compilation options (also includes common code).
++    d. aescrypt.c for encryption and decrytpion, or
++    e. aeskey.c for key scheduling.
++    f. aestab.c for table loading or generation.
++    g. aescrypt.asm for encryption and decryption using assembler code.
++    h. aescrypt.mmx.asm for encryption and decryption using MMX assembler.
++
++    To compile AES (Rijndael) for use in C code use aes.h and set the
++    defines here for the facilities you need (key lengths, encryption
++    and/or decryption). Do not define AES_DLL or AES_CPP.  Set the options
++    for optimisations and table sizes here.
++
++    To compile AES (Rijndael) for use in in C++ code use aescpp.h but do
++    not define AES_DLL
++
++    To compile AES (Rijndael) in C as a Dynamic Link Library DLL) use
++    aes.h and include the AES_DLL define.
++
++    CONFIGURATION OPTIONS (here and in aes.h)
++
++    a. set AES_DLL in aes.h if AES (Rijndael) is to be compiled as a DLL
++    b. You may need to set PLATFORM_BYTE_ORDER to define the byte order.
++    c. If you want the code to run in a specific internal byte order, then
++       ALGORITHM_BYTE_ORDER must be set accordingly.
++    d. set other configuration options decribed below.
++*/
++
++#if !defined( _AESOPT_H )
++#define _AESOPT_H
++
++#include "../aes.h"
++/* Cortex-A53 bootstrap: byte-safe I/O, scalar C and fixed tables. */
++#define SAFE_IO
++
++/*  CONFIGURATION - USE OF DEFINES
++
++    Later in this section there are a number of defines that control the
++    operation of the code.  In each section, the purpose of each define is
++    explained so that the relevant form can be included or excluded by
++    setting either 1's or 0's respectively on the branches of the related
++    #if clauses.
++
++    PLATFORM SPECIFIC INCLUDES AND BYTE ORDER IN 32-BIT WORDS
++
++    To obtain the highest speed on processors with 32-bit words, this code
++    needs to determine the byte order of the target machine. The following
++    block of code is an attempt to capture the most obvious ways in which
++    various environemnts define byte order. It may well fail, in which case
++    the definitions will need to be set by editing at the points marked
++    **** EDIT HERE IF NECESSARY **** below.  My thanks go to Peter Gutmann
++    for his assistance with this endian detection nightmare.
++*/
++
++#define BRG_LITTLE_ENDIAN   1234 /* byte 0 is least significant (i386) */
++#define BRG_BIG_ENDIAN      4321 /* byte 0 is most significant (mc68k) */
++
++#if defined(__GNUC__) || defined(__GNU_LIBRARY__)
++#  if defined(__FreeBSD__) || defined(__OpenBSD__)
++#    include <sys/endian.h>
++#  elif defined( BSD ) && BSD >= 199103
++#      include <machine/endian.h>
++#  elif defined(__APPLE__)
++#    if defined(__BIG_ENDIAN__) && !defined( BIG_ENDIAN )
++#      define BIG_ENDIAN
++#    elif defined(__LITTLE_ENDIAN__) && !defined( LITTLE_ENDIAN )
++#      define LITTLE_ENDIAN
++#    endif
++#  else
++#    include <endian.h>
++#    if defined(__BEOS__)
++#      include <byteswap.h>
++#    endif
++#  endif
++#endif
++
++#if !defined(PLATFORM_BYTE_ORDER)
++#  if defined(LITTLE_ENDIAN) || defined(BIG_ENDIAN)
++#    if    defined(LITTLE_ENDIAN) && !defined(BIG_ENDIAN)
++#      define PLATFORM_BYTE_ORDER BRG_LITTLE_ENDIAN
++#    elif !defined(LITTLE_ENDIAN) &&  defined(BIG_ENDIAN)
++#      define PLATFORM_BYTE_ORDER BRG_BIG_ENDIAN
++#    elif defined(BYTE_ORDER) && (BYTE_ORDER == LITTLE_ENDIAN)
++#      define PLATFORM_BYTE_ORDER BRG_LITTLE_ENDIAN
++#    elif defined(BYTE_ORDER) && (BYTE_ORDER == BIG_ENDIAN)
++#      define PLATFORM_BYTE_ORDER BRG_BIG_ENDIAN
++#    endif
++#  elif defined(_LITTLE_ENDIAN) || defined(_BIG_ENDIAN)
++#    if    defined(_LITTLE_ENDIAN) && !defined(_BIG_ENDIAN)
++#      define PLATFORM_BYTE_ORDER BRG_LITTLE_ENDIAN
++#    elif !defined(_LITTLE_ENDIAN) &&  defined(_BIG_ENDIAN)
++#      define PLATFORM_BYTE_ORDER BRG_BIG_ENDIAN
++#    elif defined(_BYTE_ORDER) && (_BYTE_ORDER == _LITTLE_ENDIAN)
++#      define PLATFORM_BYTE_ORDER BRG_LITTLE_ENDIAN
++#    elif defined(_BYTE_ORDER) && (_BYTE_ORDER == _BIG_ENDIAN)
++#      define PLATFORM_BYTE_ORDER BRG_BIG_ENDIAN
++#   endif
++#  elif defined(__LITTLE_ENDIAN__) || defined(__BIG_ENDIAN__)
++#    if    defined(__LITTLE_ENDIAN__) && !defined(__BIG_ENDIAN__)
++#      define PLATFORM_BYTE_ORDER BRG_LITTLE_ENDIAN
++#    elif !defined(__LITTLE_ENDIAN__) &&  defined(__BIG_ENDIAN__)
++#      define PLATFORM_BYTE_ORDER BRG_BIG_ENDIAN
++#    elif defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __LITTLE_ENDIAN__)
++#      define PLATFORM_BYTE_ORDER BRG_LITTLE_ENDIAN
++#    elif defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __BIG_ENDIAN__)
++#      define PLATFORM_BYTE_ORDER BRG_BIG_ENDIAN
++#    endif
++#  endif
++#endif
++
++/*  if the platform is still unknown, try to find its byte order    */
++/*  from commonly used machine defines                              */
++
++#if !defined(PLATFORM_BYTE_ORDER)
++
++#if   defined( __alpha__ ) || defined( __alpha ) || defined( i386 )       || \
++      defined( __i386__ )  || defined( _M_I86 )  || defined( _M_IX86 )    || \
++      defined( __OS2__ )   || defined( sun386 )  || defined( __TURBOC__ ) || \
++      defined( vax )       || defined( vms )     || defined( VMS )        || \
++      defined( __VMS )
++#  define PLATFORM_BYTE_ORDER BRG_LITTLE_ENDIAN
++
++#elif defined( AMIGA )    || defined( applec )  || defined( __AS400__ )  || \
++      defined( _CRAY )    || defined( __hppa )  || defined( __hp9000 )   || \
++      defined( ibm370 )   || defined( mc68000 ) || defined( m68k )       || \
++      defined( __MRC__ )  || defined( __MVS__ ) || defined( __MWERKS__ ) || \
++      defined( sparc )    || defined( __sparc)  || defined( SYMANTEC_C ) || \
++      defined( __TANDEM ) || defined( THINK_C ) || defined( __VMCMS__ )
++#  define PLATFORM_BYTE_ORDER BRG_BIG_ENDIAN
++
++#elif 0     /* **** EDIT HERE IF NECESSARY **** */
++#  define PLATFORM_BYTE_ORDER BRG_LITTLE_ENDIAN
++#elif 0     /* **** EDIT HERE IF NECESSARY **** */
++#  define PLATFORM_BYTE_ORDER BRG_BIG_ENDIAN
++#else
++#  error Please edit aesopt.h (line 234 or 236) to set the platform byte order
++#endif
++
++#endif
++
++/*  SOME LOCAL DEFINITIONS  */
++
++#define NO_TABLES              0
++#define ONE_TABLE              1
++#define FOUR_TABLES            4
++#define NONE                   0
++#define PARTIAL                1
++#define FULL                   2
++
++#if defined(bswap32)
++#define aes_sw32    bswap32
++#elif defined(bswap_32)
++#define aes_sw32    bswap_32
++#else
++#define brot(x,n)   (((aes_32t)(x) <<  n) | ((aes_32t)(x) >> (32 - n)))
++#define aes_sw32(x) ((brot((x),8) & 0x00ff00ff) | (brot((x),24) & 0xff00ff00))
++#endif
++
++/*  1. FUNCTIONS REQUIRED
++
++    This implementation provides subroutines for encryption, decryption
++    and for setting the three key lengths (separately) for encryption
++    and decryption. When the assembler code is not being used the following
++    definition blocks allow the selection of the routines that are to be
++    included in the compilation.
++*/
++#if defined( AES_ENCRYPT )
++#define ENCRYPTION
++#define ENCRYPTION_KEY_SCHEDULE
++#endif
++
++#if defined( AES_DECRYPT )
++#define DECRYPTION
++#define DECRYPTION_KEY_SCHEDULE
++#endif
++
++/*  2. ASSEMBLER SUPPORT
++
++    This define (which can be on the command line) enables the use of the
++    assembler code routines for encryption and decryption with the C code
++    only providing key scheduling
++*/
++
++/*  3. BYTE ORDER WITHIN 32 BIT WORDS
++
++    The fundamental data processing units in Rijndael are 8-bit bytes. The
++    input, output and key input are all enumerated arrays of bytes in which
++    bytes are numbered starting at zero and increasing to one less than the
++    number of bytes in the array in question. This enumeration is only used
++    for naming bytes and does not imply any adjacency or order relationship
++    from one byte to another. When these inputs and outputs are considered
++    as bit sequences, bits 8*n to 8*n+7 of the bit sequence are mapped to
++    byte[n] with bit 8n+i in the sequence mapped to bit 7-i within the byte.
++    In this implementation bits are numbered from 0 to 7 starting at the
++    numerically least significant end of each byte (bit n represents 2^n).
++
++    However, Rijndael can be implemented more efficiently using 32-bit
++    words by packing bytes into words so that bytes 4*n to 4*n+3 are placed
++    into word[n]. While in principle these bytes can be assembled into words
++    in any positions, this implementation only supports the two formats in
++    which bytes in adjacent positions within words also have adjacent byte
++    numbers. This order is called big-endian if the lowest numbered bytes
++    in words have the highest numeric significance and little-endian if the
++    opposite applies.
++
++    This code can work in either order irrespective of the order used by the
++    machine on which it runs. Normally the internal byte order will be set
++    to the order of the processor on which the code is to be run but this
++    define can be used to reverse this in special situations
++
++    NOTE: Assembler code versions rely on PLATFORM_BYTE_ORDER being set
++*/
++#define ALGORITHM_BYTE_ORDER PLATFORM_BYTE_ORDER
++
++/*  4. FAST INPUT/OUTPUT OPERATIONS.
++
++    On some machines it is possible to improve speed by transferring the
++    bytes in the input and output arrays to and from the internal 32-bit
++    variables by addressing these arrays as if they are arrays of 32-bit
++    words.  On some machines this will always be possible but there may
++    be a large performance penalty if the byte arrays are not aligned on
++    the normal word boundaries. On other machines this technique will
++    lead to memory access errors when such 32-bit word accesses are not
++    properly aligned. The option SAFE_IO avoids such problems but will
++    often be slower on those machines that support misaligned access
++    (especially so if care is taken to align the input  and output byte
++    arrays on 32-bit word boundaries). If SAFE_IO is not defined it is
++    assumed that access to byte arrays as if they are arrays of 32-bit
++    words will not cause problems when such accesses are misaligned.
++*/
++
++/*  5. LOOP UNROLLING
++
++    The code for encryption and decrytpion cycles through a number of rounds
++    that can be implemented either in a loop or by expanding the code into a
++    long sequence of instructions, the latter producing a larger program but
++    one that will often be much faster. The latter is called loop unrolling.
++    There are also potential speed advantages in expanding two iterations in
++    a loop with half the number of iterations, which is called partial loop
++    unrolling.  The following options allow partial or full loop unrolling
++    to be set independently for encryption and decryption
++*/
++#if 1
++#define ENC_UNROLL  FULL
++#elif 0
++#define ENC_UNROLL  PARTIAL
++#else
++#define ENC_UNROLL  NONE
++#endif
++
++#if 1
++#define DEC_UNROLL  FULL
++#elif 0
++#define DEC_UNROLL  PARTIAL
++#else
++#define DEC_UNROLL  NONE
++#endif
++
++/*  6. FAST FINITE FIELD OPERATIONS
++
++    If this section is included, tables are used to provide faster finite
++    field arithmetic (this has no effect if FIXED_TABLES is defined).
++*/
++#if 1
++#define FF_TABLES
++#endif
++
++/*  7. INTERNAL STATE VARIABLE FORMAT
++
++    The internal state of Rijndael is stored in a number of local 32-bit
++    word varaibles which can be defined either as an array or as individual
++    names variables. Include this section if you want to store these local
++    varaibles in arrays. Otherwise individual local variables will be used.
++*/
++#if 0
++#define ARRAYS
++#endif
++
++/* In this implementation the columns of the state array are each held in
++   32-bit words. The state array can be held in various ways: in an array
++   of words, in a number of individual word variables or in a number of
++   processor registers. The following define maps a variable name x and
++   a column number c to the way the state array variable is to be held.
++   The first define below maps the state into an array x[c] whereas the
++   second form maps the state into a number of individual variables x0,
++   x1, etc.  Another form could map individual state colums to machine
++   register names.
++*/
++
++#if defined(ARRAYS)
++#define s(x,c) x[c]
++#else
++#define s(x,c) x##c
++#endif
++
++/*  8. FIXED OR DYNAMIC TABLES
++
++    When this section is included the tables used by the code are compiled
++    statically into the binary file.  Otherwise the subroutine a6_legacy_gen_tabs()
++    must be called to compute them before the code is first used.
++*/
++#if 1
++#define FIXED_TABLES
++#endif
++
++/*  9. TABLE ALIGNMENT
++
++    On some sytsems speed will be improved by aligning the AES large lookup
++    tables on particular boundaries. This define should be set to a power of
++    two giving the desired alignment. It can be left undefined if alignment
++    is not needed.  This option is specific to the Microsft VC++ compiler -
++    it seems to sometimes cause trouble for the VC++ version 6 compiler.
++*/
++
++
++/*  10. INTERNAL TABLE CONFIGURATION
++
++    This cipher proceeds by repeating in a number of cycles known as 'rounds'
++    which are implemented by a round function which can optionally be speeded
++    up using tables.  The basic tables are each 256 32-bit words, with either
++    one or four tables being required for each round function depending on
++    how much speed is required. The encryption and decryption round functions
++    are different and the last encryption and decrytpion round functions are
++    different again making four different round functions in all.
++
++    This means that:
++      1. Normal encryption and decryption rounds can each use either 0, 1
++         or 4 tables and table spaces of 0, 1024 or 4096 bytes each.
++      2. The last encryption and decryption rounds can also use either 0, 1
++         or 4 tables and table spaces of 0, 1024 or 4096 bytes each.
++
++    Include or exclude the appropriate definitions below to set the number
++    of tables used by this implementation.
++*/
++
++#if 1   /* set tables for the normal encryption round */
++#define ENC_ROUND   FOUR_TABLES
++#elif 0
++#define ENC_ROUND   ONE_TABLE
++#else
++#define ENC_ROUND   NO_TABLES
++#endif
++
++#if 1   /* set tables for the last encryption round */
++#define LAST_ENC_ROUND  FOUR_TABLES
++#elif 0
++#define LAST_ENC_ROUND  ONE_TABLE
++#else
++#define LAST_ENC_ROUND  NO_TABLES
++#endif
++
++#if 1   /* set tables for the normal decryption round */
++#define DEC_ROUND   FOUR_TABLES
++#elif 0
++#define DEC_ROUND   ONE_TABLE
++#else
++#define DEC_ROUND   NO_TABLES
++#endif
++
++#if 1   /* set tables for the last decryption round */
++#define LAST_DEC_ROUND  FOUR_TABLES
++#elif 0
++#define LAST_DEC_ROUND  ONE_TABLE
++#else
++#define LAST_DEC_ROUND  NO_TABLES
++#endif
++
++/*  The decryption key schedule can be speeded up with tables in the same
++    way that the round functions can.  Include or exclude the following
++    defines to set this requirement.
++*/
++#if 1
++#define KEY_SCHED   FOUR_TABLES
++#elif 0
++#define KEY_SCHED   ONE_TABLE
++#else
++#define KEY_SCHED   NO_TABLES
++#endif
++
++/*  11. TABLE POINTER CACHING
++
++    Normally tables are referenced directly, Enable this option if you wish to
++    cache pointers to the tables in the encrypt/decrypt code.  Note that this
++	only works if you are using FOUR_TABLES for the ROUND you enable this for.
++*/
++#if 1
++#define ENC_ROUND_CACHE_TABLES
++#endif
++#if 1
++#define LAST_ENC_ROUND_CACHE_TABLES
++#endif
++#if 1
++#define DEC_ROUND_CACHE_TABLES
++#endif
++#if 1
++#define LAST_DEC_ROUND_CACHE_TABLES
++#endif
++
++
++/* END OF CONFIGURATION OPTIONS */
++
++#define RC_LENGTH   (5 * (AES_BLOCK_SIZE / 4 - 2))
++
++/* Disable or report errors on some combinations of options */
++
++#if ENC_ROUND == NO_TABLES && LAST_ENC_ROUND != NO_TABLES
++#undef  LAST_ENC_ROUND
++#define LAST_ENC_ROUND  NO_TABLES
++#elif ENC_ROUND == ONE_TABLE && LAST_ENC_ROUND == FOUR_TABLES
++#undef  LAST_ENC_ROUND
++#define LAST_ENC_ROUND  ONE_TABLE
++#endif
++
++#if ENC_ROUND == NO_TABLES && ENC_UNROLL != NONE
++#undef  ENC_UNROLL
++#define ENC_UNROLL  NONE
++#endif
++
++#if DEC_ROUND == NO_TABLES && LAST_DEC_ROUND != NO_TABLES
++#undef  LAST_DEC_ROUND
++#define LAST_DEC_ROUND  NO_TABLES
++#elif DEC_ROUND == ONE_TABLE && LAST_DEC_ROUND == FOUR_TABLES
++#undef  LAST_DEC_ROUND
++#define LAST_DEC_ROUND  ONE_TABLE
++#endif
++
++#if DEC_ROUND == NO_TABLES && DEC_UNROLL != NONE
++#undef  DEC_UNROLL
++#define DEC_UNROLL  NONE
++#endif
++
++/*  upr(x,n):  rotates bytes within words by n positions, moving bytes to
++               higher index positions with wrap around into low positions
++    ups(x,n):  moves bytes by n positions to higher index positions in
++               words but without wrap around
++    bval(x,n): extracts a byte from a word
++
++    NOTE:      The definitions given here are intended only for use with
++               unsigned variables and with shift counts that are compile
++               time constants
++*/
++
++#if (ALGORITHM_BYTE_ORDER == BRG_LITTLE_ENDIAN)
++#define upr(x,n)        (((aes_32t)(x) << (8 * (n))) | ((aes_32t)(x) >> (32 - 8 * (n))))
++#define ups(x,n)        ((aes_32t) (x) << (8 * (n)))
++#define bval(x,n)       ((aes_08t)((x) >> (8 * (n))))
++#define bytes2word(b0, b1, b2, b3)  \
++        (((aes_32t)(b3) << 24) | ((aes_32t)(b2) << 16) | ((aes_32t)(b1) << 8) | (b0))
++#endif
++
++#if (ALGORITHM_BYTE_ORDER == BRG_BIG_ENDIAN)
++#define upr(x,n)        (((aes_32t)(x) >> (8 * (n))) | ((aes_32t)(x) << (32 - 8 * (n))))
++#define ups(x,n)        ((aes_32t) (x) >> (8 * (n))))
++#define bval(x,n)       ((aes_08t)((x) >> (24 - 8 * (n))))
++#define bytes2word(b0, b1, b2, b3)  \
++        (((aes_32t)(b0) << 24) | ((aes_32t)(b1) << 16) | ((aes_32t)(b2) << 8) | (b3))
++#endif
++
++#if defined(SAFE_IO)
++
++#define word_in(x,c)    bytes2word(((aes_08t*)(x)+4*c)[0], ((aes_08t*)(x)+4*c)[1], \
++                                   ((aes_08t*)(x)+4*c)[2], ((aes_08t*)(x)+4*c)[3])
++#define word_out(x,c,v) { ((aes_08t*)(x)+4*c)[0] = bval(v,0); ((aes_08t*)(x)+4*c)[1] = bval(v,1); \
++                          ((aes_08t*)(x)+4*c)[2] = bval(v,2); ((aes_08t*)(x)+4*c)[3] = bval(v,3); }
++
++#elif (ALGORITHM_BYTE_ORDER == PLATFORM_BYTE_ORDER)
++
++#define word_in(x,c)    (*((const aes_32t*)(x)+(c)))
++#define word_out(x,c,v) (*((aes_32t*)(x)+(c)) = (v))
++
++#else
++
++#define word_in(x,c)    aes_sw32(*((const aes_32t*)(x)+(c)))
++#define word_out(x,c,v) (*((aes_32t*)(x)+(c)) = aes_sw32(v))
++
++#endif
++
++/* the finite field modular polynomial and elements */
++
++#define WPOLY   0x011b
++#define BPOLY     0x1b
++
++/* multiply four bytes in GF(2^8) by 'x' {02} in parallel */
++
++#define m1  0x80808080
++#define m2  0x7f7f7f7f
++#define gf_mulx(x)  ((((x) & m2) << 1) ^ ((((x) & m1) >> 7) * BPOLY))
++
++/* The following defines provide alternative definitions of gf_mulx that might
++   give improved performance if a fast 32-bit multiply is not available. Note
++   that a temporary variable u needs to be defined where gf_mulx is used.
++
++#define gf_mulx(x) (u = (x) & m1, u |= (u >> 1), ((x) & m2) << 1) ^ ((u >> 3) | (u >> 6))
++#define m4  (0x01010101 * BPOLY)
++#define gf_mulx(x) (u = (x) & m1, ((x) & m2) << 1) ^ ((u - (u >> 7)) & m4)
++*/
++
++/* Work out which tables are needed for the different options   */
++
++#if defined( AES_ASM )
++#if defined( ENC_ROUND )
++#undef  ENC_ROUND
++#endif
++#define ENC_ROUND   FOUR_TABLES
++#if defined( LAST_ENC_ROUND )
++#undef  LAST_ENC_ROUND
++#endif
++#define LAST_ENC_ROUND  FOUR_TABLES
++#if defined( DEC_ROUND )
++#undef  DEC_ROUND
++#endif
++#define DEC_ROUND   FOUR_TABLES
++#if defined( LAST_DEC_ROUND )
++#undef  LAST_DEC_ROUND
++#endif
++#define LAST_DEC_ROUND  FOUR_TABLES
++#if defined( KEY_SCHED )
++#undef  KEY_SCHED
++#define KEY_SCHED   FOUR_TABLES
++#endif
++#endif
++
++#if defined(ENCRYPTION) || defined(AES_ASM)
++#if ENC_ROUND == ONE_TABLE
++#define FT1_SET
++#elif ENC_ROUND == FOUR_TABLES
++#define FT4_SET
++#else
++#define SBX_SET
++#endif
++#if LAST_ENC_ROUND == ONE_TABLE
++#define FL1_SET
++#elif LAST_ENC_ROUND == FOUR_TABLES
++#define FL4_SET
++#elif !defined(SBX_SET)
++#define SBX_SET
++#endif
++#endif
++
++#if defined(DECRYPTION) || defined(AES_ASM)
++#if DEC_ROUND == ONE_TABLE
++#define IT1_SET
++#elif DEC_ROUND == FOUR_TABLES
++#define IT4_SET
++#else
++#define ISB_SET
++#endif
++#if LAST_DEC_ROUND == ONE_TABLE
++#define IL1_SET
++#elif LAST_DEC_ROUND == FOUR_TABLES
++#define IL4_SET
++#elif !defined(ISB_SET)
++#define ISB_SET
++#endif
++#endif
++
++#if defined(ENCRYPTION_KEY_SCHEDULE) || defined(DECRYPTION_KEY_SCHEDULE)
++#if KEY_SCHED == ONE_TABLE
++#define LS1_SET
++#define IM1_SET
++#elif KEY_SCHED == FOUR_TABLES
++#define LS4_SET
++#define IM4_SET
++#elif !defined(SBX_SET)
++#define SBX_SET
++#endif
++#endif
++
++/* generic definitions of Rijndael macros that use tables    */
++
++#define no_table(x,box,vf,rf,c) bytes2word( \
++    box[bval(vf(x,0,c),rf(0,c))], \
++    box[bval(vf(x,1,c),rf(1,c))], \
++    box[bval(vf(x,2,c),rf(2,c))], \
++    box[bval(vf(x,3,c),rf(3,c))])
++
++#define one_table(x,op,tab,vf,rf,c) \
++ (     tab[bval(vf(x,0,c),rf(0,c))] \
++  ^ op(tab[bval(vf(x,1,c),rf(1,c))],1) \
++  ^ op(tab[bval(vf(x,2,c),rf(2,c))],2) \
++  ^ op(tab[bval(vf(x,3,c),rf(3,c))],3))
++
++#define four_tables(x,tab,vf,rf,c) \
++ (  tab[0][bval(vf(x,0,c),rf(0,c))] \
++  ^ tab[1][bval(vf(x,1,c),rf(1,c))] \
++  ^ tab[2][bval(vf(x,2,c),rf(2,c))] \
++  ^ tab[3][bval(vf(x,3,c),rf(3,c))])
++
++#define four_cached_tables(x,tab,vf,rf,c) \
++(  tab##0[bval(vf(x,0,c),rf(0,c))] \
++   ^ tab##1[bval(vf(x,1,c),rf(1,c))] \
++   ^ tab##2[bval(vf(x,2,c),rf(2,c))] \
++   ^ tab##3[bval(vf(x,3,c),rf(3,c))])
++
++#define vf1(x,r,c)  (x)
++#define rf1(r,c)    (r)
++#define rf2(r,c)    ((8+r-c)&3)
++
++/* perform forward and inverse column mix operation on four bytes in long word x in */
++/* parallel. NOTE: x must be a simple variable, NOT an expression in these macros.  */
++
++#if defined(FM4_SET)    /* not currently used */
++#define fwd_mcol(x)     four_tables(x,t_use(f,m),vf1,rf1,0)
++#elif defined(FM1_SET)  /* not currently used */
++#define fwd_mcol(x)     one_table(x,upr,t_use(f,m),vf1,rf1,0)
++#else
++#define dec_fmvars      aes_32t g2
++#define fwd_mcol(x)     (g2 = gf_mulx(x), g2 ^ upr((x) ^ g2, 3) ^ upr((x), 2) ^ upr((x), 1))
++#endif
++
++#if defined(IM4_SET)
++#define inv_mcol(x)     four_tables(x,t_use(i,m),vf1,rf1,0)
++#elif defined(IM1_SET)
++#define inv_mcol(x)     one_table(x,upr,t_use(i,m),vf1,rf1,0)
++#else
++#define dec_imvars      aes_32t g2, g4, g9
++#define inv_mcol(x)     (g2 = gf_mulx(x), g4 = gf_mulx(g2), g9 = (x) ^ gf_mulx(g4), g4 ^= g9, \
++                        (x) ^ g2 ^ g4 ^ upr(g2 ^ g9, 3) ^ upr(g4, 2) ^ upr(g9, 1))
++#endif
++
++#if defined(FL4_SET)
++#define ls_box(x,c)     four_tables(x,t_use(f,l),vf1,rf2,c)
++#elif   defined(LS4_SET)
++#define ls_box(x,c)     four_tables(x,t_use(l,s),vf1,rf2,c)
++#elif defined(FL1_SET)
++#define ls_box(x,c)     one_table(x,upr,t_use(f,l),vf1,rf2,c)
++#elif defined(LS1_SET)
++#define ls_box(x,c)     one_table(x,upr,t_use(l,s),vf1,rf2,c)
++#else
++#define ls_box(x,c)     no_table(x,t_use(s,box),vf1,rf2,c)
++#endif
++
++#endif
+diff --git i/libkern/crypto/a6plte_aes/gen/aestab.c w/libkern/crypto/a6plte_aes/gen/aestab.c
+new file mode 100644
+index 0000000..41e25de
+--- /dev/null
++++ w/libkern/crypto/a6plte_aes/gen/aestab.c
+@@ -0,0 +1,384 @@
++/*
++ ---------------------------------------------------------------------------
++ Copyright (c) 2003, Dr Brian Gladman, Worcester, UK.   All rights reserved.
++
++ LICENSE TERMS
++
++ The free distribution and use of this software in both source and binary
++ form is allowed (with or without changes) provided that:
++
++   1. distributions of this source code include the above copyright
++      notice, this list of conditions and the following disclaimer;
++
++   2. distributions in binary form include the above copyright
++      notice, this list of conditions and the following disclaimer
++      in the documentation and/or other associated materials;
++
++   3. the copyright holder's name is not used to endorse products
++      built using this software without specific written permission.
++
++ ALTERNATIVELY, provided that this notice is retained in full, this product
++ may be distributed under the terms of the GNU General Public License (GPL),
++ in which case the provisions of the GPL apply INSTEAD OF those given above.
++
++ DISCLAIMER
++
++ This software is provided 'as is' with no explicit or implied warranties
++ in respect of its properties, including, but not limited to, correctness
++ and/or fitness for purpose.
++ ---------------------------------------------------------------------------
++ Issue 28/01/2004
++
++*/
++
++#if defined(__cplusplus)
++extern "C"
++{
++#endif
++
++#define DO_TABLES
++
++#include "aesopt.h"
++
++#if defined(FIXED_TABLES)
++
++#define sb_data(w) {\
++    w(0x63), w(0x7c), w(0x77), w(0x7b), w(0xf2), w(0x6b), w(0x6f), w(0xc5),\
++    w(0x30), w(0x01), w(0x67), w(0x2b), w(0xfe), w(0xd7), w(0xab), w(0x76),\
++    w(0xca), w(0x82), w(0xc9), w(0x7d), w(0xfa), w(0x59), w(0x47), w(0xf0),\
++    w(0xad), w(0xd4), w(0xa2), w(0xaf), w(0x9c), w(0xa4), w(0x72), w(0xc0),\
++    w(0xb7), w(0xfd), w(0x93), w(0x26), w(0x36), w(0x3f), w(0xf7), w(0xcc),\
++    w(0x34), w(0xa5), w(0xe5), w(0xf1), w(0x71), w(0xd8), w(0x31), w(0x15),\
++    w(0x04), w(0xc7), w(0x23), w(0xc3), w(0x18), w(0x96), w(0x05), w(0x9a),\
++    w(0x07), w(0x12), w(0x80), w(0xe2), w(0xeb), w(0x27), w(0xb2), w(0x75),\
++    w(0x09), w(0x83), w(0x2c), w(0x1a), w(0x1b), w(0x6e), w(0x5a), w(0xa0),\
++    w(0x52), w(0x3b), w(0xd6), w(0xb3), w(0x29), w(0xe3), w(0x2f), w(0x84),\
++    w(0x53), w(0xd1), w(0x00), w(0xed), w(0x20), w(0xfc), w(0xb1), w(0x5b),\
++    w(0x6a), w(0xcb), w(0xbe), w(0x39), w(0x4a), w(0x4c), w(0x58), w(0xcf),\
++    w(0xd0), w(0xef), w(0xaa), w(0xfb), w(0x43), w(0x4d), w(0x33), w(0x85),\
++    w(0x45), w(0xf9), w(0x02), w(0x7f), w(0x50), w(0x3c), w(0x9f), w(0xa8),\
++    w(0x51), w(0xa3), w(0x40), w(0x8f), w(0x92), w(0x9d), w(0x38), w(0xf5),\
++    w(0xbc), w(0xb6), w(0xda), w(0x21), w(0x10), w(0xff), w(0xf3), w(0xd2),\
++    w(0xcd), w(0x0c), w(0x13), w(0xec), w(0x5f), w(0x97), w(0x44), w(0x17),\
++    w(0xc4), w(0xa7), w(0x7e), w(0x3d), w(0x64), w(0x5d), w(0x19), w(0x73),\
++    w(0x60), w(0x81), w(0x4f), w(0xdc), w(0x22), w(0x2a), w(0x90), w(0x88),\
++    w(0x46), w(0xee), w(0xb8), w(0x14), w(0xde), w(0x5e), w(0x0b), w(0xdb),\
++    w(0xe0), w(0x32), w(0x3a), w(0x0a), w(0x49), w(0x06), w(0x24), w(0x5c),\
++    w(0xc2), w(0xd3), w(0xac), w(0x62), w(0x91), w(0x95), w(0xe4), w(0x79),\
++    w(0xe7), w(0xc8), w(0x37), w(0x6d), w(0x8d), w(0xd5), w(0x4e), w(0xa9),\
++    w(0x6c), w(0x56), w(0xf4), w(0xea), w(0x65), w(0x7a), w(0xae), w(0x08),\
++    w(0xba), w(0x78), w(0x25), w(0x2e), w(0x1c), w(0xa6), w(0xb4), w(0xc6),\
++    w(0xe8), w(0xdd), w(0x74), w(0x1f), w(0x4b), w(0xbd), w(0x8b), w(0x8a),\
++    w(0x70), w(0x3e), w(0xb5), w(0x66), w(0x48), w(0x03), w(0xf6), w(0x0e),\
++    w(0x61), w(0x35), w(0x57), w(0xb9), w(0x86), w(0xc1), w(0x1d), w(0x9e),\
++    w(0xe1), w(0xf8), w(0x98), w(0x11), w(0x69), w(0xd9), w(0x8e), w(0x94),\
++    w(0x9b), w(0x1e), w(0x87), w(0xe9), w(0xce), w(0x55), w(0x28), w(0xdf),\
++    w(0x8c), w(0xa1), w(0x89), w(0x0d), w(0xbf), w(0xe6), w(0x42), w(0x68),\
++    w(0x41), w(0x99), w(0x2d), w(0x0f), w(0xb0), w(0x54), w(0xbb), w(0x16) }
++
++#define isb_data(w) {\
++    w(0x52), w(0x09), w(0x6a), w(0xd5), w(0x30), w(0x36), w(0xa5), w(0x38),\
++    w(0xbf), w(0x40), w(0xa3), w(0x9e), w(0x81), w(0xf3), w(0xd7), w(0xfb),\
++    w(0x7c), w(0xe3), w(0x39), w(0x82), w(0x9b), w(0x2f), w(0xff), w(0x87),\
++    w(0x34), w(0x8e), w(0x43), w(0x44), w(0xc4), w(0xde), w(0xe9), w(0xcb),\
++    w(0x54), w(0x7b), w(0x94), w(0x32), w(0xa6), w(0xc2), w(0x23), w(0x3d),\
++    w(0xee), w(0x4c), w(0x95), w(0x0b), w(0x42), w(0xfa), w(0xc3), w(0x4e),\
++    w(0x08), w(0x2e), w(0xa1), w(0x66), w(0x28), w(0xd9), w(0x24), w(0xb2),\
++    w(0x76), w(0x5b), w(0xa2), w(0x49), w(0x6d), w(0x8b), w(0xd1), w(0x25),\
++    w(0x72), w(0xf8), w(0xf6), w(0x64), w(0x86), w(0x68), w(0x98), w(0x16),\
++    w(0xd4), w(0xa4), w(0x5c), w(0xcc), w(0x5d), w(0x65), w(0xb6), w(0x92),\
++    w(0x6c), w(0x70), w(0x48), w(0x50), w(0xfd), w(0xed), w(0xb9), w(0xda),\
++    w(0x5e), w(0x15), w(0x46), w(0x57), w(0xa7), w(0x8d), w(0x9d), w(0x84),\
++    w(0x90), w(0xd8), w(0xab), w(0x00), w(0x8c), w(0xbc), w(0xd3), w(0x0a),\
++    w(0xf7), w(0xe4), w(0x58), w(0x05), w(0xb8), w(0xb3), w(0x45), w(0x06),\
++    w(0xd0), w(0x2c), w(0x1e), w(0x8f), w(0xca), w(0x3f), w(0x0f), w(0x02),\
++    w(0xc1), w(0xaf), w(0xbd), w(0x03), w(0x01), w(0x13), w(0x8a), w(0x6b),\
++    w(0x3a), w(0x91), w(0x11), w(0x41), w(0x4f), w(0x67), w(0xdc), w(0xea),\
++    w(0x97), w(0xf2), w(0xcf), w(0xce), w(0xf0), w(0xb4), w(0xe6), w(0x73),\
++    w(0x96), w(0xac), w(0x74), w(0x22), w(0xe7), w(0xad), w(0x35), w(0x85),\
++    w(0xe2), w(0xf9), w(0x37), w(0xe8), w(0x1c), w(0x75), w(0xdf), w(0x6e),\
++    w(0x47), w(0xf1), w(0x1a), w(0x71), w(0x1d), w(0x29), w(0xc5), w(0x89),\
++    w(0x6f), w(0xb7), w(0x62), w(0x0e), w(0xaa), w(0x18), w(0xbe), w(0x1b),\
++    w(0xfc), w(0x56), w(0x3e), w(0x4b), w(0xc6), w(0xd2), w(0x79), w(0x20),\
++    w(0x9a), w(0xdb), w(0xc0), w(0xfe), w(0x78), w(0xcd), w(0x5a), w(0xf4),\
++    w(0x1f), w(0xdd), w(0xa8), w(0x33), w(0x88), w(0x07), w(0xc7), w(0x31),\
++    w(0xb1), w(0x12), w(0x10), w(0x59), w(0x27), w(0x80), w(0xec), w(0x5f),\
++    w(0x60), w(0x51), w(0x7f), w(0xa9), w(0x19), w(0xb5), w(0x4a), w(0x0d),\
++    w(0x2d), w(0xe5), w(0x7a), w(0x9f), w(0x93), w(0xc9), w(0x9c), w(0xef),\
++    w(0xa0), w(0xe0), w(0x3b), w(0x4d), w(0xae), w(0x2a), w(0xf5), w(0xb0),\
++    w(0xc8), w(0xeb), w(0xbb), w(0x3c), w(0x83), w(0x53), w(0x99), w(0x61),\
++    w(0x17), w(0x2b), w(0x04), w(0x7e), w(0xba), w(0x77), w(0xd6), w(0x26),\
++    w(0xe1), w(0x69), w(0x14), w(0x63), w(0x55), w(0x21), w(0x0c), w(0x7d) }
++
++#define mm_data(w) {\
++    w(0x00), w(0x01), w(0x02), w(0x03), w(0x04), w(0x05), w(0x06), w(0x07),\
++    w(0x08), w(0x09), w(0x0a), w(0x0b), w(0x0c), w(0x0d), w(0x0e), w(0x0f),\
++    w(0x10), w(0x11), w(0x12), w(0x13), w(0x14), w(0x15), w(0x16), w(0x17),\
++    w(0x18), w(0x19), w(0x1a), w(0x1b), w(0x1c), w(0x1d), w(0x1e), w(0x1f),\
++    w(0x20), w(0x21), w(0x22), w(0x23), w(0x24), w(0x25), w(0x26), w(0x27),\
++    w(0x28), w(0x29), w(0x2a), w(0x2b), w(0x2c), w(0x2d), w(0x2e), w(0x2f),\
++    w(0x30), w(0x31), w(0x32), w(0x33), w(0x34), w(0x35), w(0x36), w(0x37),\
++    w(0x38), w(0x39), w(0x3a), w(0x3b), w(0x3c), w(0x3d), w(0x3e), w(0x3f),\
++    w(0x40), w(0x41), w(0x42), w(0x43), w(0x44), w(0x45), w(0x46), w(0x47),\
++    w(0x48), w(0x49), w(0x4a), w(0x4b), w(0x4c), w(0x4d), w(0x4e), w(0x4f),\
++    w(0x50), w(0x51), w(0x52), w(0x53), w(0x54), w(0x55), w(0x56), w(0x57),\
++    w(0x58), w(0x59), w(0x5a), w(0x5b), w(0x5c), w(0x5d), w(0x5e), w(0x5f),\
++    w(0x60), w(0x61), w(0x62), w(0x63), w(0x64), w(0x65), w(0x66), w(0x67),\
++    w(0x68), w(0x69), w(0x6a), w(0x6b), w(0x6c), w(0x6d), w(0x6e), w(0x6f),\
++    w(0x70), w(0x71), w(0x72), w(0x73), w(0x74), w(0x75), w(0x76), w(0x77),\
++    w(0x78), w(0x79), w(0x7a), w(0x7b), w(0x7c), w(0x7d), w(0x7e), w(0x7f),\
++    w(0x80), w(0x81), w(0x82), w(0x83), w(0x84), w(0x85), w(0x86), w(0x87),\
++    w(0x88), w(0x89), w(0x8a), w(0x8b), w(0x8c), w(0x8d), w(0x8e), w(0x8f),\
++    w(0x90), w(0x91), w(0x92), w(0x93), w(0x94), w(0x95), w(0x96), w(0x97),\
++    w(0x98), w(0x99), w(0x9a), w(0x9b), w(0x9c), w(0x9d), w(0x9e), w(0x9f),\
++    w(0xa0), w(0xa1), w(0xa2), w(0xa3), w(0xa4), w(0xa5), w(0xa6), w(0xa7),\
++    w(0xa8), w(0xa9), w(0xaa), w(0xab), w(0xac), w(0xad), w(0xae), w(0xaf),\
++    w(0xb0), w(0xb1), w(0xb2), w(0xb3), w(0xb4), w(0xb5), w(0xb6), w(0xb7),\
++    w(0xb8), w(0xb9), w(0xba), w(0xbb), w(0xbc), w(0xbd), w(0xbe), w(0xbf),\
++    w(0xc0), w(0xc1), w(0xc2), w(0xc3), w(0xc4), w(0xc5), w(0xc6), w(0xc7),\
++    w(0xc8), w(0xc9), w(0xca), w(0xcb), w(0xcc), w(0xcd), w(0xce), w(0xcf),\
++    w(0xd0), w(0xd1), w(0xd2), w(0xd3), w(0xd4), w(0xd5), w(0xd6), w(0xd7),\
++    w(0xd8), w(0xd9), w(0xda), w(0xdb), w(0xdc), w(0xdd), w(0xde), w(0xdf),\
++    w(0xe0), w(0xe1), w(0xe2), w(0xe3), w(0xe4), w(0xe5), w(0xe6), w(0xe7),\
++    w(0xe8), w(0xe9), w(0xea), w(0xeb), w(0xec), w(0xed), w(0xee), w(0xef),\
++    w(0xf0), w(0xf1), w(0xf2), w(0xf3), w(0xf4), w(0xf5), w(0xf6), w(0xf7),\
++    w(0xf8), w(0xf9), w(0xfa), w(0xfb), w(0xfc), w(0xfd), w(0xfe), w(0xff) }
++
++#define rc_data(w) {\
++    w(0x01), w(0x02), w(0x04), w(0x08), w(0x10),w(0x20), w(0x40), w(0x80),\
++    w(0x1b), w(0x36) }
++
++#define h0(x)   (x)
++
++#define w0(p)   bytes2word(p, 0, 0, 0)
++#define w1(p)   bytes2word(0, p, 0, 0)
++#define w2(p)   bytes2word(0, 0, p, 0)
++#define w3(p)   bytes2word(0, 0, 0, p)
++
++#define u0(p)   bytes2word(f2(p), p, p, f3(p))
++#define u1(p)   bytes2word(f3(p), f2(p), p, p)
++#define u2(p)   bytes2word(p, f3(p), f2(p), p)
++#define u3(p)   bytes2word(p, p, f3(p), f2(p))
++
++#define v0(p)   bytes2word(fe(p), f9(p), fd(p), fb(p))
++#define v1(p)   bytes2word(fb(p), fe(p), f9(p), fd(p))
++#define v2(p)   bytes2word(fd(p), fb(p), fe(p), f9(p))
++#define v3(p)   bytes2word(f9(p), fd(p), fb(p), fe(p))
++
++#endif
++
++#if defined(FIXED_TABLES) || !defined(FF_TABLES)
++
++#define f2(x)   ((x<<1) ^ (((x>>7) & 1) * WPOLY))
++#define f4(x)   ((x<<2) ^ (((x>>6) & 1) * WPOLY) ^ (((x>>6) & 2) * WPOLY))
++#define f8(x)   ((x<<3) ^ (((x>>5) & 1) * WPOLY) ^ (((x>>5) & 2) * WPOLY) \
++                        ^ (((x>>5) & 4) * WPOLY))
++#define f3(x)   (f2(x) ^ x)
++#define f9(x)   (f8(x) ^ x)
++#define fb(x)   (f8(x) ^ f2(x) ^ x)
++#define fd(x)   (f8(x) ^ f4(x) ^ x)
++#define fe(x)   (f8(x) ^ f4(x) ^ f2(x))
++
++#else
++
++#define f2(x) ((x) ? pow[log[x] + 0x19] : 0)
++#define f3(x) ((x) ? pow[log[x] + 0x01] : 0)
++#define f9(x) ((x) ? pow[log[x] + 0xc7] : 0)
++#define fb(x) ((x) ? pow[log[x] + 0x68] : 0)
++#define fd(x) ((x) ? pow[log[x] + 0xee] : 0)
++#define fe(x) ((x) ? pow[log[x] + 0xdf] : 0)
++#define fi(x) ((x) ? pow[ 255 - log[x]] : 0)
++
++#endif
++
++#include "aestab.h"
++
++#if defined(FIXED_TABLES)
++
++/* implemented in case of wrong call for fixed tables */
++
++void a6_legacy_gen_tabs(void)
++{
++}
++
++#else   /* dynamic table generation */
++
++#if !defined(FF_TABLES)
++
++/*  Generate the tables for the dynamic table option
++
++    It will generally be sensible to use tables to compute finite
++    field multiplies and inverses but where memory is scarse this
++    code might sometimes be better. But it only has effect during
++    initialisation so its pretty unimportant in overall terms.
++*/
++
++/*  return 2 ^ (n - 1) where n is the bit number of the highest bit
++    set in x with x in the range 1 < x < 0x00000200.   This form is
++    used so that locals within fi can be bytes rather than words
++*/
++
++static aes_08t hibit(const aes_32t x)
++{   aes_08t r = (aes_08t)((x >> 1) | (x >> 2));
++
++    r |= (r >> 2);
++    r |= (r >> 4);
++    return (r + 1) >> 1;
++}
++
++/* return the inverse of the finite field element x */
++
++static aes_08t fi(const aes_08t x)
++{   aes_08t p1 = x, p2 = BPOLY, n1 = hibit(x), n2 = 0x80, v1 = 1, v2 = 0;
++
++    if(x < 2) return x;
++
++    for(;;)
++    {
++        if(!n1) return v1;
++
++        while(n2 >= n1)
++        {
++            n2 /= n1; p2 ^= p1 * n2; v2 ^= v1 * n2; n2 = hibit(p2);
++        }
++
++        if(!n2) return v2;
++
++        while(n1 >= n2)
++        {
++            n1 /= n2; p1 ^= p2 * n1; v1 ^= v2 * n1; n1 = hibit(p1);
++        }
++    }
++}
++
++#endif
++
++/* The forward and inverse affine transformations used in the S-box */
++
++#define fwd_affine(x) \
++    (w = (aes_32t)x, w ^= (w<<1)^(w<<2)^(w<<3)^(w<<4), 0x63^(aes_08t)(w^(w>>8)))
++
++#define inv_affine(x) \
++    (w = (aes_32t)x, w = (w<<1)^(w<<3)^(w<<6), 0x05^(aes_08t)(w^(w>>8)))
++
++static int init = 0;
++
++void a6_legacy_gen_tabs(void)
++{   aes_32t  i, w;
++
++#if defined(FF_TABLES)
++
++    aes_08t  pow[512], log[256];
++
++    if(init) return;
++    /*  log and power tables for GF(2^8) finite field with
++        WPOLY as modular polynomial - the simplest primitive
++        root is 0x03, used here to generate the tables
++    */
++
++    i = 0; w = 1;
++    do
++    {
++        pow[i] = (aes_08t)w;
++        pow[i + 255] = (aes_08t)w;
++        log[w] = (aes_08t)i++;
++        w ^=  (w << 1) ^ (w & 0x80 ? WPOLY : 0);
++    }
++    while (w != 1);
++
++#else
++    if(init) return;
++#endif
++
++    for(i = 0, w = 1; i < RC_LENGTH; ++i)
++    {
++        t_set(r,c)[i] = bytes2word(w, 0, 0, 0);
++        w = f2(w);
++    }
++
++    for(i = 0; i < 256; ++i)
++    {   aes_08t    b;
++
++        b = fwd_affine(fi((aes_08t)i));
++        w = bytes2word(f2(b), b, b, f3(b));
++
++#if defined( SBX_SET )
++        t_set(s,box)[i] = b;
++#endif
++
++#if defined( FT1_SET )                 /* tables for a normal encryption round */
++        t_set(f,n)[i] = w;
++#endif
++#if defined( FT4_SET )
++        t_set(f,n)[0][i] = w;
++        t_set(f,n)[1][i] = upr(w,1);
++        t_set(f,n)[2][i] = upr(w,2);
++        t_set(f,n)[3][i] = upr(w,3);
++#endif
++        w = bytes2word(b, 0, 0, 0);
++
++#if defined( FL1_SET )                 /* tables for last encryption round (may also   */
++        t_set(f,l)[i] = w;        /* be used in the key schedule)                 */
++#endif
++#if defined( FL4_SET )
++        t_set(f,l)[0][i] = w;
++        t_set(f,l)[1][i] = upr(w,1);
++        t_set(f,l)[2][i] = upr(w,2);
++        t_set(f,l)[3][i] = upr(w,3);
++#endif
++
++#if defined( LS1_SET )                 /* table for key schedule if t_set(f,l) above is    */
++        t_set(l,s)[i] = w;      /* not of the required form                     */
++#endif
++#if defined( LS4_SET )
++        t_set(l,s)[0][i] = w;
++        t_set(l,s)[1][i] = upr(w,1);
++        t_set(l,s)[2][i] = upr(w,2);
++        t_set(l,s)[3][i] = upr(w,3);
++#endif
++
++        b = fi(inv_affine((aes_08t)i));
++        w = bytes2word(fe(b), f9(b), fd(b), fb(b));
++
++#if defined( IM1_SET )                 /* tables for the inverse mix column operation  */
++        t_set(i,m)[b] = w;
++#endif
++#if defined( IM4_SET )
++        t_set(i,m)[0][b] = w;
++        t_set(i,m)[1][b] = upr(w,1);
++        t_set(i,m)[2][b] = upr(w,2);
++        t_set(i,m)[3][b] = upr(w,3);
++#endif
++
++#if defined( ISB_SET )
++        t_set(i,box)[i] = b;
++#endif
++#if defined( IT1_SET )                 /* tables for a normal decryption round */
++        t_set(i,n)[i] = w;
++#endif
++#if defined( IT4_SET )
++        t_set(i,n)[0][i] = w;
++        t_set(i,n)[1][i] = upr(w,1);
++        t_set(i,n)[2][i] = upr(w,2);
++        t_set(i,n)[3][i] = upr(w,3);
++#endif
++        w = bytes2word(b, 0, 0, 0);
++#if defined( IL1_SET )                 /* tables for last decryption round */
++        t_set(i,l)[i] = w;
++#endif
++#if defined( IL4_SET )
++        t_set(i,l)[0][i] = w;
++        t_set(i,l)[1][i] = upr(w,1);
++        t_set(i,l)[2][i] = upr(w,2);
++        t_set(i,l)[3][i] = upr(w,3);
++#endif
++    }
++    init = 1;
++}
++
++#endif
++
++#if defined(__cplusplus)
++}
++#endif
++
+diff --git i/libkern/crypto/a6plte_aes/gen/aestab.h w/libkern/crypto/a6plte_aes/gen/aestab.h
+new file mode 100644
+index 0000000..a450ec4
+--- /dev/null
++++ w/libkern/crypto/a6plte_aes/gen/aestab.h
+@@ -0,0 +1,175 @@
++/*
++ ---------------------------------------------------------------------------
++ Copyright (c) 2003, Dr Brian Gladman, Worcester, UK.   All rights reserved.
++
++ LICENSE TERMS
++
++ The free distribution and use of this software in both source and binary
++ form is allowed (with or without changes) provided that:
++
++   1. distributions of this source code include the above copyright
++      notice, this list of conditions and the following disclaimer;
++
++   2. distributions in binary form include the above copyright
++      notice, this list of conditions and the following disclaimer
++      in the documentation and/or other associated materials;
++
++   3. the copyright holder's name is not used to endorse products
++      built using this software without specific written permission.
++
++ ALTERNATIVELY, provided that this notice is retained in full, this product
++ may be distributed under the terms of the GNU General Public License (GPL),
++ in which case the provisions of the GPL apply INSTEAD OF those given above.
++
++ DISCLAIMER
++
++ This software is provided 'as is' with no explicit or implied warranties
++ in respect of its properties, including, but not limited to, correctness
++ and/or fitness for purpose.
++ ---------------------------------------------------------------------------
++ Issue 28/01/2004
++
++ This file contains the code for declaring the tables needed to implement
++ AES. The file aesopt.h is assumed to be included before this header file.
++ If there are no global variables, the definitions here can be used to put
++ the AES tables in a structure so that a pointer can then be added to the
++ AES context to pass them to the AES routines that need them.   If this
++ facility is used, the calling program has to ensure that this pointer is
++ managed appropriately.  In particular, the value of the t_dec(in,it) item
++ in the table structure must be set to zero in order to ensure that the
++ tables are initialised. In practice the three code sequences in aeskey.c
++ that control the calls to a6_legacy_gen_tabs() and the a6_legacy_gen_tabs() routine itself will
++ have to be changed for a specific implementation. If global variables are
++ available it will generally be preferable to use them with the precomputed
++ FIXED_TABLES option that uses static global tables.
++
++ The following defines can be used to control the way the tables
++ are defined, initialised and used in embedded environments that
++ require special features for these purposes
++
++    the 't_dec' construction is used to declare fixed table arrays
++    the 't_set' construction is used to set fixed table values
++    the 't_use' construction is used to access fixed table values
++
++    256 byte tables:
++
++        t_xxx(s,box)    => forward S box
++        t_xxx(i,box)    => inverse S box
++
++    256 32-bit word OR 4 x 256 32-bit word tables:
++
++        t_xxx(f,n)      => forward normal round
++        t_xxx(f,l)      => forward last round
++        t_xxx(i,n)      => inverse normal round
++        t_xxx(i,l)      => inverse last round
++        t_xxx(l,s)      => key schedule table
++        t_xxx(i,m)      => key schedule table
++
++    Other variables and tables:
++
++        t_xxx(r,c)      => the rcon table
++*/
++
++#if !defined( _AESTAB_H )
++#define _AESTAB_H
++
++#define t_dec(m,n) t_##m##n
++#define t_set(m,n) t_##m##n
++#define t_use(m,n) t_##m##n
++
++#if defined(FIXED_TABLES)
++#define Const const
++#else
++#define Const
++#endif
++
++#if defined(DO_TABLES)
++#define Extern
++#else
++#define Extern extern
++#endif
++
++#if defined(_MSC_VER) && defined(TABLE_ALIGN)
++#define Align __declspec(align(TABLE_ALIGN))
++#else
++#define Align
++#endif
++
++#if defined(__cplusplus)
++extern "C"
++{
++#endif
++
++#if defined(DO_TABLES) && defined(FIXED_TABLES)
++#define d_1(t,n,b,e)       Align Const t n[256]    =   b(e)
++#define d_4(t,n,b,e,f,g,h) Align Const t n[4][256] = { b(e), b(f), b(g), b(h) }
++Extern Align Const aes_32t t_dec(r,c)[RC_LENGTH] = rc_data(w0);
++#else
++#define d_1(t,n,b,e)       Extern Align Const t n[256]
++#define d_4(t,n,b,e,f,g,h) Extern Align Const t n[4][256]
++Extern Align Const aes_32t t_dec(r,c)[RC_LENGTH];
++#endif
++
++#if defined( SBX_SET )
++    d_1(aes_08t, t_dec(s,box), sb_data, h0);
++#endif
++#if defined( ISB_SET )
++    d_1(aes_08t, t_dec(i,box), isb_data, h0);
++#endif
++
++#if defined( FT1_SET )
++    d_1(aes_32t, t_dec(f,n), sb_data, u0);
++#endif
++#if defined( FT4_SET )
++    d_4(aes_32t, t_dec(f,n), sb_data, u0, u1, u2, u3);
++#endif
++
++#if defined( FL1_SET )
++    d_1(aes_32t, t_dec(f,l), sb_data, w0);
++#endif
++#if defined( FL4_SET )
++    d_4(aes_32t, t_dec(f,l), sb_data, w0, w1, w2, w3);
++#endif
++
++#if defined( IT1_SET )
++    d_1(aes_32t, t_dec(i,n), isb_data, v0);
++#endif
++#if defined( IT4_SET )
++    d_4(aes_32t, t_dec(i,n), isb_data, v0, v1, v2, v3);
++#endif
++
++#if defined( IL1_SET )
++    d_1(aes_32t, t_dec(i,l), isb_data, w0);
++#endif
++#if defined( IL4_SET )
++    d_4(aes_32t, t_dec(i,l), isb_data, w0, w1, w2, w3);
++#endif
++
++#if defined( LS1_SET )
++#if defined( FL1_SET )
++#undef  LS1_SET
++#else
++    d_1(aes_32t, t_dec(l,s), sb_data, w0);
++#endif
++#endif
++
++#if defined( LS4_SET )
++#if defined( FL4_SET )
++#undef  LS4_SET
++#else
++    d_4(aes_32t, t_dec(l,s), sb_data, w0, w1, w2, w3);
++#endif
++#endif
++
++#if defined( IM1_SET )
++    d_1(aes_32t, t_dec(i,m), mm_data, v0);
++#endif
++#if defined( IM4_SET )
++    d_4(aes_32t, t_dec(i,m), mm_data, v0, v1, v2, v3);
++#endif
++
++#if defined(__cplusplus)
++}
++#endif
++
++#endif
 diff --git i/libkern/crypto/a6plte_kmem_rng.c w/libkern/crypto/a6plte_kmem_rng.c
 new file mode 100644
 index 0000000..ac446ff
@@ -574,6 +3022,67 @@ index 0000000..5339c83
 +void a6_kmem_rng_generate(struct a6_kmem_rng *, void *, size_t);
 +int a6_kmem_rng_uniform(struct a6_kmem_rng *, uint64_t bound, uint64_t *);
 +#endif
+diff --git i/libkern/crypto/corecrypto_aes.c w/libkern/crypto/corecrypto_aes.c
+index 20ff4f1..1f9a837 100644
+--- i/libkern/crypto/corecrypto_aes.c
++++ w/libkern/crypto/corecrypto_aes.c
+@@ -31,10 +31,20 @@
+ #include <corecrypto/ccmode.h>
+ #include <corecrypto/ccaes.h>
+ #include <kern/debug.h>
++#if A6PLTE
++#include "a6plte_aes/aes.h"
++_Static_assert(sizeof(a6_legacy_aes_encrypt_ctx) <= sizeof(aes_encrypt_ctx), "AES encrypt context");
++_Static_assert(sizeof(a6_legacy_aes_decrypt_ctx) <= sizeof(aes_decrypt_ctx), "AES decrypt context");
++#endif
+ 
+ aes_rval
+ aes_encrypt_key(const unsigned char *key, int key_len, aes_encrypt_ctx cx[1])
+ {
++#if A6PLTE
++	if (!g_crypto_funcs) {
++		return a6_legacy_aes_encrypt_key(key, key_len, (void *)cx);
++	}
++#endif
+ 	const struct ccmode_cbc *cbc = g_crypto_funcs->ccaes_cbc_encrypt;
+ 
+ 	/* Make sure the context size for the mode fits in the one we have */
+@@ -49,6 +59,11 @@ aes_rval
+ aes_encrypt_cbc(const unsigned char *in_blk, const unsigned char *in_iv, unsigned int num_blk,
+     unsigned char *out_blk, aes_encrypt_ctx cx[1])
+ {
++#if A6PLTE
++	if (!g_crypto_funcs) {
++		return a6_legacy_aes_encrypt_cbc(in_blk, in_iv, num_blk, out_blk, (void *)cx);
++	}
++#endif
+ 	const struct ccmode_cbc *cbc = g_crypto_funcs->ccaes_cbc_encrypt;
+ 	cccbc_iv_decl(cbc->block_size, ctx_iv);
+ 
+@@ -72,6 +87,11 @@ aes_encrypt(const unsigned char *in_blk, unsigned char *out_blk, aes_encrypt_ctx
+ aes_rval
+ aes_decrypt_key(const unsigned char *key, int key_len, aes_decrypt_ctx cx[1])
+ {
++#if A6PLTE
++	if (!g_crypto_funcs) {
++		return a6_legacy_aes_decrypt_key(key, key_len, (void *)cx);
++	}
++#endif
+ 	const struct ccmode_cbc *cbc = g_crypto_funcs->ccaes_cbc_decrypt;
+ 
+ 	/* Make sure the context size for the mode fits in the one we have */
+@@ -86,6 +106,11 @@ aes_rval
+ aes_decrypt_cbc(const unsigned char *in_blk, const unsigned char *in_iv, unsigned int num_blk,
+     unsigned char *out_blk, aes_decrypt_ctx cx[1])
+ {
++#if A6PLTE
++	if (!g_crypto_funcs) {
++		return a6_legacy_aes_decrypt_cbc(in_blk, in_iv, num_blk, out_blk, (void *)cx);
++	}
++#endif
+ 	const struct ccmode_cbc *cbc = g_crypto_funcs->ccaes_cbc_decrypt;
+ 	cccbc_iv_decl(cbc->block_size, ctx_iv);
+ 
 diff --git i/libkern/crypto/corecrypto_rand.c w/libkern/crypto/corecrypto_rand.c
 index d46815b..3624f27 100644
 --- i/libkern/crypto/corecrypto_rand.c
@@ -661,6 +3170,130 @@ index d46815b..3624f27 100644
 +#else
  	g_crypto_funcs->random_kmem_init_fn(ctx);
 +#endif
+ }
+diff --git i/libkern/crypto/corecrypto_sha2.c w/libkern/crypto/corecrypto_sha2.c
+index 7392f0c..d66f96d 100644
+--- i/libkern/crypto/corecrypto_sha2.c
++++ w/libkern/crypto/corecrypto_sha2.c
+@@ -31,6 +31,9 @@
+ #include <libkern/libkern.h>
+ #include <kern/debug.h>
+ #include <corecrypto/ccdigest.h>
++#if A6PLTE
++#include <corecrypto/ccsha2.h>
++#endif
+ 
+ #if defined(CRYPTO_SHA2)
+ 
+@@ -38,13 +41,23 @@ void
+ SHA256_Init(SHA256_CTX *ctx)
+ {
+ 	const struct ccdigest_info *di;
++#if A6PLTE
++	di = g_crypto_funcs ? g_crypto_funcs->ccsha256_di : &ccsha256_ltc_di;
++#else
+ 	di = g_crypto_funcs->ccsha256_di;
++#endif
+ 
+ 	/* Make sure the context size for the digest info fits in the one we have */
+ 	if (ccdigest_di_size(di) > sizeof(SHA256_CTX)) {
+ 		panic("%s: inconsistent size for SHA256 context", __FUNCTION__);
+ 	}
+ 
++#if A6PLTE
++	if (!g_crypto_funcs) {
++		ccdigest_init(di, ctx->ctx);
++		return;
++	}
++#endif
+ 	g_crypto_funcs->ccdigest_init_fn(di, ctx->ctx);
+ }
+ 
+@@ -52,8 +65,18 @@ void
+ SHA256_Update(SHA256_CTX *ctx, const void *data, size_t len)
+ {
+ 	const struct ccdigest_info *di;
++#if A6PLTE
++	di = g_crypto_funcs ? g_crypto_funcs->ccsha256_di : &ccsha256_ltc_di;
++#else
+ 	di = g_crypto_funcs->ccsha256_di;
++#endif
+ 
++#if A6PLTE
++	if (!g_crypto_funcs) {
++		ccdigest_update(di, ctx->ctx, len, data);
++		return;
++	}
++#endif
+ 	g_crypto_funcs->ccdigest_update_fn(di, ctx->ctx, len, data);
+ }
+ 
+@@ -61,7 +84,11 @@ void
+ SHA256_Final(void *digest, SHA256_CTX *ctx)
+ {
+ 	const struct ccdigest_info *di;
++#if A6PLTE
++	di = g_crypto_funcs ? g_crypto_funcs->ccsha256_di : &ccsha256_ltc_di;
++#else
+ 	di = g_crypto_funcs->ccsha256_di;
++#endif
+ 
+ 	ccdigest_final(di, ctx->ctx, digest);
+ }
+@@ -103,13 +130,23 @@ void
+ SHA512_Init(SHA512_CTX *ctx)
+ {
+ 	const struct ccdigest_info *di;
++#if A6PLTE
++	di = g_crypto_funcs ? g_crypto_funcs->ccsha512_di : &ccsha512_ltc_di;
++#else
+ 	di = g_crypto_funcs->ccsha512_di;
++#endif
+ 
+ 	/* Make sure the context size for the digest info fits in the one we have */
+ 	if (ccdigest_di_size(di) > sizeof(SHA512_CTX)) {
+ 		panic("%s: inconsistent size for SHA512 context", __FUNCTION__);
+ 	}
+ 
++#if A6PLTE
++	if (!g_crypto_funcs) {
++		ccdigest_init(di, ctx->ctx);
++		return;
++	}
++#endif
+ 	g_crypto_funcs->ccdigest_init_fn(di, ctx->ctx);
+ }
+ 
+@@ -117,8 +154,18 @@ void
+ SHA512_Update(SHA512_CTX *ctx, const void *data, size_t len)
+ {
+ 	const struct ccdigest_info *di;
++#if A6PLTE
++	di = g_crypto_funcs ? g_crypto_funcs->ccsha512_di : &ccsha512_ltc_di;
++#else
+ 	di = g_crypto_funcs->ccsha512_di;
++#endif
+ 
++#if A6PLTE
++	if (!g_crypto_funcs) {
++		ccdigest_update(di, ctx->ctx, len, data);
++		return;
++	}
++#endif
+ 	g_crypto_funcs->ccdigest_update_fn(di, ctx->ctx, len, data);
+ }
+ 
+@@ -126,7 +173,11 @@ void
+ SHA512_Final(void *digest, SHA512_CTX *ctx)
+ {
+ 	const struct ccdigest_info *di;
++#if A6PLTE
++	di = g_crypto_funcs ? g_crypto_funcs->ccsha512_di : &ccsha512_ltc_di;
++#else
+ 	di = g_crypto_funcs->ccsha512_di;
++#endif
+ 
+ 	ccdigest_final(di, ctx->ctx, digest);
  }
 diff --git i/makedefs/MakeInc.def w/makedefs/MakeInc.def
 index e37762b..d4c57c8 100644

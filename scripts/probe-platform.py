@@ -51,8 +51,8 @@ if source.endswith(('.cpp', '.cc')):
     flags += ['-idirafter',str(sdk/'usr/include/c++/v1')]
 assembly=source.endswith('/genassym.c')
 if assembly: flags+=['-fno-integrated-as']
-if source in ('pexpert/arm/a6plte/early.c','pexpert/arm/a6plte/fb.c','libkern/crypto/a6plte_kmem_rng.c'):
-    flags+=['-mgeneral-regs-only','-mstrict-align'] # Early console and kmem generator: scalar, alignment-safe accesses.
+if source in ('pexpert/arm/a6plte/early.c','pexpert/arm/a6plte/fb.c','libkern/crypto/a6plte_kmem_rng.c') or source.startswith('libkern/crypto/a6plte_aes/'):
+    flags+=['-mgeneral-regs-only','-mstrict-align'] # Early console and bootstrap crypto: scalar, alignment-safe accesses.
 if source.endswith('.s'):
     flags+=['-x','assembler-with-cpp','-DASSEMBLER']
 output=Path(os.environ.get('A6_PROBE_OUTPUT',str(r/'artifacts'/('xnu-'+Path(source).stem))))
