@@ -26,6 +26,12 @@ chmod 1777 "$STAGE/tmp"
 chmod 755 "$STAGE/sbin/a6-init"
 chmod 644 "$STAGE/etc/a6plte-release" "$STAGE/usr/share/licenses/"*.txt
 sudo chown -R 0:0 "$STAGE"
-hdiutil create -ov -size 32m -layout NONE -fs HFS+ -volname A6PLTE_ROOT -format UDRW -srcfolder "$STAGE" "$ROOT/artifacts/ramdisk.dmg"
+# Preserve root ownership without an interactive authorization request. Keep
+# hdiutil output on a regular file: diskimages-helper can hang on piped output.
+if sudo -n hdiutil create -ov -size 32m -layout NONE -fs HFS+ -volname A6PLTE_ROOT -format UDRW -srcfolder "$STAGE" "$ROOT/artifacts/ramdisk.dmg" > artifacts/hdiutil.log 2>&1 < /dev/null; then
+    cat artifacts/hdiutil.log
+else
+    result=$?; cat artifacts/hdiutil.log; exit "$result"
+fi
 python3 scripts/extract-hfs.py artifacts/ramdisk.dmg artifacts/ramdisk.hfs
 cp "$STAGE/sbin/a6-init" artifacts/a6-init

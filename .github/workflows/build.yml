@@ -63,7 +63,12 @@ jobs:
           exit "$failed"
       - name: Link XNU ARM64 executable
         run: python3 scripts/link-xnu.py 2>&1 | tee link.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xnu-linked-kernel
+          path: artifacts/kernel.a6plte
       - name: Build HFS+ root ramdisk and native PID1
+        timeout-minutes: 3
         run: bash scripts/build-ramdisk.sh 2>&1 | tee ramdisk.log
       - uses: actions/upload-artifact@v4
         if: always()
