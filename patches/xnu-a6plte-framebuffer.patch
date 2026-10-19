@@ -1,3 +1,17 @@
+diff --git i/bsd/kern/kern_exec.c w/bsd/kern/kern_exec.c
+index 2467b24..d35e0e3 100644
+--- i/bsd/kern/kern_exec.c
++++ w/bsd/kern/kern_exec.c
+@@ -8027,6 +8027,9 @@ load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path)
+ }
+ 
+ static const char * init_programs[] = {
++#if A6PLTE
++	"/sbin/a6-init",
++#endif
+ #if DEBUG
+ 	"/usr/appleinternal/sbin/launchd.debug",
+ #endif
 diff --git i/bsd/kern/kern_mib.c w/bsd/kern/kern_mib.c
 index e67ea79..701a36e 100644
 --- i/bsd/kern/kern_mib.c

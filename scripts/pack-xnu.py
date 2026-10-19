@@ -6,7 +6,7 @@ import zlib
 from pathlib import Path
 HEADER = struct.Struct('<8sIIQQQQIIQ')
 
-def pack(data):
+def pack(data, ramdisk=None):
     if len(data) < 32:
         raise ValueError('truncated Mach-O')
     magic, cpu, sub, kind, nc, commands, flags, _ = struct.unpack_from('<8I', data)
@@ -48,12 +48,18 @@ def pack(data):
     image=bytearray((end-base+0x3fff)&~0x3fff)
     for va,vs,fo,fs,_ in segments:
         image[va-base:va-base+fs]=data[fo:fo+fs]
-    return HEADER.pack(b'A6XNU01\0',1,HEADER.size,base,entry,len(image),len(image),zlib.crc32(image),0,0)+image
+    if ramdisk is None:
+        return HEADER.pack(b'A6XNU01\0',1,HEADER.size,base,entry,len(image),len(image),zlib.crc32(image),0,0)+image
+    if not ramdisk or len(ramdisk)>64*1024*1024 or len(ramdisk)%0x1000:
+        raise ValueError('ramdisk must contain 4 KiB blocks and fit in 64 MiB')
+    payload=image+ramdisk
+    return HEADER.pack(b'A6XNU02\0',2,HEADER.size,base,entry,len(image),len(payload),zlib.crc32(payload),1,len(ramdisk))+payload
 
 def main():
     p=argparse.ArgumentParser(description=__doc__); p.add_argument('kernel',type=Path); p.add_argument('output',type=Path)
+    p.add_argument('--ramdisk',type=Path,help='raw HFS+ root image')
     a=p.parse_args()
-    try: result=pack(a.kernel.read_bytes())
+    try: result=pack(a.kernel.read_bytes(),a.ramdisk.read_bytes() if a.ramdisk else None)
     except ValueError as e: p.error(str(e))
     a.output.write_bytes(result)
     print(f'{a.output}: {len(result)} bytes. Requires a Cortex-A53/A6PLTE kernel; not a stock macOS kernel.')

@@ -63,6 +63,8 @@ jobs:
           exit "$failed"
       - name: Link XNU ARM64 executable
         run: python3 scripts/link-xnu.py 2>&1 | tee link.log
+      - name: Build HFS+ root ramdisk and native PID1
+        run: bash scripts/build-ramdisk.sh 2>&1 | tee ramdisk.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -74,6 +76,8 @@ jobs:
             artifacts/**/*.macho.o
             build/mig-generated/results.json
             artifacts/kernel.a6plte
+            artifacts/ramdisk.hfs
+            artifacts/a6-init
             artifacts/link-command.txt
             build/xnu/iokit/**/*.h
             build/xnu/iokit/**/*.cpp
@@ -88,7 +92,7 @@ jobs:
         with:
           name: xnu-build-output
       - name: Package linked kernel for lk2nd
-        run: ./scripts/package-boot.sh artifacts/kernel.a6plte
+        run: ./scripts/package-boot.sh artifacts/kernel.a6plte artifacts/ramdisk.hfs
       - uses: actions/upload-artifact@v4
         with:
           name: xnu-boot-image

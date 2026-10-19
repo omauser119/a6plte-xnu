@@ -14,6 +14,17 @@ def fixture():
     return bytearray((header+segment+thread).ljust(0x1000,b'\0'))
 
 class TestPack(unittest.TestCase):
+    def test_ramdisk_v2(self):
+        disk=bytes(range(256))*16
+        result=m.pack(fixture(),disk);h=m.HEADER.unpack_from(result)
+        self.assertEqual(h[:3],(b'A6XNU02\0',2,64))
+        self.assertEqual(h[5],0x4000)
+        self.assertEqual(h[6],0x5000)
+        self.assertEqual(h[8:],(1,0x1000))
+        self.assertEqual(result[64+h[5]:],disk)
+        self.assertEqual(h[7],m.zlib.crc32(result[64:]))
+        for invalid in (b'',b'x',bytes(4097)):
+            with self.assertRaises(ValueError):m.pack(fixture(),invalid)
     def test_zero_fill_and_crc(self):
         result=m.pack(fixture()); h=m.HEADER.unpack_from(result)
         self.assertEqual(h[0],b'A6XNU01\0'); self.assertEqual(h[5],0x4000)

@@ -51,6 +51,8 @@ flags+=['-include',str(out/config_component/'meta_features.h')]
 if component=='hfs':
     # Public macOS HFS profile: unencrypted HFS+, without Apple's private key-roll sources.
     flags += ['-UCONFIG_PROTECT','-DCONFIG_PROTECT=0']
+    if source.startswith('reference/hfs/hfs_encodings/'):
+        flags += ['-Dhfs_allocated=a6_hfs_encoding_allocated']
 if component=='osfmk': flags+=['-DMACH_KERNEL=1']
 if (source.startswith(('osfmk/vm/', 'bsd/vm/')) and source.endswith('.c')) or source == 'bsd/kern/kern_mman.c': flags+=['-DVM_UNSAFE_TYPES=1']
 if source.startswith('reference/libdispatch/'):

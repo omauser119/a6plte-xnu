@@ -2,9 +2,8 @@
 #include "loader.h"
 #include "apple_dt.h"
 #include "crc32.h"
+#include "package.h"
 #include "../console/boot_abi.h"
-struct package { char magic[8]; uint32_t version, header; uint64_t virt, entry, span, bytes; uint32_t crc, flags; uint64_t reserved; };
-_Static_assert(sizeof(struct package)==64,"package ABI");
 static void copy(void *d,const void *s,uint64_t n) { uint8_t *a=d; const uint8_t *b=s; while(n--) *a++=*b++; }
 static void zero(void *d,uint64_t n) { uint8_t *a=d; while(n--) *a++=0; }
 static void pause_before_entry(void) {
@@ -28,12 +27,10 @@ void xnu_load(struct platform *p,const void *dtb,struct range image) {
         }
     }
     a6_fb_puts(fb,"PACKAGE HEADER at "); a6_fb_hex(fb,p->initrd_start); a6_fb_puts(fb,"\n");
-    struct package h; copy(&h,(const void *)(uintptr_t)p->initrd_start,sizeof(h));
+    struct a6_xnu_package h;
+    if(a6_package_parse((const void *)(uintptr_t)p->initrd_start,p->initrd_end-p->initrd_start,&h))
+        FAIL("invalid package header or bounds");
     a6_fb_puts(fb,"PACKAGE HEADER READ\n");
-    const char magic[8]="A6XNU01"; for(unsigned i=0;i<8;++i) if(h.magic[i]!=magic[i]) FAIL("bad package magic");
-    if(h.version!=1 || h.header!=64 || h.flags || h.reserved || h.span!=h.bytes || !h.span || h.span>64*1024*1024 ||
-       h.bytes!=p->initrd_end-p->initrd_start-64 || (h.virt&0x3fff) || (h.span&0x3fff) || h.virt<0xffff000000000000ULL ||
-       h.virt+h.span<h.virt || h.entry<h.virt || h.entry-h.virt>=h.span || (h.entry&3)) FAIL("invalid package bounds");
     const uint8_t *src=(void *)(uintptr_t)(p->initrd_start+64);
     a6_fb_puts(fb,"CRC CHECK ");
     uint32_t crc=0;
@@ -51,34 +48,40 @@ void xnu_load(struct platform *p,const void *dtb,struct range image) {
     uint64_t el,sctlr; __asm__ volatile("mrs %0, CurrentEL":"=r"(el)); __asm__ volatile("mrs %0,sctlr_el1":"=r"(sctlr));
     if(el!=4 || (sctlr&5)) FAIL("EL1 with MMU and D-cache off required");
     /* Only donate a verified contiguous free window, never all RAM across firmware carveouts. */
-    uint64_t allocation,arena=128*1024*1024;
+    uint64_t allocation,arena=h.ramdisk_bytes ? 256*1024*1024 : 128*1024*1024;
     if(p->nr_reserved>=96) FAIL("reservation table full");
     const uint8_t *d=dtb; uint32_t dtlen=(uint32_t)d[4]<<24|(uint32_t)d[5]<<16|(uint32_t)d[6]<<8|d[7];
     p->reserved[p->nr_reserved++]=(struct range){(uintptr_t)dtb,dtlen};
-    if(platform_alloc(p,arena,0x200000,image,&allocation)) FAIL("no safe 128 MiB RAM window");
-    /* XNU's initial L2 block mappings require matching PA/VA low 21 bits.
-     * Its Mach header is at ...007004000, not a 2 MiB boundary. */
-    uint64_t padding=h.virt&0x1fffff;
-    uint64_t dest=allocation+padding,donated=arena-padding;
-    if(((dest^h.virt)&0x1fffff) || h.span+0x14000>donated) FAIL("invalid bootstrap memory placement");
+    if(platform_alloc(p,arena,0x200000,image,&allocation)) FAIL("no safe RAM window");
+    /* Preserve PA/VA low-21-bit alignment and reserve all ramdisk pages. */
+    struct a6_xnu_layout layout;
+    if(a6_package_layout(&h,allocation,arena,&layout)) FAIL("invalid bootstrap memory placement");
+    uint64_t dest=layout.kernel,donated=layout.donated;
     a6_fb_puts(fb,"Loading Mach-O at "); a6_fb_hex(fb,dest); a6_fb_puts(fb,"\n");
-    copy((void *)(uintptr_t)dest,src,h.bytes);
+    copy((void *)(uintptr_t)dest,src,h.span);
     a6_fb_puts(fb,"KERNEL COPY COMPLETE\n");
-    uint64_t args_pa=dest+h.span, tree_pa=args_pa+0x4000;
+    if(h.ramdisk_bytes) {
+        a6_fb_puts(fb,"Copying RAMDisk at "); a6_fb_hex(fb,layout.ramdisk); a6_fb_puts(fb,"\n");
+        copy((void *)(uintptr_t)layout.ramdisk,src+h.span,h.ramdisk_bytes);
+        a6_fb_puts(fb,"RAMDISK COPY COMPLETE\n");
+    }
+    uint64_t args_pa=layout.args,tree_pa=layout.tree;
     struct a6_boot_args *args=(void *)(uintptr_t)args_pa; zero(args,sizeof(*args));
     uint64_t freq; __asm__ volatile("mrs %0,cntfrq_el0":"=r"(freq));
     unsigned tree_size=a6_make_adt((void *)(uintptr_t)tree_pa,0x10000,dest,donated,h.span,(uint32_t)freq,
-                                p->rng_seed,p->rng_seed_size);
+                                p->rng_seed,p->rng_seed_size,layout.ramdisk,h.ramdisk_bytes);
     zero(p->rng_seed,sizeof(p->rng_seed));
     p->rng_seed_size=0;
     if(!tree_size) FAIL("Apple DT overflow");
     args->revision=2; args->version=2; args->virt_base=h.virt; args->phys_base=dest; args->mem_size=donated; args->mem_size_actual=donated;
-    args->top_of_kernel_data=(tree_pa+tree_size+0x3fff)&~0x3fffULL;
+    args->top_of_kernel_data=layout.top;
     args->video=(struct a6_boot_video){(uintptr_t)fb->base,0,fb->stride,fb->width,fb->height,fb->format==A6_RGB888?24:fb->format==A6_XRGB8888?32:16};
     /* XNU consumes a virtual DT pointer after its bootstrap identity -> KVA transition. */
     args->device_tree=h.virt+tree_pa-dest; args->device_tree_length=tree_size;
     const char cmd[]="-v debug=0x14 cpus=1 serial=1 startup_debug=1";
-    copy(args->command_line,cmd,sizeof(cmd));
+    const char root_cmd[]="-v debug=0x14 cpus=1 serial=1 startup_debug=1 rd=md0";
+    if(h.ramdisk_bytes) copy(args->command_line,root_cmd,sizeof(root_cmd));
+    else copy(args->command_line,cmd,sizeof(cmd));
     a6_fb_puts(fb,"Entering experimental XNU. Waiting for XNU marker.\n");
     a6_fb_puts(fb,"ENTRY PA: "); a6_fb_hex(fb,dest+h.entry-h.virt);
     a6_fb_puts(fb,"\nBOOT ARGS PA: "); a6_fb_hex(fb,args_pa); a6_fb_puts(fb,"\n");

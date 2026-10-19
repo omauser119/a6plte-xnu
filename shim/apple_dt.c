@@ -14,14 +14,15 @@ static void prop(struct adt *a,const char *name,const void *v,unsigned n) {
 static void str(struct adt *a,const char *k,const char *v) { prop(a,k,v,length(v)+1); }
 static void node(struct adt *a,unsigned props,unsigned kids,const char *name) { word(a,props+1); word(a,kids); str(a,"name",name); }
 unsigned a6_make_adt(void *buf,unsigned cap,uint64_t dest,uint64_t arena,uint64_t span,uint32_t freq,
-                         const uint8_t *seed,unsigned seed_size) {
+                         const uint8_t *seed,unsigned seed_size,uint64_t ramdisk,uint64_t ramdisk_bytes) {
     struct adt a={buf,0,cap,0}; uint32_t one=1,zero32=0; uint64_t r[3]={0,0x01000000,0x10000000};
     node(&a,2,4,"device-tree"); str(&a,"compatible","samsung,a6plte"); str(&a,"model","SM-A605FN");
     node(&a,6,1,"chosen"); prop(&a,"debug-enabled",&one,4); prop(&a,"dram-base",&dest,8); prop(&a,"dram-size",&arena,8); str(&a,"firmware-version","lk2nd-a6plte-xnu-experimental");
     prop(&a,"random-seed",seed,seed_size);
     /* Cortex-A53 has no Apple CTRR: report that fact to native XNU startup. */
     prop(&a,"kernel-ctrr-to-be-enabled",&zero32,4);
-    node(&a,1,0,"memory-map"); uint64_t kr[2]={dest,span}; prop(&a,"Kernel",kr,sizeof(kr));
+    node(&a,1+(ramdisk_bytes!=0),0,"memory-map"); uint64_t kr[2]={dest,span}; prop(&a,"Kernel",kr,sizeof(kr));
+    if(ramdisk_bytes) { uint64_t rd[2]={ramdisk,ramdisk_bytes}; prop(&a,"RAMDisk",rd,sizeof(rd)); }
     node(&a,0,1,"cpus");
     node(&a,6,0,"cpu0"); str(&a,"device_type","cpu"); str(&a,"state","running"); prop(&a,"reg",&zero32,4); prop(&a,"cpu-id",&zero32,4); prop(&a,"timebase-frequency",&freq,4); str(&a,"compatible","arm,cortex-a53");
     node(&a,2,0,"arm-io"); str(&a,"device_type","msm8953"); prop(&a,"ranges",r,sizeof(r));
