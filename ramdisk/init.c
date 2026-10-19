@@ -39,7 +39,10 @@ static void network_address(struct sockaddr *out,unsigned value) {
 static void configure_network(void) {
     long socket=call(SYS_socket,AF_INET,SOCK_DGRAM,0,0,0,0);
     if (socket<0) { text("PID1: USB network socket failed\n");return; }
-    struct ifaliasreq address={0};
+    struct ifaliasreq address;
+    /* Freestanding PID1 has no Libc bzero; keep zeroing explicit/scalar. */
+    volatile unsigned char *zero=(volatile unsigned char *)&address;
+    for (unsigned i=0;i<sizeof(address);++i) zero[i]=0;
     address.ifra_name[0]='e';address.ifra_name[1]='n';address.ifra_name[2]='0';
     network_address(&address.ifra_addr,0xc0a83502); /* 192.168.53.2 */
     network_address(&address.ifra_broadaddr,0xc0a83503);
