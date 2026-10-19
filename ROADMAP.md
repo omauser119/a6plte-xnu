@@ -46,8 +46,8 @@ Bash, LibSystem и SSH пока отсутствуют.
 | M3. EL0 и Darwin runtime | Первый ARM64 Mach-O процесс, системные вызовы, userspace VM, dyld, библиотеки LibSystem | Процесс из ramdisk выполняет write; затем динамический C-процесс проходит malloc, файлы, fork/exec/wait, signals и pthread smoke tests | PID1 запущен на телефоне; динамический runtime ещё не подключён |
 | D1. eMMC и userdata | После запуска ramdisk добавить MMC/SDHCI backend и ограниченный разделом block device для `userdata` | Проверены GPT, чтение и запись в пределах раздела, flush и повторное чтение; затем монтирование HFS+, созданной пользователем | GPT и чтение из PID1 подтверждены на телефоне; RW/flush прошли host-тесты, аппаратная запись ожидает подготовленного тома |
 | M4. PID1 и Bash | Минимальный ramdisk init, `/dev`, `/tmp`, учётные записи, Bash и базовые команды из Apple OSS | PID1 запускает `/bin/bash -c` со скриптами; работают команды, pipes, redirects, дочерние процессы и их сбор через wait | Запланировано |
-| M5. USB peripheral | Qualcomm clocks/reset/power/USB2 PHY, DWC3 device mode, EP0, descriptors, bulk endpoints, DMA и IRQ | Компьютер перечисляет устройство, передача bulk проверена в обе стороны, повторное подключение работает | Начат аудит передачи контроллера от lk2nd; реализации USB в XNU пока нет |
-| M6. Сеть через USB | CDC-ECM, Ethernet frames, BSD ifnet, IPv4/ARP/TCP, статические адреса | На Linux-хосте появляется USB Ethernet; работают двусторонний ping и TCP передача с проверкой данных | Запланировано |
+| M5. USB peripheral | Qualcomm clocks/reset/power/USB2 PHY, DWC3 device mode, EP0, descriptors, bulk endpoints, DMA и IRQ | Компьютер перечисляет устройство, передача bulk проверена в обе стороны, повторное подключение работает | DWC3/EP0/bulk DMA реализованы и собраны в Actions; перечисление на телефоне ожидает проверки |
+| M6. Сеть через USB | CDC-ECM, Ethernet frames, BSD ifnet, IPv4/ARP/TCP, статические адреса | На Linux-хосте появляется USB Ethernet; работают двусторонний ping и TCP передача с проверкой данных | CDC-ECM, native en0 и настройка 192.168.53.2/30 из PID1 собраны; аппаратная сеть ещё не проверена |
 | M7. SSH → интерактивный Bash | Apple OpenSSH, реальная криптография, host keys, авторизация по ключу, passwd/group lookup, PTY и job control | `ssh root@<usb-ip>` открывает Bash; работают Ctrl-C, размер терминала, pipeline, фоновые задания и повторный вход | Запланировано |
 | M8. Первый законченный выпуск | Сборка ядра и rootfs в Actions, manifest исходников, артефакты, инструкция загрузки и проверка на телефоне | 10 успешных холодных запусков, 30 минут SSH-сессии, несколько USB reconnect без panic | Первая конечная цель |
 
@@ -165,3 +165,8 @@ SSH через USB. Дальнейшие задачи проекта — eMMC, �
 и растущий sleep/wakeup: все четыре сервиса завершили старт, native buffer
 self-test прошёл, диагностический watchdog истёк без запроса сброса. Это не
 проверяет пользовательские mappings/blits и совместимость с приватным iOS ABI.
+
+USB-кандидат `2bcdf49`: [Actions 39245233507](https://github.com/omauser119/a6plte-xnu/actions/runs/39245233507)
+прошёл все три задания. DWC3 использует собственные DMA-буферы и polling-поток,
+CDC-ECM подключён к настоящему BSD ifnet. [USB-контракт и проверки](docs/USB.md).
+Перечисление USB, ARP/ping/TCP и повторное подключение на телефоне ещё не проверены.

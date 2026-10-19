@@ -45,6 +45,9 @@ an unrelated allocator after an uncertain hardware failure.
 
 ## Validation status
 
+All three jobs passed in [Actions 39245233507](https://github.com/omauser119/a6plte-xnu/actions/runs/39245233507),
+source `2bcdf49`. Physical USB enumeration and network delivery are pending.
+
 Host ASan/UBSan tests exercise HS/FS/other-speed descriptors, setup field bounds,
 100,000 randomized requests, EP0 and bulk sequences, terminating zero packets,
 endpoint halt/clear, reset, event-ring wrap, DMA/cache operation spans, and
