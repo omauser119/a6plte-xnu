@@ -10,15 +10,24 @@ acceptance checks for each step.
 On SM-A605FN, the actual XNU kernel prints its own startup logs and panics on
 framebuffer. Hardware confirms VM bootstrap, platform registration, the Apple
 pthread kernel component, DLIL thread scheduling and the displayed Skywalk
-self-tests. The CTRR metadata correction passed its hardware check: the latest
-screen shows the kernel waiting for an `Apple_HFS` root disk, with no panic.
+self-tests. Hardware now also confirms the native `md0` memory disk and
+`hfs: mounted A6PLTE_ROOT`: Apple's HFS+ driver mounted the supplied root image.
+The user also confirmed that `/sbin/a6-init` started as PID1 in ARM64 userspace.
 
-The current source adds Apple's HFS+ filesystem, a 32 MiB root image, the native
+The image contains a 32 MiB HFS+ root image, the native
 `RAMDisk` → `md0` path, and a static ARM64 `/sbin/a6-init` process. The first
-userspace check will print its PID and Darwin release, read a file from HFS+,
-and perform timed sleep/wakeup through real system calls. All three kernel/rootfs
-Actions jobs passed; hardware validation of this first rootfs and process is pending. Bash, a dynamic runtime and USB networking are not
+userspace check prints its PID and Darwin release and attempts a root-file read
+and timed sleep/wakeup through real system calls. PID1 startup is confirmed;
+its individual file-read and sustained sleep/wakeup checks still need evidence.
+Absent AMFI entitlement queries deny requests; raw XML/DER entitlements are
+treated as absent when no provider exists. Native code-signature validation
+continues. All three jobs passed for that kernel/rootfs build. Bash, a dynamic runtime and USB networking are not
 implemented yet.
+
+The current source adds an SDHCI PIO eMMC backend and native BSD block/raw
+devices restricted to the GPT `userdata` partition. Read/write, cache flush,
+GPT validation, bounds and error handling are implemented and host-tested;
+device validation is in progress. See [storage implementation and layout](docs/STORAGE.md).
 
 Native `startup_debug=1` traces startup stages; `startup_debug=3` also logs each
 callback for diagnosis. Framebuffer scrolling and clearing use aligned scalar
@@ -56,13 +65,18 @@ corecrypto provider.
   supplies the existing HFS volume-UUID path before a crypto provider is present.
 - Versioned kernel/rootfs package with full payload CRC, reserved RAMDisk pages,
   native `rd=md0` boot selection, and a first static ARM64 PID1 probe.
+- Native BSD RAMDisk root handling without IOStorageFamily meta classes;
+  absent AMFI entitlement callbacks deny requests instead of dereferencing NULL.
+- GPT-validated `/dev/a6userdata` and `/dev/ra6userdata`, bounded SDHCI PIO
+  reads/writes and eMMC cache flush, with timeout/error fault isolation.
 - Pinned upstream patches, native config/MIG tools and component compilation probes.
 
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download XNU, HFS+ ramdisk and the updated lk2nd](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup12).
-The larger image requires the included lk2nd update and a hardware restart into it.
+[Download the kernel/rootfs and lk2nd](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup13).
+The larger image requires the `hfs-map-v2` lk2nd update and a hardware restart into it.
+Bringup12's initial runtime-mapping fix was incomplete; its loader must be updated.
 
 ## GitHub Actions
 
@@ -73,10 +87,9 @@ The larger image requires the included lk2nd update and a hardware restart into 
 - **Packaging:** after a successful link, build `xnu-boot.img` for temporary loading through lk2nd.
 
 Artifacts include the linked XNU kernel, packaged boot image, lk2nd image, raw
-HFS+ root image, native PID1 and build diagnostics. All three jobs passed for the HFS+ root image and PID1 probe
-([run 39217281711](https://github.com/omauser119/a6plte-xnu/actions/runs/39217281711), source `85b713f`).
-The subsequent full build also passed with the lk2nd mapping correction
-([run 39218551452](https://github.com/omauser119/a6plte-xnu/actions/runs/39218551452), source `476fae2`).
+HFS+ root image, native PID1 and build diagnostics. All three jobs passed with
+the SDHCI PIO userdata driver and first read-only userspace probe
+([run 39232688113](https://github.com/omauser119/a6plte-xnu/actions/runs/39232688113), source `f7c546c`).
 A successful build does not establish runtime progress on hardware. No workflow
 flashes a device.
 
