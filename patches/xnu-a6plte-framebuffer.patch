@@ -148,6 +148,38 @@ index 4b1e8a9..706f289 100644
  #if CONFIG_SPTM
  	ret = txm_query_trust_cache(query_type, cdhash, query_token);
  #elif PMAP_CS_PPL_MONITOR
+diff --git i/bsd/kern/ubc_subr.c w/bsd/kern/ubc_subr.c
+index 79bf0cb..aed8107 100644
+--- i/bsd/kern/ubc_subr.c
++++ w/bsd/kern/ubc_subr.c
+@@ -4484,6 +4484,27 @@ accelerate_entitlement_queries(
+ 	 */
+ 	assert(ret == KERN_NOT_SUPPORTED);
+ 
++#if A6PLTE
++	/*
++	 * The standalone image has no AMFI provider to create or accelerate an
++	 * entitlement context. Entitlement-free signatures need no such context;
++	 * reject any XML, DER or already-created entitlement object without one.
++	 * Structural signature validation and executable-page hashes still run.
++	 */
++	if (amfi == NULL) {
++		if (cs_blob->csb_entitlements != NULL ||
++		    cs_blob->csb_entitlements_blob != NULL ||
++		    cs_blob->csb_der_entitlements_blob != NULL) {
++			return ENOTSUP;
++		}
++		return 0;
++	}
++	if (amfi->OSEntitlements.adjustContext == NULL &&
++	    amfi->OSEntitlements.adjustContextWithoutMonitor == NULL) {
++		return ENOTSUP;
++	}
++#endif
++
+ 	if (amfi->OSEntitlements.adjustContext != NULL) {
+ 		ret = amfi->OSEntitlements.adjustContext(cs_blob->csb_entitlements, cs_blob, NULL);
+ 	} else {
 diff --git i/bsd/pthread/pthread_shims.c w/bsd/pthread/pthread_shims.c
 index e5e58b5..29dbc4e 100644
 --- i/bsd/pthread/pthread_shims.c
@@ -4339,7 +4371,7 @@ index f4d148b..a0b2687 100644
  
  /* I-Cache. */
 diff --git i/osfmk/arm64/sleh.c w/osfmk/arm64/sleh.c
-index 0554aa8..4bb305b 100644
+index 0554aa8..56a8898 100644
 --- i/osfmk/arm64/sleh.c
 +++ w/osfmk/arm64/sleh.c
 @@ -55,8 +55,10 @@
@@ -4353,7 +4385,27 @@ index 0554aa8..4bb305b 100644
  #include <pexpert/arm64/board_config.h>
  
  #include <vm/vm_page.h>
-@@ -3010,7 +3012,10 @@ sleh_irq(arm_saved_state_t *state)
+@@ -644,6 +646,9 @@ panic_with_thread_kernel_state(const char *msg, arm_saved_state_t *ss)
+ 
+ 
+ 	panic_plain("%s at pc 0x%016llx, lr 0x%016llx (saved state: %p%s)\n"
++#if A6PLTE
++	    "esr: 0x%016llx far: 0x%016llx\n"
++#endif
+ 	    "\t  x0:  0x%016llx x1:  0x%016llx  x2:  0x%016llx  x3:  0x%016llx\n"
+ 	    "\t  x4:  0x%016llx x5:  0x%016llx  x6:  0x%016llx  x7:  0x%016llx\n"
+ 	    "\t  x8:  0x%016llx x9:  0x%016llx  x10: 0x%016llx  x11: 0x%016llx\n"
+@@ -654,6 +659,9 @@ panic_with_thread_kernel_state(const char *msg, arm_saved_state_t *ss)
+ 	    "\t  x28: 0x%016llx fp:  0x%016llx  lr:  0x%016llx  sp:  0x%016llx\n"
+ 	    "\t  pc:  0x%016llx cpsr: 0x%08x         esr: 0x%016llx  far: 0x%016llx\n",
+ 	    msg, state->pc, state->lr, ss, (ss_valid ? "" : " INVALID"),
++#if A6PLTE
++	    state->esr, state->far,
++#endif
+ 	    state->x[0], state->x[1], state->x[2], state->x[3],
+ 	    state->x[4], state->x[5], state->x[6], state->x[7],
+ 	    state->x[8], state->x[9], state->x[10], state->x[11],
+@@ -3010,7 +3018,10 @@ sleh_irq(arm_saved_state_t *state)
  
  	sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_OTHER);
  
