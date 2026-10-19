@@ -351,6 +351,52 @@ index 0000000..d983bb1
 +options   CONFIG_KERNEL_TAGGING		# <kernel_tagging>
 +
 +options A6PLTE # <a6plte>
+diff --git i/iokit/Kernel/IOService.cpp w/iokit/Kernel/IOService.cpp
+index 6824ed8..813af06 100644
+--- i/iokit/Kernel/IOService.cpp
++++ w/iokit/Kernel/IOService.cpp
+@@ -67,6 +67,10 @@
+ #include <sys/kdebug.h>
+ #include <string.h>
+ 
++#if A6PLTE
++extern "C" bool IORamDiskBSDRoot(void);
++#endif
++
+ #include <machine/pal_routines.h>
+ 
+ #define LOG kprintf
+@@ -5396,6 +5400,16 @@ IOService::publishHiddenMedia(IOService * parent)
+ 	bool                wasHiding;
+ 
+ 	iomediaClass = OSMetaClass::getMetaClassWithName(gIOMediaKey);
++#if A6PLTE
++	/* A native BSD memory disk has no IOMedia objects to unhide when
++	 * IOStorageFamily is not linked. Preserve the normal path otherwise. */
++	if (!iomediaClass && !parent && IORamDiskBSDRoot()) {
++		LOCKWRITENOTIFY();
++		gIOServiceHideIOMedia = false;
++		UNLOCKNOTIFY();
++		return;
++	}
++#endif
+ 	assert(iomediaClass);
+ 
+ 	LOCKWRITENOTIFY();
+@@ -5449,7 +5463,13 @@ IOService::setRootMedia(IOService * root)
+ 	bool unhide;
+ 
+ 	ioblockstoragedriverClass = OSMetaClass::getMetaClassWithName(gIOBlockStorageDriverKey);
++#if A6PLTE
++	/* IOFindBSDRoot selects md0 directly, without an IOService provider.
++	 * It is valid to have no IOStorageFamily for this exact root type. */
++	assert(ioblockstoragedriverClass || (!root && IORamDiskBSDRoot()));
++#else
+ 	assert(ioblockstoragedriverClass);
++#endif
+ 
+ 	while (root) {
+ 		if (root->metaCast(ioblockstoragedriverClass)) {
 diff --git i/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
 new file mode 100644
 index 0000000..a7e3211
