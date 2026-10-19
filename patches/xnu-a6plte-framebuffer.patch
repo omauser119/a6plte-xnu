@@ -397,6 +397,23 @@ index 6824ed8..813af06 100644
  
  	while (root) {
  		if (root->metaCast(ioblockstoragedriverClass)) {
+diff --git i/iokit/Kernel/IOUserClient.cpp w/iokit/Kernel/IOUserClient.cpp
+index e3c0911..2c17027 100644
+--- i/iokit/Kernel/IOUserClient.cpp
++++ w/iokit/Kernel/IOUserClient.cpp
+@@ -1591,6 +1591,12 @@ IOUserClient::copyClientEntitlement( task_t task,
+ 		return NULL;
+ 	}
+ 
++#if A6PLTE
++	if (amfi == NULL || amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc == NULL) {
++		return NULL;
++	}
++#endif
++
+ 	kern_return_t ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
+ 		proc,
+ 		entitlement,
 diff --git i/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
 new file mode 100644
 index 0000000..a7e3211
@@ -509,6 +526,93 @@ index 559a9db..4b414d8 100644
      "   {"
      "     'IOClass'         = IOPanicPlatform;"
      "     'IOProviderClass' = IOPlatformExpertDevice;"
+diff --git i/iokit/bsddev/IOKitBSDInit.cpp w/iokit/bsddev/IOKitBSDInit.cpp
+index 2bbd161..8c01124 100644
+--- i/iokit/bsddev/IOKitBSDInit.cpp
++++ w/iokit/bsddev/IOKitBSDInit.cpp
+@@ -1578,6 +1578,13 @@ IOTaskHasStringEntitlement(task_t task, const char *entitlement, const char *val
+ 		return false;
+ 	}
+ 
++#if A6PLTE
++	/* No provider means no entitlement; never grant rights as a fallback. */
++	if (amfi == NULL || amfi->OSEntitlements.queryEntitlementStringWithProc == NULL) {
++		return false;
++	}
++#endif
++
+ 	kern_return_t ret = amfi->OSEntitlements.queryEntitlementStringWithProc(
+ 		proc,
+ 		entitlement,
+@@ -1621,6 +1628,13 @@ IOTaskHasEntitlement(task_t task, const char *entitlement)
+ 		return false;
+ 	}
+ 
++#if A6PLTE
++	/* No provider means no entitlement; never grant rights as a fallback. */
++	if (amfi == NULL || amfi->OSEntitlements.queryEntitlementBooleanWithProc == NULL) {
++		return false;
++	}
++#endif
++
+ 	kern_return_t ret = amfi->OSEntitlements.queryEntitlementBooleanWithProc(
+ 		proc,
+ 		entitlement);
+@@ -1651,6 +1665,13 @@ IOTaskGetIntegerEntitlement(task_t task, const char *entitlement, uint64_t *valu
+ 		return false;
+ 	}
+ 
++#if A6PLTE
++	/* No provider means no entitlement; never grant rights as a fallback. */
++	if (amfi == NULL || amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc == NULL) {
++		return false;
++	}
++#endif
++
+ 	kern_return_t ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
+ 		proc,
+ 		entitlement,
+@@ -1701,6 +1722,13 @@ IOTaskGetEntitlement(task_t task, const char *entitlement)
+ 		return NULL;
+ 	}
+ 
++#if A6PLTE
++	/* No provider means no entitlement; never grant rights as a fallback. */
++	if (amfi == NULL || amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc == NULL) {
++		return NULL;
++	}
++#endif
++
+ 	kern_return_t ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
+ 		proc,
+ 		entitlement,
+@@ -1740,6 +1768,13 @@ IOTaskHasEntitlementAsBooleanOrObject(task_t task, const char *entitlement)
+ 		return false;
+ 	}
+ 
++#if A6PLTE
++	/* No provider means no entitlement; never grant rights as a fallback. */
++	if (amfi == NULL || amfi->OSEntitlements.queryEntitlementBooleanWithProc == NULL) {
++		return false;
++	}
++#endif
++
+ 	kern_return_t ret = amfi->OSEntitlements.queryEntitlementBooleanWithProc(
+ 		proc,
+ 		entitlement);
+@@ -1747,6 +1782,12 @@ IOTaskHasEntitlementAsBooleanOrObject(task_t task, const char *entitlement)
+ 		return true;
+ 	}
+ 
++#if A6PLTE
++	if (amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc == NULL) {
++		return false;
++	}
++#endif
++
+ 	/* Check for the presence of an object */
+ 	void *entitlement_object = NULL;
+ 	ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
 diff --git i/iokit/conf/files w/iokit/conf/files
 index c72c690..6aa4089 100644
 --- i/iokit/conf/files
