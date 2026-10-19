@@ -22,6 +22,12 @@ python3 "$ROOT/tests/test_hfs_image.py"
 python3 "$ROOT/tests/test_iokit_catalogue.py"
 python3 "$ROOT/tests/test_amfi_queries.py"
 python3 "$ROOT/tests/test_amfi_signature.py"
+for unit in storage sdhci; do
+    sources=("$ROOT/xnu/bsd/dev/a6plte/sdhci.c")
+    if [[ $unit == storage ]]; then sources=("$ROOT/xnu/bsd/dev/a6plte/gpt.c"); fi
+    clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_$unit.c" "${sources[@]}" -o "$ROOT/artifacts/test-$unit"
+    "$ROOT/artifacts/test-$unit"
+done
 python3 "$ROOT/tests/test_bootimg.py"
 python3 "$ROOT/tests/test_crc32.py"
 clang -DA6PLTE=1 -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_xnu_early.c" "$ROOT/xnu/pexpert/arm/a6plte/early.c" "$ROOT/xnu/pexpert/arm/a6plte/fb.c" -o "$ROOT/artifacts/test-xnu-early"

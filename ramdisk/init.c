@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
 /* Initial native Darwin PID1 probe. Runtime libraries and Bash are later stages. */
 #include <sys/syscall.h>
+#include "../xnu/bsd/sys/disk.h"
 static long console=-1;
 static char filebuf[512],release[64];
 static long call(long number,long a,long b,long c,long d,long e,long f) {
@@ -44,6 +45,20 @@ __attribute__((noreturn)) void start(void) {
         else text("PID1: root file read failed\n");
         call(SYS_close,file,0,0,0,0,0);
     } else text("PID1: root file open failed\n");
+    long storage=call(SYS_open,(long)"/dev/ra6userdata",0,0,0,0,0);
+    if(storage>=0) {
+        uint64_t blocks=0;uint32_t writable=0;
+        if(!call(SYS_ioctl,storage,DKIOCGETBLOCKCOUNT,(long)&blocks,0,0,0)) {
+            text("eMMC userdata: sectors ");number(blocks);text("\n");
+        }
+        if(!call(SYS_ioctl,storage,DKIOCISWRITABLE,(long)&writable,0,0,0)) {
+            text("eMMC userdata: write interface ");text(writable?"enabled\n":"read only\n");
+        }
+        long n=call(SYS_read,storage,(long)filebuf,512,0,0,0);
+        if(n==512) text("PID1: eMMC userdata sector read OK\n");
+        else { text("PID1: eMMC userdata read failed ");number((unsigned long)-n);text("\n"); }
+        call(SYS_close,storage,0,0,0,0,0);
+    } else { text("PID1: userdata device unavailable, errno ");number((unsigned long)-storage);text("\n"); }
     for(unsigned long beat=1;;++beat) {
         struct { long seconds;int microseconds,pad; } timeout={1,0,0};
         long result=call(SYS_select,0,0,0,0,(long)&timeout,0);
