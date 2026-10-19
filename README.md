@@ -76,12 +76,14 @@ corecrypto provider.
 SM-A605FN HW.Rev.4 display: 1080×2220 packed RGB888, stride 3240,
 framebuffer physical address 0x90001000. GIC integration is not hardware-validated.
 
-[Download the kernel/rootfs and lk2nd](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup13).
+[Download the kernel/rootfs and lk2nd](https://github.com/omauser119/a6plte-xnu/releases/tag/a6plte-xnu-12377-bringup14).
 The larger image requires the `hfs-map-v2` lk2nd update and a hardware restart into it.
 Bringup12's initial runtime-mapping fix was incomplete; its loader must be updated.
 
 ## GitHub Actions
 
+Hardware-confirmed `IO services 31 / watchdog timeout: no reset` with a growing
+sleep/wakeup counter records successful startup and diagnostic timer expiry.
 The current platform-service extension adds a log-only `IOWatchDogTimer`, an
 explicit `AppleKeyStore` stub, CPU shared-memory `IOSurfaceRoot`, and an inherited
 scanout `IOMobileFramebuffer`. Graphics use a documented A6 ABI; private iOS
@@ -95,8 +97,8 @@ framework compatibility is not yet implemented. See [platform services](docs/PLA
 
 Artifacts include the linked XNU kernel, packaged boot image, lk2nd image, raw
 HFS+ root image, native PID1 and build diagnostics. All three jobs passed with
-the SDHCI PIO userdata driver and first read-only userspace probe
-([run 39232688113](https://github.com/omauser119/a6plte-xnu/actions/runs/39232688113), source `f7c546c`).
+the userdata driver and the four new platform services
+([run 39240870003](https://github.com/omauser119/a6plte-xnu/actions/runs/39240870003), source `0cf5061`).
 A successful build does not establish runtime progress on hardware. No workflow
 flashes a device.
 

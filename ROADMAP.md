@@ -160,3 +160,8 @@ SSH через USB. Дальнейшие задачи проекта — eMMC, �
 стаб AppleKeyStore и начальные CPU-реализации IOSurfaceRoot/IOMobileFramebuffer
 с собственным A6 ABI. Подробнее: [контракты и ограничения](docs/PLATFORM-SERVICES.md).
 Это не подтверждает работу закрытых графических клиентов iOS.
+
+На `0cf5061` пользователь подтвердил `IO services 31 / watchdog timeout: no reset`
+и растущий sleep/wakeup: все четыре сервиса завершили старт, native buffer
+self-test прошёл, диагностический watchdog истёк без запроса сброса. Это не
+проверяет пользовательские mappings/blits и совместимость с приватным iOS ABI.

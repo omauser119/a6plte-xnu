@@ -4,7 +4,11 @@ These are built-in board implementations, published as children of
 `A6PLTEPlatformExpert`. They use XNU's actual IOService, IOUserClient, IOTimerEventSource,
 IOBufferMemoryDescriptor and IODeviceMemory classes. They do not load Apple's
 closed platform kexts. The kernel build and actual phone execution are separate
-checks; this revision has not yet been verified on the phone.
+checks. On SM-A605FN the user confirmed `IO services 31 / watchdog timeout: no reset`
+with a continuing sleep/wakeup counter from source `0cf5061`. All four startup
+paths, the native surface allocation smoke check, and diagnostic timer expiry
+therefore completed on the phone. User-client mappings/blits and private iOS
+framework compatibility have not been hardware-tested.
 
 | Service | Implemented behavior | Limit |
 | --- | --- | --- |
@@ -68,8 +72,9 @@ Unsupported selectors, async requests and out-of-line structure arguments fail.
 Generic physical mapping, arbitrary kernel access and changing scanout addresses
 are not exposed. Unit tests exercise overflow, zero sizes, format rejection,
 allocation caps, edge rectangles and 100,000 randomized layout/bounds cases with
-ASan/UBSan. Actual IORegistry matching, user mappings, blits and timer expiry need
-hardware verification.
+ASan/UBSan. Actual userspace IORegistry matching, user mappings and blits still need
+hardware verification. Diagnostic timer expiry and service startup have been
+confirmed through the native PID1 sysctl output.
 
 `kern.a6plte_services` is a read-only native sysctl. Bits 1/2/4/8 record successful
 watchdog/keystore-stub/surface/framebuffer startup; bit 16 is set only when the
