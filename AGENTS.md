@@ -201,5 +201,18 @@ diagnostics symbols/strings present. User returned the phone; loader hfs-map-v2
 verified, SHA256 and full image checks repeated. Fastboot accepted this exact
 image in 0.491 s (send 0.380 s, boot 0.078 s). Private log:
 artifacts/boot-bc1271e-cpu0.private.log. No flash, UART or USB-network startup.
-Screen result pending: ask for `A6PLTE BOOT DIAGNOSTICS (CPU0)`, S6 command/reg/value,
-dyld first failure and last signature. No cache cause asserted yet.
+Hardware result: user reports `signature dyld_shared_cache_arm64 errno 22
+coverage -1 / 114409472` (signature offset 0x6d1c000). This is F_ADDFILESIGS_RETURN
+failure before coverage copyout, not yet a proven hash mismatch. S6 probe reg/value
+still not provided.
+
+Next candidate removes the BSD userdata strategy's arbitrary rejection of
+buffers >64 KiB. The existing slice checks the WHOLE request against validated
+userdata before the existing one-sector-at-a-time SDHCI transfer; readonly/GPT
+checks and physio's 64-KiB cap remain intact. A native-strategy ASan/UBSan test
+reproduces large 1-MiB reads/writes, rejects a write that crosses the slice before
+any sectors are changed, and checks buffer guards/readonly/EOF/raw cap. Input
+and slice code unchanged. This is a demonstrated driver bug, not confirmation
+that it caused this specific signature EINVAL. Signature diagnostics now retain
+the fcntl stage (read/allocate/validate/coverage), plus exact cs_blob rejection
+stage, page shift, limit and coverage. Preserve native signature verification.

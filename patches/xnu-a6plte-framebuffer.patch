@@ -193,10 +193,10 @@ index 0000000..f4913d5
 +#endif
 diff --git c/bsd/dev/a6plte/dyld_diag.c w/bsd/dev/a6plte/dyld_diag.c
 new file mode 100644
-index 0000000..4c787b2
+index 0000000..a585d21
 --- /dev/null
 +++ w/bsd/dev/a6plte/dyld_diag.c
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,131 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Read-only diagnostics for user-provided split dyld caches. No file changes. */
 +#if A6PLTE
@@ -210,14 +210,19 @@ index 0000000..4c787b2
 +#include <kern/kalloc.h>
 +#include "dyld_diag.h"
 +static unsigned present,missing_files,bad_files,signatures;
-+static char first_issue[384],last_signature[192],last_mmap[192],last_map[128];
-+void a6_dyld_note_signature(const char *name,int error,int64_t coverage,uint64_t offset) {
-+    snprintf(last_signature,sizeof(last_signature),"%s errno %d coverage %lld / %llu",
-+        name,error,(long long)coverage,(unsigned long long)offset);
++static char first_issue[384],last_signature[192],last_mmap[192],last_map[128],blob_failure[192];
++void a6_dyld_note_signature(const char *name,int error,int64_t coverage,uint64_t offset,const char *stage) {
++    snprintf(last_signature,sizeof(last_signature),"%s errno %d coverage %lld / %llu (%s)",
++        name,error,(long long)coverage,(unsigned long long)offset,stage);
 +    if (!error) ++signatures;
 +    if (!first_issue[0] && (error || coverage<0 || (uint64_t)coverage<offset))
 +        snprintf(first_issue,sizeof(first_issue),"signature: %s",last_signature);
 +    printf("A6PLTE dyld: signature %s\n",last_signature);
++}
++void a6_dyld_note_blob(const char *stage,int error,int pageshift,unsigned limit,int64_t start,int64_t end) {
++    snprintf(blob_failure,sizeof(blob_failure),"%s errno %d shift %d limit %u range %lld..%lld",
++        stage,error,pageshift,limit,(long long)start,(long long)end);
++    printf("A6PLTE dyld: blob rejected: %s\n",blob_failure);
 +}
 +void a6_dyld_note_mmap(const char *name,int error,uint64_t offset,uint64_t length) {
 +    snprintf(last_mmap,sizeof(last_mmap),"%s errno %d offset %llu bytes %llu",name,error,
@@ -240,6 +245,7 @@ index 0000000..4c787b2
 +    if (!present) printf("dyld: none of the known arm64 cache paths opened\n");
 +    if (first_issue[0]) printf("dyld first failure: %s\n",first_issue);
 +    if (last_signature[0]) printf("dyld last signature: %s\n",last_signature);
++    if (blob_failure[0]) printf("dyld blob failure: %s\n",blob_failure);
 +    if (last_mmap[0]) printf("dyld last mmap: %s\n",last_mmap);
 +    if (last_map[0]) printf("dyld last map2: %s\n",last_map);
 +    else printf("dyld: map2 syscall not reached\n");
@@ -324,16 +330,17 @@ index 0000000..4c787b2
 +#endif
 diff --git c/bsd/dev/a6plte/dyld_diag.h w/bsd/dev/a6plte/dyld_diag.h
 new file mode 100644
-index 0000000..e7caed1
+index 0000000..795796f
 --- /dev/null
 +++ w/bsd/dev/a6plte/dyld_diag.h
-@@ -0,0 +1,10 @@
+@@ -0,0 +1,11 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#ifndef A6PLTE_DYLD_DIAG_H
 +#define A6PLTE_DYLD_DIAG_H
 +#include <stdint.h>
 +void a6_dyld_preflight(void);
-+void a6_dyld_note_signature(const char *,int,int64_t,uint64_t);
++void a6_dyld_note_signature(const char *,int,int64_t,uint64_t,const char *);
++void a6_dyld_note_blob(const char *,int,int,unsigned,int64_t,int64_t);
 +void a6_dyld_note_mmap(const char *,int,uint64_t,uint64_t);
 +void a6_dyld_note_map(unsigned,unsigned,int);
 +void a6_dyld_report(void);
@@ -1346,10 +1353,10 @@ index 0000000..d9a45df
 +#endif
 diff --git c/bsd/dev/a6plte/userdata.c w/bsd/dev/a6plte/userdata.c
 new file mode 100644
-index 0000000..90bea63
+index 0000000..5209cc9
 --- /dev/null
 +++ w/bsd/dev/a6plte/userdata.c
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,172 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Native BSD block/raw devices exposing only the GPT userdata slice. */
 +#include <sys/param.h>
@@ -1413,7 +1420,11 @@ index 0000000..90bea63
 +    caddr_t address=NULL;
 +    buf_setresid(bp,count);
 +    if (minor(buf_device(bp))!=0 || !published) error=ENXIO;
-+    else if (number<0 || count%512 || count>65536) error=EINVAL;
++    /* Filesystem/cluster buffers can exceed the advertised preferred I/O size.
++     * The slice validates the WHOLE request before the SDHCI sector loop, so
++     * accept those buffers instead of failing a large signature read with
++     * EINVAL. physio's 64-KiB cap and all partition/write checks remain. */
++    else if (number<0 || count%512) error=EINVAL;
 +    else if (!write && (uint64_t)number==userdata.count) { /* EOF; leave resid unchanged. */ }
 +    else if ((error=buf_map(bp,&address))==0) {
 +        lck_mtx_lock(&a6_emmc_lock);
@@ -1574,10 +1585,10 @@ index 95192dd..ff8c5e3 100644
  
  	/*
 diff --git c/bsd/kern/kern_descrip.c w/bsd/kern/kern_descrip.c
-index 13b08b5..23f24bb 100644
+index 13b08b5..4755afb 100644
 --- c/bsd/kern/kern_descrip.c
 +++ w/bsd/kern/kern_descrip.c
-@@ -2733,6 +2733,11 @@ outdrop:
+@@ -2733,6 +2733,12 @@ outdrop:
  int
  sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
  {
@@ -1585,11 +1596,12 @@ index 13b08b5..23f24bb 100644
 +	char a6_cache_name[80] = {0};
 +	uint64_t a6_cache_signature_offset = 0;
 +	int64_t a6_cache_coverage = -1;
++	const char *a6_cache_stage = "signature arguments";
 +#endif
  	int fd = uap->fd;
  	int cmd = uap->cmd;
  	struct filedesc *fdp = &p->p_fd;
-@@ -3867,6 +3872,10 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
+@@ -3867,6 +3873,10 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
  		}
  
  		if (IS_64BIT_PROCESS(p)) {
@@ -1600,7 +1612,7 @@ index 13b08b5..23f24bb 100644
  			error = copyin(argp, &fs, sizeof_fs);
  		} else {
  			if (cmd == F_ADDFILESIGS_INFO) {
-@@ -3891,6 +3900,9 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
+@@ -3891,6 +3901,9 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
  		/*
  		 * First check if we have something loaded a this offset
  		 */
@@ -1610,7 +1622,37 @@ index 13b08b5..23f24bb 100644
  		blob = ubc_cs_blob_get(vp, CPU_TYPE_ANY, CPU_SUBTYPE_ANY, fs.fs_file_start);
  		if (blob != NULL) {
  			/* If this is for dyld_sim revalidate the blob */
-@@ -3999,6 +4011,9 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
+@@ -3924,6 +3937,9 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
+ 			}
+ 
+ 			kernel_blob_size = CAST_DOWN(vm_size_t, fs.fs_blob_size);
++#if A6PLTE
++			a6_cache_stage = "allocate signature";
++#endif
+ 			kr = ubc_cs_blob_allocate(&kernel_blob_addr, &kernel_blob_size);
+ 			if (kr != KERN_SUCCESS || kernel_blob_size < fs.fs_blob_size) {
+ 				error = ENOMEM;
+@@ -3937,6 +3953,9 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
+ 				    fs.fs_blob_size);
+ 			} else { /* F_ADDFILESIGS || F_ADDFILESIGS_RETURN || F_ADDFILESIGS_FOR_DYLD_SIM || F_ADDFILESIGS_INFO */
+ 				int resid;
++#if A6PLTE
++				a6_cache_stage = "read signature";
++#endif
+ 
+ 				error = vn_rdwr(UIO_READ,
+ 				    vp,
+@@ -3962,6 +3981,9 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
+ 			}
+ 
+ 			blob = NULL;
++#if A6PLTE
++			a6_cache_stage = "validate signature";
++#endif
+ 			error = ubc_cs_blob_add(vp,
+ 			    proc_platform(p),
+ 			    CPU_TYPE_ANY,                       /* not for a specific architecture */
+@@ -3999,7 +4021,13 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
  			if (blob) {
  				end_offset = blob->csb_end_offset;
  			}
@@ -1618,16 +1660,20 @@ index 13b08b5..23f24bb 100644
 +			a6_cache_coverage = end_offset;
 +#endif
  			error = copyout(&end_offset, argp, sizeof(end_offset));
++#if A6PLTE
++			a6_cache_stage = "return coverage";
++#endif
  
  			if (error) {
-@@ -5223,6 +5238,12 @@ dropboth:
+ 				vnode_put(vp);
+@@ -5223,6 +5251,12 @@ dropboth:
  	}
  
  outdrop:
 +#if A6PLTE
 +	if (a6_cache_name[0]) {
-+		extern void a6_dyld_note_signature(const char *,int,int64_t,uint64_t);
-+		a6_dyld_note_signature(a6_cache_name,error,a6_cache_coverage,a6_cache_signature_offset);
++		extern void a6_dyld_note_signature(const char *,int,int64_t,uint64_t,const char *);
++		a6_dyld_note_signature(a6_cache_name,error,a6_cache_coverage,a6_cache_signature_offset,a6_cache_stage);
 +	}
 +#endif
  	return sys_fcntl_outdrop(p, fd, fp, vp, error);
@@ -1932,7 +1978,7 @@ index 9de68e1..66a3528 100644
  	int spacetype = IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32;
  
 diff --git c/bsd/kern/ubc_subr.c w/bsd/kern/ubc_subr.c
-index 9b553be..4d2882d 100644
+index 9b553be..c54139d 100644
 --- c/bsd/kern/ubc_subr.c
 +++ w/bsd/kern/ubc_subr.c
 @@ -371,7 +371,11 @@ cs_validate_codedirectory(const CS_CodeDirectory *cd, size_t length)
@@ -2090,18 +2136,100 @@ index 9b553be..4d2882d 100644
  int
  ubc_cs_blob_add(
  	struct vnode    *vp,
-@@ -4758,6 +4883,10 @@ ubc_cs_blob_add(
+@@ -4604,6 +4729,11 @@ ubc_cs_blob_add(
+ 	boolean_t record_mtime = false;
+ 	kern_return_t kr = KERN_DENIED;
+ 	errno_t error = -1;
++	const char *a6_stage __unused = "structure";
++#if A6PLTE
++	bool a6_trace = proc_getpid(current_proc())==1 && vp->v_name && !strncmp(vp->v_name,"dyld_shared_cache",17);
++	extern void a6_dyld_note_blob(const char *,int,int,unsigned,int64_t,int64_t);
++#endif
+ 
+ #if HAS_APPLE_PAC
+ 	void *signed_entitlements = NULL;
+@@ -4626,6 +4756,9 @@ ubc_cs_blob_add(
+ 	 */
+ 	error = cs_blob_init_validated(addr, size, &tmp_blob, &cd);
+ 	if (error != 0) {
++#if A6PLTE
++		if (a6_trace) a6_dyld_note_blob(a6_stage,error,0,0,0,0);
++#endif
+ 		printf("unable to create a validated cs_blob object: %d\n", error);
+ 		return error;
+ 	}
+@@ -4635,6 +4768,7 @@ ubc_cs_blob_add(
+ 	tmp_blob.csb_base_offset = base_offset;
+ 
+ 	/* Perform 1st stage reconstitution */
++	a6_stage = "reconstitution 1";
+ 	error = reconstitute_code_signature(&tmp_blob);
+ 	if (error != 0) {
+ 		goto out;
+@@ -4695,6 +4829,7 @@ ubc_cs_blob_add(
+ 	unsigned int cs_flags = tmp_blob.csb_flags;
+ 	unsigned int signer_type = tmp_blob.csb_signer_type;
+ 
++	a6_stage = "MAC policy";
+ 	error = mac_vnode_check_signature(
+ 		vp,
+ 		&tmp_blob,
+@@ -4746,18 +4881,26 @@ ubc_cs_blob_add(
+ #endif
+ 
+ 	/* Perform 2nd stage reconstitution */
++	a6_stage = "reconstitution 2";
+ 	error = reconstitute_code_signature_2nd_stage(&tmp_blob);
+ 	if (error != 0) {
+ 		goto out;
+ 	}
+ 
+ 	/* Setup any multi-level hashing for the code signature */
++	a6_stage = "multilevel hashing";
+ 	error = setup_multilevel_hashing(&tmp_blob);
+ 	if (error != 0) {
+ 		goto out;
  	}
  
  	/* Ensure security critical auxiliary blobs still exist */
 +#if A6PLTE
++	a6_stage = "16K slot reads";
 +	error = a6_cs_prepare_4k_hashes(vp, &tmp_blob);
 +	if (error != 0) goto out;
 +#endif
++	a6_stage = "auxiliary blobs";
  	error = validate_auxiliary_signed_blobs(&tmp_blob);
  	if (error != 0) {
  		goto out;
-@@ -5115,6 +5244,10 @@ ubc_cs_blob_add_supplement(
+@@ -4771,6 +4914,7 @@ ubc_cs_blob_add(
+ 	 * that is the last part of signature validation which can shift the code
+ 	 * signature around.
+ 	 */
++	a6_stage = "entitlements";
+ 	error = accelerate_entitlement_queries(&tmp_blob);
+ 	if (error != 0) {
+ 		goto out;
+@@ -4791,6 +4935,7 @@ ubc_cs_blob_add(
+ 	 * in the beginning, right after structural validation, however, multilevel
+ 	 * hashing can change some offets.
+ 	 */
++	a6_stage = "signed coverage";
+ 	blob_start_offset = tmp_blob.csb_base_offset + tmp_blob.csb_start_offset;
+ 	blob_end_offset = tmp_blob.csb_base_offset + tmp_blob.csb_end_offset;
+ 	if (blob_start_offset >= blob_end_offset) {
+@@ -4996,6 +5141,11 @@ ubc_cs_blob_add(
+ 	error = 0;      /* success ! */
+ 
+ out:
++#if A6PLTE
++	if (a6_trace && error && error!=EAGAIN)
++		a6_dyld_note_blob(a6_stage,error,tmp_blob.csb_hash_pageshift,tmp_blob.csb_cd?ntohl(tmp_blob.csb_cd->codeLimit):0,
++		    tmp_blob.csb_start_offset,tmp_blob.csb_end_offset);
++#endif
+ 	if (error) {
+ 		if (error != EAGAIN) {
+ 			printf("check_signature[pid: %d]: error = %d\n", proc_getpid(current_proc()), error);
+@@ -5115,6 +5265,10 @@ ubc_cs_blob_add_supplement(
  
  	vnode_unlock(orig_vp);
  
@@ -2112,7 +2240,7 @@ index 9b553be..4d2882d 100644
  	blob_ro = zalloc_ro(ZONE_ID_CS_BLOB, Z_WAITOK | Z_NOFAIL);
  	tmp_blob.csb_ro_addr = blob_ro;
  	tmp_blob.csb_vnode = vp;
-@@ -5689,6 +5822,7 @@ cs_validate_hash(
+@@ -5689,6 +5843,7 @@ cs_validate_hash(
  	off_t                   offset; /* page offset in the file */
  	size_t                  size;
  	off_t                   codeLimit = 0;
@@ -2120,7 +2248,7 @@ index 9b553be..4d2882d 100644
  	const char              *lower_bound, *upper_bound;
  	vm_offset_t             kaddr, blob_addr;
  
-@@ -5726,12 +5860,27 @@ cs_validate_hash(
+@@ -5726,12 +5881,27 @@ cs_validate_hash(
  			if (hashtype->cs_digest_size > sizeof(actual_hash)) {
  				panic("hash size too large");
  			}
@@ -2149,7 +2277,7 @@ index 9b553be..4d2882d 100644
  			hash = hashes(cd, (uint32_t)(offset >> blob->csb_hash_pageshift),
  			    hashtype->cs_size,
  			    lower_bound, upper_bound);
-@@ -5764,8 +5913,16 @@ cs_validate_hash(
+@@ -5764,8 +5934,16 @@ cs_validate_hash(
  	} else {
  		*tainted = 0;
  
