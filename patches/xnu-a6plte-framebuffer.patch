@@ -14,15 +14,17 @@ index e3d2f34..81d54f9 100644
  		    fl->f_fn, count ? fl->f_type : 0);
  		free((char *)fl);
 diff --git c/bsd/conf/files w/bsd/conf/files
-index 4427401..db83df7 100644
+index 4427401..4ddfd32 100644
 --- c/bsd/conf/files
 +++ w/bsd/conf/files
-@@ -594,3 +594,5 @@ bsd/skywalk/packet/packet_kern.c		optional skywalk
+@@ -594,3 +594,7 @@ bsd/skywalk/packet/packet_kern.c		optional skywalk
  bsd/skywalk/packet/pbufpool.c			optional skywalk
  bsd/skywalk/packet/pbufpool_kern.c		optional skywalk
  bsd/dev/cpu_copy_in_cksum_gen.c			optional skywalk
 +
 +bsd/dev/a6plte/compat.c optional a6plte
++
++bsd/dev/a6plte/dyld_diag.c optional a6plte
 diff --git c/bsd/conf/files.arm64 w/bsd/conf/files.arm64
 index a77bd10..5fc6f17 100644
 --- c/bsd/conf/files.arm64
@@ -187,6 +189,92 @@ index 0000000..f4913d5
 +        error?"unavailable":"registered",error);
 +    thread_t thread;
 +    if (kernel_thread_start(sample_thread,NULL,&thread)==KERN_SUCCESS) thread_deallocate(thread);
++}
++#endif
+diff --git c/bsd/dev/a6plte/dyld_diag.c w/bsd/dev/a6plte/dyld_diag.c
+new file mode 100644
+index 0000000..70ee0c3
+--- /dev/null
++++ w/bsd/dev/a6plte/dyld_diag.c
+@@ -0,0 +1,80 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* Read-only diagnostics for user-provided split dyld caches. No file changes. */
++#if A6PLTE
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/vnode.h>
++#include <sys/vnode_internal.h>
++#include <sys/uio.h>
++#include <sys/kauth.h>
++#include <sys/proc.h>
++#include <kern/kalloc.h>
++static uint32_t le32(const unsigned char *p) {
++    return p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
++}
++static uint64_t le64(const unsigned char *p) { return le32(p)|(uint64_t)le32(p+4)<<32; }
++static int read_exact(vnode_t vp,uint64_t offset,void *data,unsigned size,uint64_t length) {
++    if (offset>length || size>length-offset || offset>INT64_MAX) return EINVAL;
++    int resid=0,error=vn_rdwr(UIO_READ,vp,data,(int)size,(off_t)offset,UIO_SYSSPACE,0,
++        kauth_cred_get(),&resid,current_proc());
++    return error?error:resid?EIO:0;
++}
++static void cache_check(const char *path,unsigned char *header) {
++    vnode_t vp=NULL;int error=vnode_lookup(path,0,&vp,vfs_context_current());
++    if (error) return;
++    off_t size=0;error=vnode_size(vp,&size,vfs_context_current());
++    if (!error && size>=0) error=read_exact(vp,0,header,512,(uint64_t)size);
++    else if (!error) error=EINVAL;
++    if (error || memcmp(header,"dyld_",5)) {
++        printf("A6PLTE dyld: %s invalid header/read error %d\n",path,error);vnode_put(vp);return;
++    }
++    uint32_t mapping=le32(header+16),count=0,array=0;
++    /* Public dyld cache format: subCacheArrayOffset/Count at 0x188/0x18c,
++     * cacheSubType at 0x1c8. Older headers do not contain these fields. */
++    if (mapping>=0x190) { array=le32(header+0x188);count=le32(header+0x18c); }
++    printf("A6PLTE dyld: %s size %llu, platform %u, %u subcaches\n",path,
++        (unsigned long long)size,le32(header+0xd8),count);
++    uint64_t signature=le64(header+40),signature_size=le64(header+48);
++    if (signature>(uint64_t)size || signature_size>(uint64_t)size-signature)
++        printf("A6PLTE dyld: cache signature outside file\n");
++    if (count>64) { printf("A6PLTE dyld: excessive subcache count\n");vnode_put(vp);return; }
++    bool suffixes=mapping>0x1c8;unsigned stride=suffixes?56:24,missing=0,invalid=0;
++    for (unsigned i=0;i<count;++i) {
++        unsigned char entry[56],child_header[104];char suffix[33],child_path[384];
++        error=read_exact(vp,(uint64_t)array+(uint64_t)i*stride,entry,stride,(uint64_t)size);
++        if (error) { printf("A6PLTE dyld: subcache table read error %d\n",error);++invalid;break; }
++        if (suffixes) {
++            memcpy(suffix,entry+24,32);suffix[32]=0;
++            bool valid=suffix[0]=='.' && memchr(suffix,0,32)!=NULL;
++            for (unsigned j=1;suffix[j] && j<32;++j)
++                if (!((suffix[j]>='0' && suffix[j]<='9') || (suffix[j]>='a' && suffix[j]<='z') ||
++                    (suffix[j]>='A' && suffix[j]<='Z') || suffix[j]=='.' || suffix[j]=='_')) valid=false;
++            if (!valid) { printf("A6PLTE dyld: invalid subcache suffix %u\n",i);++invalid;continue; }
++        } else snprintf(suffix,sizeof(suffix),".%u",i+1);
++        if (snprintf(child_path,sizeof(child_path),"%s%s",path,suffix)>=(int)sizeof(child_path)) { ++invalid;continue; }
++        vnode_t child=NULL;error=vnode_lookup(child_path,0,&child,vfs_context_current());
++        if (error) { printf("A6PLTE dyld: MISSING %s errno %d\n",child_path,error);++missing;continue; }
++        off_t child_size=0;error=vnode_size(child,&child_size,vfs_context_current());
++        if (!error && child_size>=0) error=read_exact(child,0,child_header,sizeof(child_header),(uint64_t)child_size);
++        else if (!error) error=EINVAL;
++        if (error || memcmp(child_header,"dyld_",5) || memcmp(child_header+88,entry,16)) {
++            printf("A6PLTE dyld: BAD HEADER/UUID %s errno %d\n",child_path,error);++invalid;
++        }
++        vnode_put(child);
++    }
++    printf("A6PLTE dyld: split files checked: %u missing, %u invalid\n",missing,invalid);
++    vnode_put(vp);
++}
++void a6_dyld_preflight(void) {
++    unsigned char *header=kalloc_data(512,Z_WAITOK);
++    if (!header) return;
++    static const char *paths[]={
++        "/System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64",
++        "/System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64.development",
++        "/System/Library/dyld/dyld_shared_cache_arm64",
++        "/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64",
++    };
++    for (unsigned i=0;i<sizeof(paths)/sizeof(paths[0]);++i) cache_check(paths[i],header);
++    kfree_data(header,512);
 +}
 +#endif
 diff --git c/bsd/dev/a6plte/gpt.c w/bsd/dev/a6plte/gpt.c
@@ -1424,8 +1512,24 @@ index 95192dd..ff8c5e3 100644
  	decmpfs_header *hdr = NULL;
  
  	/*
+diff --git c/bsd/kern/kern_descrip.c w/bsd/kern/kern_descrip.c
+index 13b08b5..4c33f1b 100644
+--- c/bsd/kern/kern_descrip.c
++++ w/bsd/kern/kern_descrip.c
+@@ -3999,6 +3999,11 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
+ 			if (blob) {
+ 				end_offset = blob->csb_end_offset;
+ 			}
++#if A6PLTE
++			if (proc_pid(p)==1 && vp->v_name && !strncmp(vp->v_name,"dyld_shared_cache",17))
++				printf("A6PLTE dyld: signed %s coverage %lld, signature at %llu\n",vp->v_name,
++				    end_offset,(unsigned long long)fs.fs_blob_start);
++#endif
+ 			error = copyout(&end_offset, argp, sizeof(end_offset));
+ 
+ 			if (error) {
 diff --git c/bsd/kern/kern_exec.c w/bsd/kern/kern_exec.c
-index f41b75b..ab4b6ae 100644
+index f41b75b..0f8ccb7 100644
 --- c/bsd/kern/kern_exec.c
 +++ w/bsd/kern/kern_exec.c
 @@ -6832,6 +6832,9 @@ load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path)
@@ -1438,6 +1542,17 @@ index f41b75b..ab4b6ae 100644
  #if DEBUG
  	"/usr/appleinternal/sbin/launchd.debug",
  #endif
+@@ -6873,6 +6876,10 @@ static const char * init_programs[] = {
+ void
+ load_init_program(proc_t p)
+ {
++#if A6PLTE
++	extern void a6_dyld_preflight(void);
++	a6_dyld_preflight();
++#endif
+ 	uint32_t i;
+ 	int error;
+ 	vm_map_t map = current_map();
 diff --git c/bsd/kern/kern_ktrace.c w/bsd/kern/kern_ktrace.c
 index 9f521f6..c94f527 100644
 --- c/bsd/kern/kern_ktrace.c
@@ -2295,6 +2410,21 @@ index 5b51e9c..3a94ed4 100644
  
  	context.vc_thread = current_thread();
  	context.vc_ucred = cred;
+diff --git c/bsd/vm/vm_unix.c w/bsd/vm/vm_unix.c
+index 336c84d..f2287cb 100644
+--- c/bsd/vm/vm_unix.c
++++ w/bsd/vm/vm_unix.c
+@@ -2994,6 +2994,10 @@ shared_region_map_and_slide_2_np(
+ done:
+ 	kfree_data(shared_files, files_count * sizeof(shared_files[0]));
+ 	kfree_data(mappings, mappings_count * sizeof(mappings[0]));
++#if A6PLTE
++	if (proc_pid(p)==1) printf("A6PLTE dyld: shared region map %u files, %u mappings -> errno %d\n",
++	    files_count,mappings_count,kr);
++#endif
+ 	return kr;
+ }
+ 
 diff --git c/config/MASTER.arm64.a6plte.MacOSX w/config/MASTER.arm64.a6plte.MacOSX
 new file mode 100644
 index 0000000..8dedf5c
