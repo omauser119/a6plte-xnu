@@ -355,3 +355,21 @@ inode types, 2-byte alignments, both forks, fixed disk sizes, guards and stale
 inode rejection checked. Aggregate HFS patch updated, full CI/hardware pending.
 This panic must be fixed before on-disk checkpoints can be evaluated; it does
 not establish the prior shared-region/map2 refusal's cause. Keep CPU0 only.
+
+HFS fix ad7c960 passed native Apple Clang and packaging, but its Linux test job
+missed uuid/uuid.h. Follow-up 2a53d3c adds uuid-dev to the runner; source code is
+unchanged. ALL Actions 39487558036 now pass. Actual linked HFS create/update/read
+functions no longer call the failing checked 32-byte copy; Apple's compiler
+emits independent 16-byte field accesses. Strict ___memmove_chk remains intact.
+Verified kernel: build/verified-2a53d3c/kernel/kernel.a6plte, SHA256
+6463618921f000cef2bc8d0b0cf911d986d453e8ade0bc9cec7632668d13fb51.
+Verified image: build/verified-2a53d3c/images/xnu-8796-userdata-cpu0-boot.img,
+17094656 bytes, SHA256
+0cf772962f4f1688b67ba019cfca84d1ef13c28da1c8c743684762cae6c54e4a.
+User returned phone to lk2nd; expected device and hfs-map-v2 loader verified,
+kernel/image SHA256 rechecked, fastboot boot ACK in 0.485 s (send 0.373, boot
+0.078). Private log artifacts/boot-2a53d3c-cpu0.private.log; image/boot receipts
+in build/verified-2a53d3c. This is now the latest PHONE BOOTED image, not a flash.
+CPU0, userdata HFS root/launchd, UART forbidden, USB network disabled unchanged.
+Screen-result question pending: did HFS pass, did checkpoint save/reuse start,
+and exact panic reason/caller if it fails again. Do not infer success from ACK.

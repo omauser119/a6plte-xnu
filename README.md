@@ -52,19 +52,20 @@ package format or a flash operation for this profile.
 
 ## Verification status
 
-All jobs in [Actions run 39473267592](https://github.com/omauser119/a6plte-xnu/actions/runs/39473267592)
-passed for native source `333bb5d`, including Apple Clang, linking with no undefined
-symbols, ASan/UBSan host checks and both image profiles. This includes persistent
-hash conversion and the QUP STOP/FIFO completion fix. Download just the kernel
-with `python3 scripts/download-ci-kernel.py 39473267592`, then package it locally.
+All jobs in [Actions run 39487558036](https://github.com/omauser119/a6plte-xnu/actions/runs/39487558036)
+passed for source `2a53d3c`, including Apple Clang, linking with no undefined
+symbols, ASan/UBSan host checks and both image profiles. This includes the HFS
+catalog bounds fix, persistent hash conversion and QUP STOP/FIFO completion fix.
+Download just the kernel with
+`python3 scripts/download-ci-kernel.py 39487558036`, then package it locally.
 The downloader verifies the GitHub archive SHA256 before extraction.
 
 Hardware confirmed native launchd image activation and successful 16-KiB code
 signature verification on the 4-KiB kernel. Dyld then reported that its shared
 cache was not loaded and `libSystem.B.dylib` was unavailable; split-cache and
 mapping diagnostics are included. This is not yet a successful launchd boot.
-The preceding checkpoint image `ba06ed0` was accepted by fastboot; actual
-checkpoint creation/reuse and physical touch with `333bb5d` need screen results.
+The CPU0-only `2a53d3c` image has been accepted by fastboot. Screen confirmation
+of checkpoint creation/reuse and physical touch is still pending.
 
 The `333bb5d` hardware run stopped in `__memmove_chk` (`16 < 32`) after HFS
 journal setup. Apple's catalog writer copied the adjacent 16-byte `userInfo`
