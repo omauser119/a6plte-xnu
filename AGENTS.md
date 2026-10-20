@@ -329,3 +329,12 @@ yet: fastboot empty after ba06ed0 activation. Readiness question pending: return
 from the current run to lk2nd after preserving final error lines if any. A second
 pending question asks whether ba06ed0 shows checkpoint saving and final dyld
 signature/blob/map2. No new pasta permission needed. Do not flash boot or LK.
+
+User returned to lk2nd. Native 333bb5d image above was SHA256 checked again,
+full CRC/BootArgs/root/CPU0/USB profile revalidated, and expected loader
+`a6plte:xnu-loader=hfs-map-v2` verified on the expected device. Fastboot boot
+accepted it in 0.479 s (0.372 send, 0.078 boot). Private receipt:
+artifacts/boot-333bb5d-cpu0.private.log. This is now the latest PHONE BOOTED
+image, no flash. Screen result pending: async question asks S6SY761 ready/probe
+status, checkpoint reused/saving lines, and final dyld error if it stops.
+Do not infer physical touch or successful launchd from fastboot's OKAY.
