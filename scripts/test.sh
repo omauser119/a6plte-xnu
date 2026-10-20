@@ -56,3 +56,6 @@ clang -DKERNEL=1 -DA6PLTE=1 -I"$ROOT/xnu/libkern" -fsanitize=address,undefined -
 clang --target=arm64-apple-darwin -mcpu=cortex-a53 -ffreestanding -fno-builtin -mgeneral-regs-only -mstrict-align -O2 -DA6PLTE=1 -Wall -Wextra -Werror -c "$ROOT/xnu/libkern/crypto/a6plte_kmem_rng.c" -o "$ROOT/artifacts/xnu-kmem-rng.macho.o"
 
 python3 "$ROOT/tests/test_sha512.py"
+
+clang -std=c17 -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_input.c" "$ROOT/xnu/iokit/Kernel/arm/A6Input.c" "$ROOT/xnu/iokit/Kernel/arm/A6HIDWire.c" -o "$ROOT/artifacts/test-input"
+"$ROOT/artifacts/test-input"

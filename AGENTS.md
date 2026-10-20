@@ -95,3 +95,24 @@ Framebuffer защищён reentrant межъядерной блокировко
 параллельных писателей и точное сравнение framebuffer) прошли. Native asm/C
 probes прошли. SMP пока не проверен на телефоне; честный итог — только после
 отчёта online и реальной работы AP. Sweet HID не использовать.
+
+
+952dec2: read-only split dyld cache preflight (native header/subcache UUID/path
+checks), signed-coverage and mapping syscall results. All Actions 39408904675
+passed. Hardware result pending. No shared-cache root cause asserted yet.
+
+e36f008: SMP kernel all Actions 39407189812 passed. Verified downloaded image:
+build/verified-e36f008/images/xnu-8796-userdata-boot.img, SHA256
+ff6960f807519bd10f387ab278326a7ea2173760c3a9ef595f0449dbf1cf333f.
+Not booted yet; readiness question pending (hardware-reset into lk2nd).
+
+Original HID implemented in A6HID.cpp, A6Input.c/.h, A6HIDWire.c/.h, with no
+Sweet HID source. Physical S6SY761 on BLSP1 QUP2, TLMM GPIO6/7/59/139;
+volume-up GPIO85, read-only PM8953 PON RT_STS over SPMI observer for power
+and volume-down. Clocks from msm8953-mainline/linux d9eabbae3edea6adb08e74c30059aa0933afaae7.
+No firmware update, power/reset PMIC writes, UART, or USB startup. Public Apple
+event-service queue ABI, ESUC open/close/copy, core IOSharedDataQueue, digitizer
+collections/ten contacts and consumer volume/power keys. This is a subset of
+IOHIDFamily, not proof of working backboardd/UI. Hardware not tested yet.
+Host ASan/UBSan tests cover FIFO repeated START, coordinates/slots/release,
+PON read-only commands, debounce, bounded timeout, HID wire sizes/capacity.

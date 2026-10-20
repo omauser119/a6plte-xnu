@@ -2804,6 +2804,612 @@ index 0000000..9a8bcfe
 +        d->size < (uint64_t)d->stride*d->height || stride<w*bpp || stride>65536) return 0;
 +    return h<=bytes/stride;
 +}
+diff --git c/iokit/Kernel/arm/A6HID.cpp w/iokit/Kernel/arm/A6HID.cpp
+new file mode 100644
+index 0000000..85a026d
+--- /dev/null
++++ w/iokit/Kernel/arm/A6HID.cpp
+@@ -0,0 +1,315 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* Original board HID transport. Physical events only; no Sweet HID sources.
++ * Implements the public event-service queue ABI, not the complete IOHIDFamily. */
++#if A6PLTE
++#include <IOKit/IOService.h>
++#include <IOKit/IOUserClient.h>
++#include <IOKit/IOSharedDataQueue.h>
++#include <IOKit/IODeviceMemory.h>
++#include <IOKit/IOWorkLoop.h>
++#include <IOKit/IOTimerEventSource.h>
++#include <IOKit/IOLib.h>
++#include <IOKit/IOKitKeys.h>
++#include <libkern/c++/OSArray.h>
++#include <libkern/c++/OSDictionary.h>
++#include <libkern/c++/OSNumber.h>
++#include <pexpert/pexpert.h>
++#include <kern/clock.h>
++#include <machine/machine_routines.h>
++#include "A6HIDWire.h"
++class A6HIDEventClient;
++class IOHIDEventService : public IOService {
++    OSDeclareDefaultStructors(IOHIDEventService);
++    IOLock *lock=nullptr;
++    A6HIDEventClient *clients[8]={};
++    uint8_t last[4][A6_HID_PACKET_MAX]={};uint32_t lengths[4]={};
++public:
++    bool touch=false;
++    bool start(IOService *) APPLE_KEXT_OVERRIDE;
++    void free() APPLE_KEXT_OVERRIDE;
++    IOReturn newUserClient(task_t,void *,UInt32,OSDictionary *,IOUserClient **) APPLE_KEXT_OVERRIDE;
++    bool addClient(A6HIDEventClient *);
++    void removeClient(A6HIDEventClient *);
++    void publish(unsigned,const void *,uint32_t);
++    void flushClients();
++    void replay(A6HIDEventClient *);
++    uint32_t copyLast(uint32_t,void *);
++};
++OSDefineMetaClassAndStructors(IOHIDEventService,IOService);
++class IOHIDEventDriver : public IOHIDEventService { OSDeclareDefaultStructors(IOHIDEventDriver); };
++OSDefineMetaClassAndStructors(IOHIDEventDriver,IOHIDEventService);
++class A6Digitizer : public IOHIDEventDriver { OSDeclareDefaultStructors(A6Digitizer); };
++OSDefineMetaClassAndStructors(A6Digitizer,IOHIDEventDriver);
++class A6Buttons : public IOHIDEventDriver { OSDeclareDefaultStructors(A6Buttons); };
++OSDefineMetaClassAndStructors(A6Buttons,IOHIDEventDriver);
++
++class A6HIDEventClient : public IOUserClient {
++    OSDeclareDefaultStructors(A6HIDEventClient);
++    IOHIDEventService *owner=nullptr;
++    IOSharedDataQueue *queue=nullptr;IOLock *lock=nullptr;mach_port_t notification=MACH_PORT_NULL;
++    bool opened=false,closed=false,registered=false;
++    uint8_t pending[4][A6_HID_PACKET_MAX]={};uint32_t lengths[4]={};
++    void flushLocked();
++public:
++    bool start(IOService *) APPLE_KEXT_OVERRIDE;
++    void stop(IOService *) APPLE_KEXT_OVERRIDE;
++    void free() APPLE_KEXT_OVERRIDE;
++    IOService *getService() APPLE_KEXT_OVERRIDE { return owner; }
++    IOReturn clientClose() APPLE_KEXT_OVERRIDE;
++    IOReturn clientDied() APPLE_KEXT_OVERRIDE { return clientClose(); }
++    IOReturn externalMethod(uint32_t,IOExternalMethodArguments *,IOExternalMethodDispatch *,OSObject *,void *) APPLE_KEXT_OVERRIDE;
++    IOReturn registerNotificationPort(mach_port_t,UInt32,UInt32) APPLE_KEXT_OVERRIDE;
++    IOReturn clientMemoryForType(UInt32,IOOptionBits *,IOMemoryDescriptor **) APPLE_KEXT_OVERRIDE;
++    void push(unsigned,const void *,uint32_t);
++    void flush();
++};
++OSDefineMetaClassAndStructors(A6HIDEventClient,IOUserClient);
++bool A6HIDEventClient::start(IOService *provider) {
++    if (!IOUserClient::start(provider)) return false;
++    owner=OSDynamicCast(IOHIDEventService,provider);
++    lock=IOLockAlloc();queue=IOSharedDataQueue::withCapacity(16384);
++    if(owner)owner->retain();
++    if (!owner || !lock || !queue) return false;
++    registered=owner->addClient(this);return registered;
++}
++void A6HIDEventClient::flushLocked() {
++    if (!opened || closed || !queue) return;
++    for(unsigned i=0;i<4;++i)if(lengths[i] && queue->enqueue(pending[i],lengths[i]))lengths[i]=0;
++}
++void A6HIDEventClient::flush() { IOLockLock(lock);flushLocked();IOLockUnlock(lock); }
++void A6HIDEventClient::push(unsigned slot,const void *data,uint32_t n) {
++    if (slot>=4 || !n || n>A6_HID_PACKET_MAX) return;
++    IOLockLock(lock);
++    if (!closed) { memcpy(pending[slot],data,n);lengths[slot]=n;flushLocked(); }
++    IOLockUnlock(lock);
++}
++IOReturn A6HIDEventClient::clientClose() {
++    if (lock) { IOLockLock(lock);closed=true;opened=false;IOLockUnlock(lock); }
++    if (registered && owner) { registered=false;owner->removeClient(this); }
++    terminate();return kIOReturnSuccess;
++}
++void A6HIDEventClient::stop(IOService *provider) {
++    if(lock) {IOLockLock(lock);closed=true;opened=false;IOLockUnlock(lock);}
++    if (registered && owner) { registered=false;owner->removeClient(this); }
++    IOUserClient::stop(provider);
++}
++void A6HIDEventClient::free() {
++    if(queue) { queue->setNotificationPort(MACH_PORT_NULL);queue->release(); }
++    if(notification!=MACH_PORT_NULL)releaseNotificationPort(notification);
++    if(owner)owner->release();if(lock)IOLockFree(lock);IOUserClient::free();
++}
++IOReturn A6HIDEventClient::registerNotificationPort(mach_port_t port,UInt32,UInt32) {
++    if (!lock) { if(port)releaseNotificationPort(port);return kIOReturnOffline; }
++    IOLockLock(lock);
++    if(closed) { IOLockUnlock(lock);if(port)releaseNotificationPort(port);return kIOReturnOffline; }
++    mach_port_t old=notification;notification=port;queue->setNotificationPort(port);
++    flushLocked();IOLockUnlock(lock);
++    if(old)releaseNotificationPort(old);return kIOReturnSuccess;
++}
++IOReturn A6HIDEventClient::clientMemoryForType(UInt32 type,IOOptionBits *options,IOMemoryDescriptor **memory) {
++    if(!options || !memory || type>0)return kIOReturnBadArgument;
++    *memory=nullptr;*options=0;IOLockLock(lock);
++    auto descriptor=queue->getMemoryDescriptor();
++    if(!closed)*memory=descriptor;else if(descriptor)descriptor->release();IOLockUnlock(lock);
++    return *memory?kIOReturnSuccess:kIOReturnOffline;
++}
++IOReturn A6HIDEventClient::externalMethod(uint32_t selector,IOExternalMethodArguments *args,
++    IOExternalMethodDispatch *,OSObject *,void *) {
++    if(!args || args->asyncWakePort || args->asyncReferenceCount || args->scalarOutputCount ||
++        args->structureInputDescriptor || selector>4)return kIOReturnBadArgument;
++    unsigned expected=selector<2?1:selector==2?2:selector==3?3:0;
++    if(args->scalarInputCount!=expected || (expected && !args->scalarInput) ||
++        args->structureInputSize>A6_HID_PACKET_MAX ||
++        (args->structureInputSize && !args->structureInput))return kIOReturnBadArgument;
++    if(selector<2) {
++        if(args->structureInputSize || args->structureOutputSize || args->structureOutputDescriptor)return kIOReturnBadArgument;
++        IOLockLock(lock);if(closed) { IOLockUnlock(lock);return kIOReturnOffline; }
++        opened=selector==0;IOLockUnlock(lock);
++        if(selector==0)owner->replay(this);return kIOReturnSuccess;
++    }
++    IOLockLock(lock);bool active=opened && !closed;IOLockUnlock(lock);
++    if(!active)return kIOReturnNotOpen;
++    if(selector==3)return kIOReturnUnsupported; /* No output HID elements. */
++    if(selector==4)return kIOReturnNotFound; /* No property-matching copy API yet. */
++    uint8_t data[A6_HID_PACKET_MAX];uint32_t n=owner->copyLast((uint32_t)args->scalarInput[0],data);
++    if(!n)return kIOReturnNotFound;
++    if(args->structureOutputDescriptor) {
++        if(args->structureOutputDescriptor->getLength()<n)return kIOReturnNoSpace;
++        if(args->structureOutputDescriptor->writeBytes(0,data,n)!=n)return kIOReturnVMError;
++        args->structureOutputDescriptorSize=n;
++    } else {
++        if(!args->structureOutput || args->structureOutputSize<n)return kIOReturnNoSpace;
++        memcpy(args->structureOutput,data,n);args->structureOutputSize=n;
++    }
++    return kIOReturnSuccess;
++}
++bool IOHIDEventService::start(IOService *provider) {
++    if(!IOService::start(provider) || !(lock=IOLockAlloc()))return false;
++    setProperty("Product",touch?"Samsung Galaxy A6+ Touchscreen":"Samsung Galaxy A6+ Buttons");
++    setProperty("Manufacturer","Samsung");setProperty("VendorID",0x04e8,32);
++    setProperty("ProductID",0xa605,32);setProperty("Built-In",true);
++    setProperty("Transport",touch?"I2C":"GPIO/SPMI");
++    setProperty("PrimaryUsagePage",touch?0x0d:0x0c,32);setProperty("PrimaryUsage",touch?4:1,32);
++    auto usage=OSDictionary::withCapacity(2);auto pairs=OSArray::withCapacity(1);
++    if(!usage || !pairs) {if(usage)usage->release();if(pairs)pairs->release();return false;}
++    auto page=OSNumber::withNumber(touch?0x0d:0x0c,32);auto value=OSNumber::withNumber(touch?4:1,32);
++    if(!page || !value) {if(page)page->release();if(value)value->release();usage->release();pairs->release();return false;}
++    usage->setObject("DeviceUsagePage",page);usage->setObject("DeviceUsage",value);
++    pairs->setObject(usage);setProperty("DeviceUsagePairs",pairs);
++    page->release();value->release();usage->release();pairs->release();
++    setProperty("IOUserClientClass","A6HIDEventClient");setProperty("A6PhysicalInput",true);
++    if(touch) { setProperty("DisplayIntegrated",true);setProperty("DisplayWidth",1080,32);setProperty("DisplayHeight",2220,32); }
++    return true;
++}
++void IOHIDEventService::free() { if(lock)IOLockFree(lock);IOService::free(); }
++bool IOHIDEventService::addClient(A6HIDEventClient *client) {
++    bool ok=false;IOLockLock(lock);
++    for(unsigned i=0;i<8;++i)if(!clients[i]) {clients[i]=client;client->retain();ok=true;break;}
++    IOLockUnlock(lock);return ok;
++}
++void IOHIDEventService::removeClient(A6HIDEventClient *client) {
++    bool found=false;IOLockLock(lock);
++    for(unsigned i=0;i<8;++i)if(clients[i]==client) {clients[i]=nullptr;found=true;break;}
++    IOLockUnlock(lock);if(found)client->release();
++}
++void IOHIDEventService::publish(unsigned slot,const void *data,uint32_t n) {
++    if(slot>=4 || !n || n>A6_HID_PACKET_MAX)return;
++    /* Serialize replay and live delivery in the same order. No user-memory
++     * access occurs under this sleeping mutex; client enqueue is kernel-only. */
++    IOLockLock(lock);memcpy(last[slot],data,n);lengths[slot]=n;
++    for(unsigned i=0;i<8;++i)if(clients[i])clients[i]->push(slot,data,n);
++    IOLockUnlock(lock);
++}
++void IOHIDEventService::flushClients() {
++    IOLockLock(lock);
++    for(unsigned i=0;i<8;++i)if(clients[i])clients[i]->flush();
++    IOLockUnlock(lock);
++}
++void IOHIDEventService::replay(A6HIDEventClient *client) {
++    IOLockLock(lock);
++    for(unsigned i=0;i<4;++i)if(lengths[i])client->push(i,last[i],lengths[i]);
++    IOLockUnlock(lock);
++}
++uint32_t IOHIDEventService::copyLast(uint32_t type,void *out) {
++    uint32_t n=0;IOLockLock(lock);
++    for(unsigned i=0;i<4;++i)if(lengths[i] && ((type==11 && touch) || (type==3 && !touch))) {
++        n=lengths[i];memcpy(out,last[i],n);break;
++    }
++    IOLockUnlock(lock);return n;
++}
++IOReturn IOHIDEventService::newUserClient(task_t task,void *security,UInt32 type,OSDictionary *props,IOUserClient **handler) {
++    if(!handler)return kIOReturnBadArgument;*handler=nullptr;
++    if(type!=0x65737563)return kIOReturnUnsupported; /* 'esuc', event-service connection */
++    /* This client exposes read-only physical events; it cannot inject events or
++     * access controller registers, framebuffer, storage, or kernel memory. */
++    A6HIDEventClient *client=new A6HIDEventClient;
++    if(!client)return kIOReturnNoMemory;
++    if(!client->initWithTask(task,security,type,props)) {client->release();return kIOReturnNoMemory;}
++    client->setProperty(kIOUserClientDefaultLockingKey,true);
++    if(!client->attach(this)) {client->release();return kIOReturnError;}
++    if(!client->start(this)) {client->detach(this);client->release();return kIOReturnNoResources;}
++    *handler=client;return kIOReturnSuccess;
++}
++
++class A6InputController : public IOService {
++    OSDeclareDefaultStructors(A6InputController);
++    uintptr_t bases[5]={};IOMemoryMap *mappings[5]={};
++    struct a6_input input={};
++    IOWorkLoop *loop=nullptr;IOTimerEventSource *timer=nullptr;
++    A6Digitizer *digitizer=nullptr;A6Buttons *buttons=nullptr;
++    bool running=false;unsigned touchLogs=0;
++    static uint32_t read(void *,unsigned,unsigned);
++    static void write(void *,unsigned,unsigned,uint32_t);
++    static uint64_t us(void *);
++    static void delay(void *,unsigned);
++    static void poll(OSObject *,IOTimerEventSource *);
++    void update(unsigned);
++public:
++    bool start(IOService *) APPLE_KEXT_OVERRIDE;
++    void stop(IOService *) APPLE_KEXT_OVERRIDE;
++    void free() APPLE_KEXT_OVERRIDE;
++};
++OSDefineMetaClassAndStructors(A6InputController,IOService);
++static const unsigned regionSizes[5]={0x100000,0x50000,0x1000,0x1000,0x800000};
++uint32_t A6InputController::read(void *context,unsigned region,unsigned reg) {
++    auto self=(A6InputController *)context;
++    if(region>=5 || reg%4 || reg>regionSizes[region]-4 || !self->bases[region])panic("A6 input MMIO read bounds");
++    uint32_t value=*(volatile uint32_t *)(self->bases[region]+reg);__asm__ volatile("dsb sy" ::: "memory");return value;
++}
++void A6InputController::write(void *context,unsigned region,unsigned reg,uint32_t value) {
++    auto self=(A6InputController *)context;
++    if(region>=5 || reg%4 || reg>regionSizes[region]-4 || !self->bases[region] || region==A6_INPUT_SPMI ||
++        (region==A6_INPUT_OBSERVER && ((reg%0x8000)!=0 || value!=((1u<<27)|(0x10u<<4)))))
++        panic("A6 input MMIO write bounds");
++    *(volatile uint32_t *)(self->bases[region]+reg)=value;__asm__ volatile("dsb sy" ::: "memory");
++}
++uint64_t A6InputController::us(void *) {
++    uint64_t t;__asm__ volatile("mrs %0,cntpct_el0":"=r"(t));
++    return (t/19200000)*1000000+(t%19200000)*1000000/19200000;
++}
++void A6InputController::delay(void *,unsigned us) { IODelay(us); }
++bool A6InputController::start(IOService *provider) {
++    if(!IOService::start(provider))return false;
++    static const uintptr_t addresses[5]={0x01000000,0x01800000,0x078b6000,0x0200f000,0x02c00000};
++    for(unsigned i=0;i<5;++i) {
++        auto memory=IODeviceMemory::withRange(addresses[i],regionSizes[i]);if(!memory)return false;
++        mappings[i]=memory->map();memory->release();
++        if(!mappings[i] || !(bases[i]=mappings[i]->getVirtualAddress()))return false;
++    }
++    struct a6_input_bus bus={this,read,write,us,delay};
++    int result=a6_input_init(&input,&bus);
++    IOLog("A6PLTE input: S6SY761 %s, raw %ux%u, PON %s; reg %x value %x\n",
++        result?"probe failed":"ready",input.max_x,input.max_y,input.pon_ready?"mapped":"unavailable",input.error_register,input.error_value);
++    digitizer=new A6Digitizer;buttons=new A6Buttons;
++    if(!digitizer || !buttons || !digitizer->init() || !buttons->init())return false;
++    digitizer->touch=true;
++    if(!digitizer->attach(this) || !digitizer->start(this) || !buttons->attach(this) || !buttons->start(this))return false;
++    digitizer->setProperty("A6TouchHardwareReady",input.touch_ready!=0);
++    digitizer->setProperty("A6SensorMaxX",input.max_x,32);digitizer->setProperty("A6SensorMaxY",input.max_y,32);
++    buttons->setProperty("A6PONMapped",input.pon_ready!=0);
++    update(15);digitizer->registerService();buttons->registerService();
++    loop=IOWorkLoop::workLoop();timer=IOTimerEventSource::timerEventSource(this,poll);
++    if(!loop || !timer || loop->addEventSource(timer)!=kIOReturnSuccess)return false;
++    running=true;timer->setTimeoutMS(8);registerService();return true;
++}
++void A6InputController::update(unsigned changes) {
++    uint8_t data[A6_HID_PACKET_MAX];uint64_t time=mach_absolute_time();
++    if(changes&1) {
++        size_t n=a6_hid_touch_packet(data,sizeof(data),time,digitizer->getRegistryEntryID(),&input);
++        if(n)digitizer->publish(0,data,(uint32_t)n);
++        if(input.changed && touchLogs<24) {IOLog("A6PLTE touch: contacts changed %x\n",input.changed);++touchLogs;}
++        input.changed=0;
++    }
++    for(unsigned i=0;i<3;++i)if(changes&(2u<<i)) {
++        size_t n=a6_hid_key_packet(data,sizeof(data),time,buttons->getRegistryEntryID(),i,(input.buttons>>i)&1);
++        buttons->publish(i+1,data,(uint32_t)n);
++        IOLog("A6PLTE button: %s %s\n",i==0?"volume-up":i==1?"volume-down":"power",input.buttons&(1u<<i)?"down":"up");
++    }
++}
++void A6InputController::poll(OSObject *owner,IOTimerEventSource *source) {
++    auto self=OSDynamicCast(A6InputController,owner);if(!self || !self->running)return;
++    unsigned changes=(unsigned)a6_input_poll(&self->input);if(changes)self->update(changes);
++    self->digitizer->flushClients();self->buttons->flushClients();source->setTimeoutMS(8);
++}
++void A6InputController::stop(IOService *provider) {
++    running=false;if(timer)timer->cancelTimeout();
++    if(timer && loop)loop->removeEventSource(timer);
++    if(digitizer)digitizer->terminate();if(buttons)buttons->terminate();IOService::stop(provider);
++}
++void A6InputController::free() {
++    if(timer) {timer->cancelTimeout();if(loop)loop->removeEventSource(timer);timer->release();}
++    if(loop)loop->release();
++    if(digitizer) {if(digitizer->getProvider()==this)digitizer->detach(this);digitizer->release();}
++    if(buttons) {if(buttons->getProvider()==this)buttons->detach(this);buttons->release();}
++    for(unsigned i=0;i<5;++i)if(mappings[i])mappings[i]->release();
++    IOService::free();
++}
++void a6_start_input(IOService *provider) {
++    auto service=new A6InputController;if(!service)return;
++    bool attached=false;
++    if(!service->init() || !(attached=service->attach(provider)) || !service->start(provider)) {
++        IOLog("A6PLTE: input controller start failed\n");if(attached)service->detach(provider);
++    }
++    service->release();
++}
++#endif
+diff --git c/iokit/Kernel/arm/A6HIDWire.c w/iokit/Kernel/arm/A6HIDWire.c
+new file mode 100644
+index 0000000..3d88630
+--- /dev/null
++++ w/iokit/Kernel/arm/A6HIDWire.c
+@@ -0,0 +1,37 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#include "A6HIDWire.h"
++_Static_assert(sizeof(struct a6_hid_header)==28,"IOHID queue header");
++_Static_assert(sizeof(struct a6_hid_key)==32,"IOHID keyboard event");
++_Static_assert(sizeof(struct a6_hid_digitizer)==104,"IOHID digitizer event");
++static void copy(void *target,const void *source,size_t n) {
++    uint8_t *d=target;const uint8_t *s=source;while(n--)*d++=*s++;
++}
++size_t a6_hid_key_packet(void *out,size_t cap,uint64_t time,uint64_t sender,unsigned key,int down) {
++    static const uint16_t usages[3]={0xe9,0xea,0x30};
++    if (!out || cap<60 || key>=3 || (down!=0 && down!=1)) return 0;
++    struct a6_hid_header h={time,sender,0,0,1};
++    struct a6_hid_key k={.base={.size=32,.type=3},.page=0x0c,.usage=usages[key],.down=(uint32_t)down};
++    copy(out,&h,sizeof(h));copy((uint8_t *)out+sizeof(h),&k,sizeof(k));return 60;
++}
++size_t a6_hid_touch_packet(void *out,size_t cap,uint64_t time,uint64_t sender,const struct a6_input *input) {
++    if (!out || !input || !input->max_x || !input->max_y) return 0;
++    unsigned n=0,active=0;for(unsigned i=0;i<10;++i) {
++        n+=input->fingers[i].active || (input->changed&(1u<<i));active+=input->fingers[i].active!=0;
++    }
++    size_t size=28+(n+1)*104;if(cap<size)return 0;
++    struct a6_hid_header h={time,sender,0,0,n+1};copy(out,&h,sizeof(h));
++    struct a6_hid_digitizer root={.base={.size=104,.type=11,.options=(1u<<1)|(1u<<19)},
++        .transducer=3,.mask=7,.child_mask=7};
++    if(active)root.base.options|=(1u<<16)|(1u<<17);
++    copy((uint8_t *)out+28,&root,sizeof(root));size_t at=28+104;
++    for(unsigned i=0;i<10;++i) {
++        const struct a6_finger *f=&input->fingers[i];if(!f->active && !(input->changed&(1u<<i)))continue;
++        struct a6_hid_digitizer d={.base={.size=104,.type=11,.options=1u<<19,.depth=1},
++            .x=(int32_t)((uint64_t)f->x*65536/input->max_x),
++            .y=(int32_t)((uint64_t)f->y*65536/input->max_y),.index=i+1,.transducer=2,.identity=i+1,
++            .mask=7,.pressure=f->active?(int32_t)((unsigned)f->pressure*65536/63):0};
++        if(f->active)d.base.options|=(1u<<16)|(1u<<17);
++        copy((uint8_t *)out+at,&d,sizeof(d));at+=sizeof(d);
++    }
++    return size;
++}
+diff --git c/iokit/Kernel/arm/A6HIDWire.h w/iokit/Kernel/arm/A6HIDWire.h
+new file mode 100644
+index 0000000..2bd96f3
+--- /dev/null
++++ w/iokit/Kernel/arm/A6HIDWire.h
+@@ -0,0 +1,27 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef A6_HID_WIRE_H
++#define A6_HID_WIRE_H
++#include "A6Input.h"
++#ifdef __cplusplus
++extern "C" {
++#endif
++/* Public Apple IOHID event queue representation, implemented independently.
++ * Reference: IOHIDFamily 2365347f5147a1e2a46de21acd08d27fe0906e85. */
++struct __attribute__((packed,aligned(4))) a6_hid_header {
++    uint64_t timestamp,sender;uint32_t options,attributes,count;
++};
++struct a6_hid_base { uint32_t size,type,options;uint8_t depth,reserved[3]; };
++struct a6_hid_key { struct a6_hid_base base;uint16_t page,usage;uint32_t down,flags;uint8_t press_count,reserved[3]; };
++struct a6_hid_digitizer {
++    struct a6_hid_base base;int32_t x,y,z;
++    uint32_t index,transducer,identity,mask,child_mask,buttons;
++    int32_t pressure,aux_pressure,twist;uint32_t orientation_type;
++    int32_t orientation[6];uint32_t generation,will_update,did_update;
++};
++#define A6_HID_PACKET_MAX (28+11*104)
++size_t a6_hid_key_packet(void *,size_t,uint64_t,uint64_t,unsigned,int);
++size_t a6_hid_touch_packet(void *,size_t,uint64_t,uint64_t,const struct a6_input *);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git c/iokit/Kernel/arm/A6Input.c w/iokit/Kernel/arm/A6Input.c
+new file mode 100644
+index 0000000..769d17d
+--- /dev/null
++++ w/iokit/Kernel/arm/A6Input.c
+@@ -0,0 +1,163 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* Original polled QUPv2/S6SY761 + TLMM/PM8953 PON driver. Register/protocol
++ * definitions verified against upstream hardware drivers; no firmware writes,
++ * DMA, PMIC power/reset writes, or UART access. */
++#include "A6Input.h"
++static uint32_t rd(struct a6_input *s,unsigned region,unsigned reg) { return s->bus.read(s->bus.context,region,reg); }
++static void wr(struct a6_input *s,unsigned region,unsigned reg,uint32_t value) { s->bus.write(s->bus.context,region,reg,value); }
++static int wait_bits(struct a6_input *s,unsigned region,unsigned reg,uint32_t mask,uint32_t wanted,unsigned timeout) {
++    uint64_t start=s->bus.us(s->bus.context);uint32_t v;
++    do {
++        v=rd(s,region,reg);if ((v&mask)==wanted) return 0;
++        s->bus.delay(s->bus.context,2);
++    } while (s->bus.us(s->bus.context)-start<timeout);
++    s->error_register=(region<<24)|reg;s->error_value=v;return -1;
++}
++static int state(struct a6_input *s,unsigned next) {
++    if (wait_bits(s,A6_INPUT_QUP,4,4,4,1000)) return -1;
++    wr(s,A6_INPUT_QUP,4,next);
++    return wait_bits(s,A6_INPUT_QUP,4,7,4|next,1000);
++}
++static void pin(struct a6_input *s,unsigned gpio,unsigned function,unsigned pull,unsigned output) {
++    unsigned reg=gpio*0x1000;uint32_t value=rd(s,A6_INPUT_TLMM,reg);
++    value=(value&~0x3ffu)|(function<<2)|pull|(output?1u<<9:0);
++    wr(s,A6_INPUT_TLMM,reg,value); /* 2 mA drive; preserve unrelated bits */
++}
++static int qup_reset(struct a6_input *s) {
++    wr(s,A6_INPUT_QUP,0x0c,1);
++    if (wait_bits(s,A6_INPUT_QUP,4,7,4,1000)) return -1;
++    wr(s,A6_INPUT_QUP,0,0x207);
++    wr(s,A6_INPUT_QUP,8,3u<<14);
++    wr(s,A6_INPUT_QUP,0x100,0);wr(s,A6_INPUT_QUP,0x200,0);
++    wr(s,A6_INPUT_QUP,0x1c,0x7c);wr(s,A6_INPUT_QUP,0x20,0);
++    wr(s,A6_INPUT_QUP,0x28,0x300);wr(s,A6_INPUT_QUP,0x408,1);
++    return 0;
++}
++/* One short FIFO phase. phase 0 leaves the bus owned for a repeated START. */
++static int phase(struct a6_input *s,const uint8_t *tags,unsigned n,uint8_t *out,unsigned bytes,int first) {
++    uint32_t configure=first?0:1u<<31;
++    wr(s,A6_INPUT_QUP,0x150,configure|n);
++    wr(s,A6_INPUT_QUP,0x208,configure|(bytes?bytes+2:0));
++    wr(s,A6_INPUT_QUP,0,0x207|(bytes?0:0x80));
++    if (first) {
++        if (state(s,1)) return -1;
++        wr(s,A6_INPUT_QUP,0x400,(3u<<8)|93); /* 19.2 MHz -> 100 kHz */
++        if (state(s,3)) return -1;
++    }
++    for (unsigned i=0;i<n;i+=4) {
++        uint32_t value=0;for(unsigned j=0;j<4 && i+j<n;++j)value|=(uint32_t)tags[i+j]<<(j*8);
++        wr(s,A6_INPUT_QUP,0x110,value);
++    }
++    if (state(s,1)) return -1;
++    uint64_t start=s->bus.us(s->bus.context);unsigned received=0;uint8_t raw[16]={0};
++    for (;;) {
++        uint32_t op=rd(s,A6_INPUT_QUP,0x18),status=rd(s,A6_INPUT_QUP,0x404),error=rd(s,A6_INPUT_QUP,0x1c);
++        if ((status&0x38000fcu) || (error&0x7c)) {
++            s->error_register=0x02000404;s->error_value=status;return -1;
++        }
++        if (bytes && received<bytes+2 && (op&(1u<<5))) {
++            uint32_t word=rd(s,A6_INPUT_QUP,0x218);
++            for (unsigned j=0;j<4 && received<bytes+2;++j) raw[received++]=(uint8_t)(word>>(j*8));
++        }
++        if ((op&(1u<<10)) && (!bytes || received==bytes+2)) break;
++        if (op&0x300) wr(s,A6_INPUT_QUP,0x18,op&0x300);
++        if (s->bus.us(s->bus.context)-start>=20000) {
++            s->error_register=0x02000018;s->error_value=op;return -1;
++        }
++        s->bus.delay(s->bus.context,2);
++    }
++    if (bytes) {
++        if ((raw[0]<0x85 || raw[0]>0x87) || raw[1]!=bytes) { s->error_register=0x02000218;s->error_value=raw[0]|(uint32_t)raw[1]<<8;return -1; }
++        for(unsigned i=0;i<bytes;++i)out[i]=raw[i+2];
++    }
++    wr(s,A6_INPUT_QUP,0x18,0x300);
++    return 0;
++}
++static int command(struct a6_input *s,uint8_t cmd,const uint8_t *data,unsigned n,uint8_t *out,unsigned bytes) {
++    if (n>3 || bytes>11 || (n && !data) || (bytes && !out)) return -1;
++    if (qup_reset(s)) return -1;
++    uint8_t tags[8]={0x81,0x90,bytes?0x82:0x83,(uint8_t)(n+1),cmd,0,0,0};
++    for(unsigned i=0;i<n;++i)tags[5+i]=data[i];
++    int error=phase(s,tags,5+n,0,0,1);
++    if (!error && bytes) {
++        uint8_t read_tags[4]={0x81,0x91,0x87,(uint8_t)bytes};
++        if (state(s,3)) error=-1;
++        else error=phase(s,read_tags,4,out,bytes,0);
++    }
++    /* Reset on success and failure: never leave the I2C bus claimed. */
++    if (state(s,0)) error=-1;
++    return error;
++}
++static int pon(struct a6_input *s,uint8_t *value) {
++    unsigned base=s->pon_channel*0x8000;
++    wr(s,A6_INPUT_OBSERVER,base,(1u<<27)|(0x10u<<4)); /* EXT_READL SID0, PID8, RT_STS */
++    if (wait_bits(s,A6_INPUT_OBSERVER,base+8,1,1,1000)) return -1;
++    uint32_t status=rd(s,A6_INPUT_OBSERVER,base+8);
++    if (status&14) { s->error_register=0x04000008|base;s->error_value=status;return -1; }
++    *value=(uint8_t)rd(s,A6_INPUT_OBSERVER,base+0x18);return 0;
++}
++int a6_input_init(struct a6_input *s,const struct a6_input_bus *bus) {
++    if (!s || !bus || !bus->read || !bus->write || !bus->us || !bus->delay) return -1;
++    *s=(struct a6_input){.bus=*bus};
++    pin(s,85,0,3,0); /* volume-up: active-low, pull-up */
++    uint32_t version=rd(s,A6_INPUT_SPMI,0);
++    if (version>=0x20010000 && version<0x50000000) {
++        for (unsigned n=0;n<256;++n) {
++            uint32_t map=rd(s,A6_INPUT_SPMI,0x800+n*4);
++            if (map && ((map>>8)&0xfff)==8) { s->pon_channel=n;s->pon_ready=1;break; }
++        }
++    }
++    /* Turn on only the two clocks and pins belonging to BLSP1 QUP2. */
++    wr(s,A6_INPUT_GCC,0x45004,rd(s,A6_INPUT_GCC,0x45004)|(1u<<10));
++    if (wait_bits(s,A6_INPUT_GCC,0x1008,1u<<31,0,1000)) return -1;
++    wr(s,A6_INPUT_GCC,0x3004,1); /* XO, divide by one (RCG2 HID=1) */
++    wr(s,A6_INPUT_GCC,0x3000,rd(s,A6_INPUT_GCC,0x3000)|1);
++    if (wait_bits(s,A6_INPUT_GCC,0x3000,1,0,1000)) return -1;
++    wr(s,A6_INPUT_GCC,0x3010,rd(s,A6_INPUT_GCC,0x3010)|1);
++    if (wait_bits(s,A6_INPUT_GCC,0x3010,1u<<31,0,1000)) return -1;
++    pin(s,6,3,0,0);pin(s,7,3,0,0);pin(s,59,0,0,0);
++    /* Both fixed touch supplies share GPIO139. Enable without power cycling. */
++    wr(s,A6_INPUT_TLMM,139*0x1000+4,rd(s,A6_INPUT_TLMM,139*0x1000+4)|2);
++    pin(s,139,0,0,1);bus->delay(bus->context,150000);
++    uint8_t id[3],boot=0,integrity=0,panel[11],enable[2]={1,0};
++    if (command(s,0x52,0,0,id,3) || command(s,0x55,0,0,&boot,1) || boot!=0x20 ||
++        command(s,0x21,0,0,&integrity,1) || integrity!=0x80 || command(s,0x23,0,0,panel,11)) return -1;
++    s->max_x=(unsigned)panel[0]<<8|panel[1];s->max_y=(unsigned)panel[2]<<8|panel[3];
++    if (!s->max_x || !s->max_y || s->max_x>4095 || s->max_y>4095) return -1;
++    if (command(s,0x30,enable,2,0,0) || command(s,0x62,0,0,0,0) || command(s,0x10,0,0,0,0)) return -1;
++    s->touch_ready=1;return 0;
++}
++int a6_input_decode(struct a6_input *s,const uint8_t e[8]) {
++    if (!s || !e || !e[0] || (e[0]&3)) return 0;
++    unsigned id=(e[0]>>2)&15,state=e[0]>>6;if (!id || id>10 || !state) return 0;
++    --id;struct a6_finger f={.x=(uint16_t)((unsigned)e[1]<<4|(e[3]>>4)),
++        .y=(uint16_t)((unsigned)e[2]<<4|(e[3]&15)),.active=state!=3,.pressure=e[6]&63,.major=e[4],.minor=e[5]};
++    if (f.x>s->max_x)f.x=(uint16_t)s->max_x;if(f.y>s->max_y)f.y=(uint16_t)s->max_y;
++    s->fingers[id]=f;s->changed|=(uint16_t)(1u<<id);return 1;
++}
++void a6_input_release(struct a6_input *s) {
++    for (unsigned i=0;i<10;++i) if (s->fingers[i].active) { s->fingers[i].active=0;s->changed|=(uint16_t)(1u<<i); }
++}
++int a6_input_poll(struct a6_input *s) {
++    if (!s) return 0;
++    unsigned before=s->buttons,values=(rd(s,A6_INPUT_TLMM,85*0x1000+4)&1)?0:1;
++    uint8_t p=0;int valid=s->pon_ready && !pon(s,&p);
++    if (p&2)values|=2;if(p&1)values|=4;
++    for(unsigned i=0;i<3;++i) {
++        if (i && !valid) continue;
++        uint8_t value=(values>>i)&1;
++        if(s->candidate[i]!=value) {s->candidate[i]=value;s->samples[i]=1;}
++        else if(s->samples[i]<3)++s->samples[i];
++        if(s->samples[i]==3) { s->stable[i]=value;s->buttons=(uint8_t)((s->buttons&~(1u<<i))|((unsigned)value<<i)); }
++    }
++    int result=(int)((before^s->buttons)<<1);
++    if (!s->touch_ready || (rd(s,A6_INPUT_TLMM,59*0x1000+4)&1)) return result;
++    for(unsigned n=0;n<32;++n) {
++        uint8_t e[8];
++        if(command(s,0x60,0,0,e,8)) { a6_input_release(s);return result|1; }
++        if(!e[0])break;
++        if(a6_input_decode(s,e)) result|=1;
++        if(!(e[7]&63))break;
++    }
++    return result;
++}
+diff --git c/iokit/Kernel/arm/A6Input.h w/iokit/Kernel/arm/A6Input.h
+new file mode 100644
+index 0000000..8ffbe93
+--- /dev/null
++++ w/iokit/Kernel/arm/A6Input.h
+@@ -0,0 +1,34 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef A6_INPUT_H
++#define A6_INPUT_H
++#include <stdint.h>
++#include <stddef.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++enum { A6_INPUT_TLMM,A6_INPUT_GCC,A6_INPUT_QUP,A6_INPUT_SPMI,A6_INPUT_OBSERVER };
++struct a6_input_bus {
++    void *context;
++    uint32_t (*read)(void *,unsigned,unsigned);
++    void (*write)(void *,unsigned,unsigned,uint32_t);
++    uint64_t (*us)(void *);
++    void (*delay)(void *,unsigned);
++};
++struct a6_finger { uint16_t x,y; uint8_t active,pressure,major,minor; };
++struct a6_input {
++    struct a6_input_bus bus;
++    struct a6_finger fingers[10];
++    unsigned max_x,max_y;
++    unsigned pon_channel;
++    uint32_t error_register,error_value;
++    uint8_t touch_ready,pon_ready,buttons,stable[3],candidate[3],samples[3];
++    uint16_t changed;
++};
++int a6_input_init(struct a6_input *,const struct a6_input_bus *);
++int a6_input_poll(struct a6_input *); /* 1 touch change; button changes in bits 1..3 */
++int a6_input_decode(struct a6_input *,const uint8_t event[8]);
++void a6_input_release(struct a6_input *);
++#ifdef __cplusplus
++}
++#endif
++#endif
 diff --git c/iokit/Kernel/arm/A6KeyStoreState.h w/iokit/Kernel/arm/A6KeyStoreState.h
 new file mode 100644
 index 0000000..95fa433
@@ -2937,10 +3543,10 @@ index 0000000..e8a3c39
 +#endif /* A6PLTE */
 diff --git c/iokit/Kernel/arm/A6PlatformServices.cpp w/iokit/Kernel/arm/A6PlatformServices.cpp
 new file mode 100644
-index 0000000..9b48f60
+index 0000000..456b626
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PlatformServices.cpp
-@@ -0,0 +1,484 @@
+@@ -0,0 +1,486 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Board services with an explicitly versioned bring-up ABI, not Apple's private ABI. */
 +#if A6PLTE
@@ -3417,12 +4023,14 @@ index 0000000..9b48f60
 +    }
 +    service->release();
 +}
++extern void a6_start_input(IOService *);
 +void a6_start_platform_services(IOService *provider) {
 +    startBoardService<A6PLTEWatchdog>(provider,"watchdog");
 +    startBoardService<AppleKeyStore>(provider,"AppleKeyStore");
 +    startBoardService<AppleSmartBattery>(provider,"battery");
 +    startBoardService<IOSurfaceRoot>(provider,"IOSurfaceRoot");
 +    startBoardService<IOMobileFramebuffer>(provider,"IOMobileFramebuffer");
++    a6_start_input(provider);
 +}
 +#endif
 diff --git c/iokit/Kernel/arm/A6PlatformServicesABI.h w/iokit/Kernel/arm/A6PlatformServicesABI.h
@@ -3598,7 +4206,7 @@ index 5219fb0..a3f4279 100644
  		proc,
  		entitlement,
 diff --git c/iokit/conf/files w/iokit/conf/files
-index 5fb0a52..e8b0193 100644
+index 5fb0a52..899feee 100644
 --- c/iokit/conf/files
 +++ w/iokit/conf/files
 @@ -79,6 +79,9 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
@@ -3611,6 +4219,14 @@ index 5fb0a52..e8b0193 100644
  iokit/Kernel/IOPlatformIO.cpp				optional iokitcpp
  
  iokit/Kernel/IOCPU.cpp					optional iokitcpp
+@@ -148,3 +151,7 @@ iokit/Kernel/IOWorkloadConfig.cpp			optional iokitcpp
+ 
+ # Skywalk
+ iokit/bsddev/skywalk/IOSkywalkSupport.cpp		optional iokitcpp skywalk
++
++iokit/Kernel/arm/A6HID.cpp optional a6plte
++iokit/Kernel/arm/A6Input.c optional a6plte
++iokit/Kernel/arm/A6HIDWire.c optional a6plte
 diff --git c/libkern/conf/files w/libkern/conf/files
 index ece14c7..b441a1b 100644
 --- c/libkern/conf/files
