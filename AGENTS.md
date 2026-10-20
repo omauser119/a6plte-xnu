@@ -290,3 +290,28 @@ record lengths, corruption, resumed prefix, source changes, read-only reuse,
 ENOSPC/fsync failure, permission/link/mount checks and balanced resources. Existing
 signature/fault and full host tests pass. Native cs_cache.c/dyld_diag.c probes
 pass; cs_cache_vfs uses real kalloc_type Apple builtins and must pass native CI.
+
+ba06ed0: ALL Actions 39470889999 passed, including actual Apple Clang VFS/cache
+objects and NOUNDEFS link. Downloaded kernel SHA256
+aa13d33bdf58d8ac1d191116c7fc0c85a0aa4ab1fa93821bbd23ff8cd7855e0d.
+Verified image build/verified-ba06ed0/images/xnu-8796-userdata-cpu0-boot.img,
+17094656 bytes, SHA256
+8d197114953521d6be24710458a801d8bd209e5f20e3aceba95eb4d2bd6acbce.
+Expected loader is getvar `a6plte:xnu-loader` -> hfs-map-v2, NOT the empty
+standard version-bootloader var. Actual ba06ed0 image boot accepted in 0.484 s
+(0.376 send + 0.078 boot); private log artifacts/boot-ba06ed0-cpu0.private.log.
+An async question for checkpoint-saving line and final dyld signature/blob/map2
+is pending. The user had already reset before the exact “44” error was recorded.
+
+User supplied physical touch failure: cmd 21, reg 02000018, value 00000040.
+This is a polled QUP OPERATIONAL timeout with OUT_FULL, not an S6 firmware
+integrity response. Probe 0x52/0x55 succeeded before 0x21. Source had reset the
+mini-core as soon as RX bytes were visible without waiting for I2C BUS_ACTIVE
+to clear (STOP may still be in progress). Also waited only MAX_OUTPUT_DONE on
+short FIFO writes, although QUP OUTPUT_SERVICE can precede it. Fix adds bounded
+idle-before-reset, FIFO SERVICE completion, read-response completion, and wait
+for I2C master-gen readiness after selection. Own HID stays own; no Sweet HID.
+Regression models delayed physical STOP and reproduces the exact cmd21/reg18/40
+failure with the prior actual driver. Fixed actual driver passes it and a
+SERVICE-only (lagging DONE) transfer, ASan/UBSan and native A6Input.c header probe.
+This demonstrates source defects, not proof of working touch on the phone.

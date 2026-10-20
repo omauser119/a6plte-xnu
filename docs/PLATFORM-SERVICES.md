@@ -27,6 +27,15 @@ working until their exact ABI and dependencies have been implemented and tested.
 The framebuffer console remains active. Kernel log output can overwrite rendered
 pixels. The driver does not replace lk2nd's MDP/DSI setup or reinitialize the panel.
 
+The reported S6SY761 probe `command 21 / reg 02000018 / value 00000040`
+identifies a QUP operational timeout with the output FIFO full. The transport
+now waits for physical I2C STOP/bus idle before resetting QUP, accepts the FIFO
+OUTPUT_SERVICE completion when MAX_OUTPUT_DONE lags, and waits for mini-core
+selection readiness. Delayed-STOP regression reproduces that exact timeout with
+the old driver and passes with the fix; physical touch remains unconfirmed.
+Register/handshake references are the pinned
+[Linux QUP driver](https://github.com/msm8953-mainline/linux/blob/d9eabbae3edea6adb08e74c30059aa0933afaae7/drivers/i2c/busses/i2c-qup.c).
+
 ## Watchdog policy
 
 The service derives from the real `IOWatchDogTimer` base, including its sleep

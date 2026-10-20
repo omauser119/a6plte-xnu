@@ -3894,10 +3894,10 @@ index 0000000..2bd96f3
 +#endif
 diff --git c/iokit/Kernel/arm/A6Input.c w/iokit/Kernel/arm/A6Input.c
 new file mode 100644
-index 0000000..5e72d26
+index 0000000..74d37a4
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Input.c
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,192 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Original polled QUPv2/S6SY761 + TLMM/PM8953 PON driver. Register/protocol
 + * definitions verified against upstream hardware drivers; no firmware writes,
@@ -3936,7 +3936,8 @@ index 0000000..5e72d26
 +    wr(s,A6_INPUT_QUP,0x1c,0x7c);wr(s,A6_INPUT_QUP,0x404,0x38000fc);
 +    wr(s,A6_INPUT_QUP,0x20,0);
 +    wr(s,A6_INPUT_QUP,0x28,0x300);wr(s,A6_INPUT_QUP,0x408,1);
-+    return 0;
++    /* Mini-core selection is asynchronous even after RESET is valid. */
++    return wait_bits(s,A6_INPUT_QUP,4,0x14,0x14,1000);
 +}
 +/* One short FIFO phase. phase 0 leaves the bus owned for a repeated START. */
 +static int phase(struct a6_input *s,const uint8_t *tags,unsigned n,uint8_t *out,unsigned bytes,int first) {
@@ -3965,8 +3966,12 @@ index 0000000..5e72d26
 +            uint32_t word=rd(s,A6_INPUT_QUP,0x218);
 +            for (unsigned j=0;j<4 && received<bytes+2;++j) raw[received++]=(uint8_t)(word>>(j*8));
 +        }
-+        if ((op&(1u<<10)) && (!bytes || received==bytes+2)) break;
++        /* In FIFO mode OUTPUT_SERVICE can precede MAX_OUTPUT_DONE. Waiting
++         * only for DONE after acknowledging SERVICE can hang short writes.
++         * A read is complete once its entire tagged response is drained. */
++        int complete=bytes?received==bytes+2:(op&((1u<<8)|(1u<<10)))!=0;
 +        if (op&0x300) wr(s,A6_INPUT_QUP,0x18,op&0x300);
++        if (complete) break;
 +        if (s->bus.us(s->bus.context)-start>=20000) {
 +            s->error_register=0x02000018;s->error_value=op;return -1;
 +        }
@@ -3992,6 +3997,10 @@ index 0000000..5e72d26
 +        if (state(s,3)) error=-1;
 +        else error=phase(s,read_tags,4,out,bytes,0);
 +    }
++    /* Receiving the final byte is earlier than STOP reaching the bus. Do
++     * not reset the mini-core while the sensor still owns/finishes a transfer.
++     * Otherwise a later command can stall with OPERATIONAL.OUT_FULL (0x40). */
++    if (!error) error=wait_bits(s,A6_INPUT_QUP,0x404,1u<<8,0,20000);
 +    /* Reset on success and failure: never leave the I2C bus claimed. */
 +    uint32_t failed_reg=s->error_register,failed_value=s->error_value;
 +    if (state(s,0)) error=-1;
