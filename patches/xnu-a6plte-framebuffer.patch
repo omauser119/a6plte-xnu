@@ -3443,10 +3443,10 @@ index 0000000..95fa433
 +#endif
 diff --git c/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
 new file mode 100644
-index 0000000..e8a3c39
+index 0000000..c9ef47c
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,97 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if A6PLTE
 +
@@ -3459,7 +3459,7 @@ index 0000000..e8a3c39
 +
 +static_assert(MAX_CPUS == 8, "A6PLTE has eight Cortex-A53 CPUs");
 +extern void a6_start_platform_services(IOService *provider);
-+extern "C" void a6_start_other_cpus(void);
++
 +
 +/*
 + * The low-level PE code already owns the framebuffer, GICv2 and boot CPU.
@@ -3499,8 +3499,9 @@ index 0000000..e8a3c39
 +		return false;
 +	}
 +
-+	/* Register the real topology, then start APs through the board PSCI/GIC path. */
-+	a6_start_other_cpus();
++	/* Discovery runs with IRQs masked, before EARLY_BOOT installs kernel PRNG.
++	 * Publish the possible count now; register/start APs after spllo(). */
++	ml_set_max_cpus(ml_get_topology_info()->num_cpus);
 +	/* Keep PM's separate sleep/wake panic watchdog disabled as well. */
 +	gIOKitDebug |= kIOSleepWakeWdogOff;
 +	a6_start_platform_services(this);
@@ -8067,10 +8068,10 @@ index 0000000..473651e
 +#endif
 diff --git c/osfmk/arm64/a6plte_smp.c w/osfmk/arm64/a6plte_smp.c
 new file mode 100644
-index 0000000..c4ac217
+index 0000000..4d81e08
 --- /dev/null
 +++ w/osfmk/arm64/a6plte_smp.c
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,74 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if A6PLTE
 +#include <kern/processor.h>
@@ -8119,6 +8120,7 @@ index 0000000..c4ac217
 +    int n=cpu_index(target);if (n>=0) a6_xnu_send_ipi((unsigned)n);
 +}
 +void a6_start_other_cpus(void) {
++    if (!ml_get_interrupts_enabled()) panic("A6PLTE: SMP start requires live interrupts");
 +    const ml_topology_info_t *topology=ml_get_topology_info();
 +    processor_t processors[8]={0};unsigned count=topology->num_cpus;
 +    if (count>8) panic("A6PLTE: invalid CPU topology");
@@ -8988,7 +8990,7 @@ index 8e29586..1a7aeae 100644
  		running_timers_activate(processor);
  		processor->first_timeslice = TRUE;
 diff --git c/osfmk/kern/startup.c w/osfmk/kern/startup.c
-index bec97fb..acaf04a 100644
+index bec97fb..55aa6c6 100644
 --- c/osfmk/kern/startup.c
 +++ w/osfmk/kern/startup.c
 @@ -396,11 +396,17 @@ void
@@ -9010,6 +9012,21 @@ index bec97fb..acaf04a 100644
  		    startup_phase >= STARTUP_SUB_KPRINTF) {
  			kprintf("%s[%d, rank %d]: %p(%p)\n", __func__,
  			    cur->subsystem, cur->rank, cur->func, cur->arg);
+@@ -702,6 +708,14 @@ kernel_bootstrap_thread(void)
+ 	ml_spin_debug_clear_self();
+ #endif
+ 	(void) spllo();         /* Allow interruptions */
++#if A6PLTE
++	/* random_cpu_init() and processor_start() need the installed PRNG and
++	 * working interrupts. Early IOKit discovery is too soon for either. */
++	extern void a6_start_other_cpus(void);
++	kernel_bootstrap_log("a6_smp_start");
++	a6_start_other_cpus();
++#endif
++
+ 
+ 	/*
+ 	 * This will start displaying progress to the user, start as early as possible
 diff --git c/osfmk/kern/startup.h w/osfmk/kern/startup.h
 index 4a1a582..2a0eec7 100644
 --- c/osfmk/kern/startup.h
