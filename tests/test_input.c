@@ -79,7 +79,7 @@ int main(void) {
     h.regs[A6_INPUT_TLMM][(85*0x1000+4)/4]=1;
     struct a6_input s;struct a6_input_bus bus={&h,read_reg,write_reg,time_us,delay};
     assert(!a6_input_init(&s,&bus) && s.touch_ready && s.pon_ready && s.pon_channel==3);
-    assert(s.max_x==1080 && s.max_y==2220);
+    assert(s.max_x==4095 && s.max_y==4095);
     contact(h.events[0],1,1,900,1500,1);contact(h.events[1],10,1,300,1000,0);h.event_count=2;
     assert(a6_input_poll(&s)==1 && s.changed==0x201 && s.fingers[0].active && s.fingers[9].active);
     uint8_t data[A6_HID_PACKET_MAX+16];memset(data,0xa5,sizeof(data));
@@ -88,7 +88,7 @@ int main(void) {
     struct a6_hid_header header;memcpy(&header,data,28);assert(header.timestamp==0x1122334455667788 && header.sender==0x8877665544332211 && header.count==3 && !header.attributes);
     struct a6_hid_digitizer d;memcpy(&d,data+28+104,104);
     assert(d.base.size==104 && d.base.type==11 && d.base.depth==1 && d.identity==1 && d.transducer==2);
-    assert(d.x==900*65536/1080 && d.y==1500*65536/2220 && (d.base.options&(1u<<17)));
+    assert(d.x==900*65536/4095 && d.y==1500*65536/4095 && (d.base.options&(1u<<17)));
     for(unsigned i=340;i<sizeof(data);++i)assert(data[i]==0xa5);
     s.changed=0;contact(h.events[2],1,3,900,1500,0);h.event_count=3;
     assert(a6_input_poll(&s)==1 && !s.fingers[0].active && s.fingers[9].active);

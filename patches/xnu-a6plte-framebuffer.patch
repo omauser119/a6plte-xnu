@@ -3203,10 +3203,10 @@ index 0000000..2bd96f3
 +#endif
 diff --git c/iokit/Kernel/arm/A6Input.c w/iokit/Kernel/arm/A6Input.c
 new file mode 100644
-index 0000000..769d17d
+index 0000000..acff47e
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Input.c
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,165 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Original polled QUPv2/S6SY761 + TLMM/PM8953 PON driver. Register/protocol
 + * definitions verified against upstream hardware drivers; no firmware writes,
@@ -3331,8 +3331,10 @@ index 0000000..769d17d
 +    uint8_t id[3],boot=0,integrity=0,panel[11],enable[2]={1,0};
 +    if (command(s,0x52,0,0,id,3) || command(s,0x55,0,0,&boot,1) || boot!=0x20 ||
 +        command(s,0x21,0,0,&integrity,1) || integrity!=0x80 || command(s,0x23,0,0,panel,11)) return -1;
-+    s->max_x=(unsigned)panel[0]<<8|panel[1];s->max_y=(unsigned)panel[2]<<8|panel[3];
-+    if (!s->max_x || !s->max_y || s->max_x>4095 || s->max_y>4095) return -1;
++    if (!((unsigned)panel[0]<<8|panel[1]) || !((unsigned)panel[2]<<8|panel[3])) return -1;
++    /* Board DT overrides panel defaults: touchscreen-size-x/y = 4096.
++     * These are sensor units, independent of the 1080x2220 display pixels. */
++    s->max_x=4095;s->max_y=4095;
 +    if (command(s,0x30,enable,2,0,0) || command(s,0x62,0,0,0,0) || command(s,0x10,0,0,0,0)) return -1;
 +    s->touch_ready=1;return 0;
 +}
