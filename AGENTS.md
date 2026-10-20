@@ -250,6 +250,10 @@ Kernel build/verified-665a2d5/kernel/kernel.a6plte, SHA256
 3ce28c0d29741ec701af6186d79f377f7c1db63266a58fc2ef37691da96174a2.
 Actual native strategy disassembly verified: 64-KiB rejection removed, checked
 a6_slice_io still called. Full image checks passed; receipts in verified path.
-Watcher session 45300 completed successfully. This image is NOT booted yet:
-fastboot still empty, physical-reset question already pending. The hotfix was
-never loaded and is superseded. No new pasta permission needed to boot 665a2d5.
+Watcher session 45300 completed successfully. User returned the phone; the full
+native 665a2d5 image above was SHA256/CRC/profile checked again, loader hfs-map-v2
+verified, and fastboot boot accepted it in 0.475 s (send 0.379 s, boot 0.078 s).
+Private receipt artifacts/boot-665a2d5-cpu0.private.log. Screen result pending:
+ask last lines, `dyld blob failure` and fcntl stage after last signature if it
+fails again. The binary hotfix was never loaded and is superseded. SMP off,
+no flash/UART/USB-network startup. No new pasta permission required.
