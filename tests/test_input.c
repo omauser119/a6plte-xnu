@@ -7,7 +7,8 @@ struct hardware {
     uint32_t *regs[5];uint64_t now;
     uint8_t tx[16],rx[16],cmd,events[32][8],pon;
     unsigned tx_count,rx_count,rx_at,event_count,event_at;
-    int reset_timeout,nack;
+    int reset_timeout,nack,cleanup_timeout,bad_boot;
+    uint32_t core_error;
 };
 static const unsigned sizes[5]={0x100000,0x50000,0x1000,0x1000,0x800000};
 static uint32_t read_reg(void *ctx,unsigned region,unsigned offset) {
@@ -16,7 +17,8 @@ static uint32_t read_reg(void *ctx,unsigned region,unsigned offset) {
     if(region==A6_INPUT_QUP && offset==0x218) {
         uint32_t value=0;for(unsigned j=0;j<4 && h->rx_at<h->rx_count;++j)value|=(uint32_t)h->rx[h->rx_at++]<<(8*j);return value;
     }
-    if(region==A6_INPUT_QUP && offset==0x404)return h->nack?8:0;
+    if(region==A6_INPUT_QUP && offset==0x404)return h->nack?8:h->regs[region][offset/4];
+    if(region==A6_INPUT_QUP && offset==0x1c)return h->core_error?h->core_error:h->regs[region][offset/4];
     if(region==A6_INPUT_TLMM && offset==59*0x1000+4)return h->event_at<h->event_count?0:1;
     return h->regs[region][offset/4];
 }
@@ -35,7 +37,7 @@ static void execute(struct hardware *h) {
         memset(h->rx,0,sizeof(h->rx));h->rx[0]=0x85;h->rx[1]=(uint8_t)bytes;h->rx_count=bytes+2;h->rx_at=0;
         switch(h->cmd) {
         case 0x52:assert(bytes==3);h->rx[2]=0x76;h->rx[3]=1;h->rx[4]=1;break;
-        case 0x55:assert(bytes==1);h->rx[2]=0x20;break;
+        case 0x55:assert(bytes==1);h->rx[2]=h->bad_boot?0x10:0x20;break;
         case 0x21:assert(bytes==1);h->rx[2]=0x80;break;
         case 0x23:assert(bytes==11);h->rx[2]=4;h->rx[3]=0x38;h->rx[4]=8;h->rx[5]=0xac;break;
         case 0x60:
@@ -59,11 +61,13 @@ static void write_reg(void *ctx,unsigned region,unsigned offset,uint32_t value) 
         assert(offset==0x45004 || offset==0x3004 || offset==0x3000 || offset==0x3010);
         if(offset==0x3000)value&=~1u;
     }
-    if(region==A6_INPUT_QUP && offset==0x1c)value=0; /* W1C error status */
+    if(region==A6_INPUT_QUP && (offset==0x1c || offset==0x404)) {
+        h->regs[region][offset/4]&=~value;return; /* W1C error status */
+    }
     h->regs[region][offset/4]=value;
     if(region==A6_INPUT_QUP) {
         if(offset==0xc) { h->tx_count=h->rx_count=h->rx_at=0;h->regs[region][1]=h->reset_timeout?0:4; }
-        if(offset==4) {h->regs[region][1]=value|4;if(value==1)execute(h);}
+        if(offset==4) {h->regs[region][1]=h->cleanup_timeout && value==0?0:value|4;if(value==1)execute(h);}
         if(offset==0x110)for(unsigned j=0;j<4;++j) {assert(h->tx_count<16);h->tx[h->tx_count++]=(uint8_t)(value>>(8*j));}
     }
 }
@@ -78,6 +82,8 @@ int main(void) {
     h.regs[A6_INPUT_SPMI][0]=0x20010000;h.regs[A6_INPUT_SPMI][(0x800+3*4)/4]=8u<<8;
     h.regs[A6_INPUT_TLMM][(85*0x1000+4)/4]=1;
     struct a6_input s;struct a6_input_bus bus={&h,read_reg,write_reg,time_us,delay};
+    /* A NACK left by an earlier transaction must be acknowledged before probe. */
+    h.regs[A6_INPUT_QUP][0x404/4]=8;h.regs[A6_INPUT_QUP][0x1c/4]=4;
     assert(!a6_input_init(&s,&bus) && s.touch_ready && s.pon_ready && s.pon_channel==3);
     assert(s.max_x==4095 && s.max_y==4095);
     contact(h.events[0],1,1,900,1500,1);contact(h.events[1],10,1,300,1000,0);h.event_count=2;
@@ -108,6 +114,16 @@ int main(void) {
     assert(a6_input_poll(&s)==1 && !s.fingers[9].active && s.changed==(1u<<9));h.nack=0;
     /* Invalid wire contact IDs and status events never index outside ten slots. */
     for(unsigned byte=0;byte<256;++byte) {uint8_t e[8]={(uint8_t)byte};a6_input_decode(&s,e);}
+    uint32_t reg,value,cmd;
+    h.core_error=4;h.cleanup_timeout=1;
+    assert(a6_input_init(&s,&bus)==-1 && !s.touch_ready);
+    a6_input_probe_status(&reg,&value,&cmd);
+    assert(reg==0x0200001c && value==4 && cmd==0x52); /* Cleanup must not hide the FIFO error. */
+    h.core_error=0;h.cleanup_timeout=0;h.bad_boot=1;
+    assert(a6_input_init(&s,&bus)==-1 && !s.touch_ready);
+    a6_input_probe_status(&reg,&value,&cmd);
+    assert(reg==0x05000055 && value==0x10 && cmd==0x55);
+    h.bad_boot=0;
     h.reset_timeout=1;h.event_count=h.event_at=0;uint64_t before=h.now;
     assert(a6_input_init(&s,&bus)==-1 && !s.touch_ready && h.now-before<160000);
     for(unsigned i=0;i<5;++i)free(h.regs[i]);

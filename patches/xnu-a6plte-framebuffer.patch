@@ -193,10 +193,10 @@ index 0000000..f4913d5
 +#endif
 diff --git c/bsd/dev/a6plte/dyld_diag.c w/bsd/dev/a6plte/dyld_diag.c
 new file mode 100644
-index 0000000..70ee0c3
+index 0000000..4c787b2
 --- /dev/null
 +++ w/bsd/dev/a6plte/dyld_diag.c
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,125 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Read-only diagnostics for user-provided split dyld caches. No file changes. */
 +#if A6PLTE
@@ -208,6 +208,42 @@ index 0000000..70ee0c3
 +#include <sys/kauth.h>
 +#include <sys/proc.h>
 +#include <kern/kalloc.h>
++#include "dyld_diag.h"
++static unsigned present,missing_files,bad_files,signatures;
++static char first_issue[384],last_signature[192],last_mmap[192],last_map[128];
++void a6_dyld_note_signature(const char *name,int error,int64_t coverage,uint64_t offset) {
++    snprintf(last_signature,sizeof(last_signature),"%s errno %d coverage %lld / %llu",
++        name,error,(long long)coverage,(unsigned long long)offset);
++    if (!error) ++signatures;
++    if (!first_issue[0] && (error || coverage<0 || (uint64_t)coverage<offset))
++        snprintf(first_issue,sizeof(first_issue),"signature: %s",last_signature);
++    printf("A6PLTE dyld: signature %s\n",last_signature);
++}
++void a6_dyld_note_mmap(const char *name,int error,uint64_t offset,uint64_t length) {
++    snprintf(last_mmap,sizeof(last_mmap),"%s errno %d offset %llu bytes %llu",name,error,
++        (unsigned long long)offset,(unsigned long long)length);
++    if (error && !first_issue[0]) snprintf(first_issue,sizeof(first_issue),"mmap: %s",last_mmap);
++    printf("A6PLTE dyld: mmap %s\n",last_mmap);
++}
++void a6_dyld_note_map(unsigned files,unsigned mappings,int error) {
++    snprintf(last_map,sizeof(last_map),"%u files, %u mappings, errno %d",files,mappings,error);
++    if (error && !first_issue[0]) snprintf(first_issue,sizeof(first_issue),"map2: %s",last_map);
++    printf("A6PLTE dyld: shared region %s\n",last_map);
++}
++void a6_dyld_report(void) {
++    extern void a6_input_probe_status(uint32_t *,uint32_t *,uint32_t *);
++    uint32_t reg,value,command;a6_input_probe_status(&reg,&value,&command);
++    printf("\nA6PLTE BOOT DIAGNOSTICS (CPU0)\n");
++    if (reg) printf("S6SY761: command %x reg %08x value %08x\n",command,reg,value);
++    printf("dyld: %u caches, %u missing parts, %u invalid, %u signed\n",
++        present,missing_files,bad_files,signatures);
++    if (!present) printf("dyld: none of the known arm64 cache paths opened\n");
++    if (first_issue[0]) printf("dyld first failure: %s\n",first_issue);
++    if (last_signature[0]) printf("dyld last signature: %s\n",last_signature);
++    if (last_mmap[0]) printf("dyld last mmap: %s\n",last_mmap);
++    if (last_map[0]) printf("dyld last map2: %s\n",last_map);
++    else printf("dyld: map2 syscall not reached\n");
++}
 +static uint32_t le32(const unsigned char *p) {
 +    return p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
 +}
@@ -221,10 +257,12 @@ index 0000000..70ee0c3
 +static void cache_check(const char *path,unsigned char *header) {
 +    vnode_t vp=NULL;int error=vnode_lookup(path,0,&vp,vfs_context_current());
 +    if (error) return;
++    ++present;
 +    off_t size=0;error=vnode_size(vp,&size,vfs_context_current());
 +    if (!error && size>=0) error=read_exact(vp,0,header,512,(uint64_t)size);
 +    else if (!error) error=EINVAL;
 +    if (error || memcmp(header,"dyld_",5)) {
++        ++bad_files;if (!first_issue[0]) snprintf(first_issue,sizeof(first_issue),"cache header %s errno %d",path,error);
 +        printf("A6PLTE dyld: %s invalid header/read error %d\n",path,error);vnode_put(vp);return;
 +    }
 +    uint32_t mapping=le32(header+16),count=0,array=0;
@@ -234,9 +272,11 @@ index 0000000..70ee0c3
 +    printf("A6PLTE dyld: %s size %llu, platform %u, %u subcaches\n",path,
 +        (unsigned long long)size,le32(header+0xd8),count);
 +    uint64_t signature=le64(header+40),signature_size=le64(header+48);
-+    if (signature>(uint64_t)size || signature_size>(uint64_t)size-signature)
++    if (signature>(uint64_t)size || signature_size>(uint64_t)size-signature) {
++        ++bad_files;if (!first_issue[0]) snprintf(first_issue,sizeof(first_issue),"signature outside %s",path);
 +        printf("A6PLTE dyld: cache signature outside file\n");
-+    if (count>64) { printf("A6PLTE dyld: excessive subcache count\n");vnode_put(vp);return; }
++    }
++    if (count>64) { ++bad_files;printf("A6PLTE dyld: excessive subcache count\n");vnode_put(vp);return; }
 +    bool suffixes=mapping>0x1c8;unsigned stride=suffixes?56:24,missing=0,invalid=0;
 +    for (unsigned i=0;i<count;++i) {
 +        unsigned char entry[56],child_header[104];char suffix[33],child_path[384];
@@ -252,16 +292,21 @@ index 0000000..70ee0c3
 +        } else snprintf(suffix,sizeof(suffix),".%u",i+1);
 +        if (snprintf(child_path,sizeof(child_path),"%s%s",path,suffix)>=(int)sizeof(child_path)) { ++invalid;continue; }
 +        vnode_t child=NULL;error=vnode_lookup(child_path,0,&child,vfs_context_current());
-+        if (error) { printf("A6PLTE dyld: MISSING %s errno %d\n",child_path,error);++missing;continue; }
++        if (error) {
++            if (!first_issue[0]) snprintf(first_issue,sizeof(first_issue),"open %s errno %d",child_path,error);
++            printf("A6PLTE dyld: MISSING %s errno %d\n",child_path,error);++missing;continue;
++        }
 +        off_t child_size=0;error=vnode_size(child,&child_size,vfs_context_current());
 +        if (!error && child_size>=0) error=read_exact(child,0,child_header,sizeof(child_header),(uint64_t)child_size);
 +        else if (!error) error=EINVAL;
 +        if (error || memcmp(child_header,"dyld_",5) || memcmp(child_header+88,entry,16)) {
++            if (!first_issue[0]) snprintf(first_issue,sizeof(first_issue),"subcache header/UUID %s errno %d",child_path,error);
 +            printf("A6PLTE dyld: BAD HEADER/UUID %s errno %d\n",child_path,error);++invalid;
 +        }
 +        vnode_put(child);
 +    }
 +    printf("A6PLTE dyld: split files checked: %u missing, %u invalid\n",missing,invalid);
++    missing_files+=missing;bad_files+=invalid;
 +    vnode_put(vp);
 +}
 +void a6_dyld_preflight(void) {
@@ -276,6 +321,22 @@ index 0000000..70ee0c3
 +    for (unsigned i=0;i<sizeof(paths)/sizeof(paths[0]);++i) cache_check(paths[i],header);
 +    kfree_data(header,512);
 +}
++#endif
+diff --git c/bsd/dev/a6plte/dyld_diag.h w/bsd/dev/a6plte/dyld_diag.h
+new file mode 100644
+index 0000000..e7caed1
+--- /dev/null
++++ w/bsd/dev/a6plte/dyld_diag.h
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef A6PLTE_DYLD_DIAG_H
++#define A6PLTE_DYLD_DIAG_H
++#include <stdint.h>
++void a6_dyld_preflight(void);
++void a6_dyld_note_signature(const char *,int,int64_t,uint64_t);
++void a6_dyld_note_mmap(const char *,int,uint64_t,uint64_t);
++void a6_dyld_note_map(unsigned,unsigned,int);
++void a6_dyld_report(void);
 +#endif
 diff --git c/bsd/dev/a6plte/gpt.c w/bsd/dev/a6plte/gpt.c
 new file mode 100644
@@ -1513,21 +1574,65 @@ index 95192dd..ff8c5e3 100644
  
  	/*
 diff --git c/bsd/kern/kern_descrip.c w/bsd/kern/kern_descrip.c
-index 13b08b5..4c33f1b 100644
+index 13b08b5..23f24bb 100644
 --- c/bsd/kern/kern_descrip.c
 +++ w/bsd/kern/kern_descrip.c
-@@ -3999,6 +3999,11 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
+@@ -2733,6 +2733,11 @@ outdrop:
+ int
+ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
+ {
++#if A6PLTE
++	char a6_cache_name[80] = {0};
++	uint64_t a6_cache_signature_offset = 0;
++	int64_t a6_cache_coverage = -1;
++#endif
+ 	int fd = uap->fd;
+ 	int cmd = uap->cmd;
+ 	struct filedesc *fdp = &p->p_fd;
+@@ -3867,6 +3872,10 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
+ 		}
+ 
+ 		if (IS_64BIT_PROCESS(p)) {
++#if A6PLTE
++			if (cmd==F_ADDFILESIGS_RETURN && proc_pid(p)==1 && vp->v_name && !strncmp(vp->v_name,"dyld_shared_cache",17))
++				strlcpy(a6_cache_name,vp->v_name,sizeof(a6_cache_name));
++#endif
+ 			error = copyin(argp, &fs, sizeof_fs);
+ 		} else {
+ 			if (cmd == F_ADDFILESIGS_INFO) {
+@@ -3891,6 +3900,9 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
+ 		/*
+ 		 * First check if we have something loaded a this offset
+ 		 */
++#if A6PLTE
++		a6_cache_signature_offset = fs.fs_blob_start;
++#endif
+ 		blob = ubc_cs_blob_get(vp, CPU_TYPE_ANY, CPU_SUBTYPE_ANY, fs.fs_file_start);
+ 		if (blob != NULL) {
+ 			/* If this is for dyld_sim revalidate the blob */
+@@ -3999,6 +4011,9 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
  			if (blob) {
  				end_offset = blob->csb_end_offset;
  			}
 +#if A6PLTE
-+			if (proc_pid(p)==1 && vp->v_name && !strncmp(vp->v_name,"dyld_shared_cache",17))
-+				printf("A6PLTE dyld: signed %s coverage %lld, signature at %llu\n",vp->v_name,
-+				    end_offset,(unsigned long long)fs.fs_blob_start);
++			a6_cache_coverage = end_offset;
 +#endif
  			error = copyout(&end_offset, argp, sizeof(end_offset));
  
  			if (error) {
+@@ -5223,6 +5238,12 @@ dropboth:
+ 	}
+ 
+ outdrop:
++#if A6PLTE
++	if (a6_cache_name[0]) {
++		extern void a6_dyld_note_signature(const char *,int,int64_t,uint64_t);
++		a6_dyld_note_signature(a6_cache_name,error,a6_cache_coverage,a6_cache_signature_offset);
++	}
++#endif
+ 	return sys_fcntl_outdrop(p, fd, fp, vp, error);
+ 
+ out:
 diff --git c/bsd/kern/kern_exec.c w/bsd/kern/kern_exec.c
 index f41b75b..0f8ccb7 100644
 --- c/bsd/kern/kern_exec.c
@@ -1553,6 +1658,26 @@ index f41b75b..0f8ccb7 100644
  	uint32_t i;
  	int error;
  	vm_map_t map = current_map();
+diff --git c/bsd/kern/kern_exit.c w/bsd/kern/kern_exit.c
+index 1161432..87cc30e 100644
+--- c/bsd/kern/kern_exit.c
++++ w/bsd/kern/kern_exit.c
+@@ -1821,6 +1821,15 @@ proc_handle_critical_exit(proc_t p, int rv)
+ 
+ 	sync(p, (void *)NULL, (int *)NULL);
+ 
++#if A6PLTE
++	/* Repeat saved, read-only boot results where they remain visible on the
++	 * framebuffer. No file I/O or live MMIO in this reporting function. */
++	if (p == initproc) {
++		extern void a6_dyld_report(void);
++		a6_dyld_report();
++	}
++#endif
++
+ 	if (p->p_exit_reason == OS_REASON_NULL) {
+ 		panic_with_options(0, NULL, DEBUGGER_OPTION_INITPROC_PANIC, "%s -- no exit reason available -- (signal %d, exit status %d %s)",
+ 		    prefix_str, WTERMSIG(rv), WEXITSTATUS(rv), ((proc_getcsflags(p) & CS_KILLED) ? "CS_KILLED" : ""));
 diff --git c/bsd/kern/kern_ktrace.c w/bsd/kern/kern_ktrace.c
 index 9f521f6..c94f527 100644
 --- c/bsd/kern/kern_ktrace.c
@@ -1607,6 +1732,44 @@ index 9f521f6..c94f527 100644
  				}
  				if (ktrace_active_mask & KTRACE_KDEBUG) {
  					kdebug_reset();
+diff --git c/bsd/kern/kern_mman.c w/bsd/kern/kern_mman.c
+index 56f3d58..b330a1f 100644
+--- c/bsd/kern/kern_mman.c
++++ w/bsd/kern/kern_mman.c
+@@ -181,6 +181,9 @@ vnode_t fbdp_vp = NULL;
+ int
+ mmap(proc_t p, struct mmap_args *uap, user_addr_t *retval)
+ {
++#if A6PLTE
++	char a6_cache_name[80] = {0};
++#endif
+ 	/*
+ 	 *	Map in special device (must be SHARED) or file
+ 	 */
+@@ -528,6 +531,10 @@ mmap(proc_t p, struct mmap_args *uap, user_addr_t *retval)
+ 		}
+ 
+ 		AUDIT_ARG(vnpath, vp, ARG_VNODE1);
++#if A6PLTE
++		if (proc_pid(p)==1 && vp->v_name && !strncmp(vp->v_name,"dyld_shared_cache",17))
++			strlcpy(a6_cache_name,vp->v_name,sizeof(a6_cache_name));
++#endif
+ 
+ 		/*
+ 		 * POSIX: mmap needs to update access time for mapped files
+@@ -934,6 +941,12 @@ bad:
+ 	KERNEL_DEBUG_CONSTANT((BSDDBG_CODE(DBG_BSD_SC_EXTENDED_INFO2, SYS_mmap) | DBG_FUNC_NONE), (uint32_t)(*retval >> 32), (uint32_t)(user_size >> 32),
+ 	    (uint32_t)(file_pos >> 32), (uint32_t)file_pos, 0);
+ #endif /* XNU_TARGET_OS_OSX */
++#if A6PLTE
++	if (a6_cache_name[0]) {
++		extern void a6_dyld_note_mmap(const char *,int,uint64_t,uint64_t);
++		a6_dyld_note_mmap(a6_cache_name,error,(uint64_t)uap->pos,(uint64_t)uap->len);
++	}
++#endif
+ 	return error;
+ }
+ 
 diff --git c/bsd/kern/kern_sig.c w/bsd/kern/kern_sig.c
 index ca53f9b..51f7611 100644
 --- c/bsd/kern/kern_sig.c
@@ -2411,16 +2574,18 @@ index 5b51e9c..3a94ed4 100644
  	context.vc_thread = current_thread();
  	context.vc_ucred = cred;
 diff --git c/bsd/vm/vm_unix.c w/bsd/vm/vm_unix.c
-index 336c84d..f2287cb 100644
+index 336c84d..375f359 100644
 --- c/bsd/vm/vm_unix.c
 +++ w/bsd/vm/vm_unix.c
-@@ -2994,6 +2994,10 @@ shared_region_map_and_slide_2_np(
+@@ -2994,6 +2994,12 @@ shared_region_map_and_slide_2_np(
  done:
  	kfree_data(shared_files, files_count * sizeof(shared_files[0]));
  	kfree_data(mappings, mappings_count * sizeof(mappings[0]));
 +#if A6PLTE
-+	if (proc_pid(p)==1) printf("A6PLTE dyld: shared region map %u files, %u mappings -> errno %d\n",
-+	    files_count,mappings_count,kr);
++	if (proc_pid(p)==1) {
++		extern void a6_dyld_note_map(unsigned,unsigned,int);
++		a6_dyld_note_map(files_count,mappings_count,kr);
++	}
 +#endif
  	return kr;
  }
@@ -2806,7 +2971,7 @@ index 0000000..9a8bcfe
 +}
 diff --git c/iokit/Kernel/arm/A6HID.cpp w/iokit/Kernel/arm/A6HID.cpp
 new file mode 100644
-index 0000000..85a026d
+index 0000000..a4210b9
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6HID.cpp
 @@ -0,0 +1,315 @@
@@ -3070,8 +3235,8 @@ index 0000000..85a026d
 +    }
 +    struct a6_input_bus bus={this,read,write,us,delay};
 +    int result=a6_input_init(&input,&bus);
-+    IOLog("A6PLTE input: S6SY761 %s, raw %ux%u, PON %s; reg %x value %x\n",
-+        result?"probe failed":"ready",input.max_x,input.max_y,input.pon_ready?"mapped":"unavailable",input.error_register,input.error_value);
++    IOLog("A6PLTE input: S6SY761 %s, raw %ux%u, PON %s; command %x reg %x value %x\n",
++        result?"probe failed":"ready",input.max_x,input.max_y,input.pon_ready?"mapped":"unavailable",input.command,input.error_register,input.error_value);
 +    digitizer=new A6Digitizer;buttons=new A6Buttons;
 +    if(!digitizer || !buttons || !digitizer->init() || !buttons->init())return false;
 +    digitizer->touch=true;
@@ -3203,15 +3368,19 @@ index 0000000..2bd96f3
 +#endif
 diff --git c/iokit/Kernel/arm/A6Input.c w/iokit/Kernel/arm/A6Input.c
 new file mode 100644
-index 0000000..acff47e
+index 0000000..5e72d26
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Input.c
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,183 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Original polled QUPv2/S6SY761 + TLMM/PM8953 PON driver. Register/protocol
 + * definitions verified against upstream hardware drivers; no firmware writes,
 + * DMA, PMIC power/reset writes, or UART access. */
 +#include "A6Input.h"
++static uint32_t probe_register,probe_value,probe_command;
++void a6_input_probe_status(uint32_t *reg,uint32_t *value,uint32_t *command) {
++    *reg=probe_register;*value=probe_value;*command=probe_command;
++}
 +static uint32_t rd(struct a6_input *s,unsigned region,unsigned reg) { return s->bus.read(s->bus.context,region,reg); }
 +static void wr(struct a6_input *s,unsigned region,unsigned reg,uint32_t value) { s->bus.write(s->bus.context,region,reg,value); }
 +static int wait_bits(struct a6_input *s,unsigned region,unsigned reg,uint32_t mask,uint32_t wanted,unsigned timeout) {
@@ -3238,7 +3407,8 @@ index 0000000..acff47e
 +    wr(s,A6_INPUT_QUP,0,0x207);
 +    wr(s,A6_INPUT_QUP,8,3u<<14);
 +    wr(s,A6_INPUT_QUP,0x100,0);wr(s,A6_INPUT_QUP,0x200,0);
-+    wr(s,A6_INPUT_QUP,0x1c,0x7c);wr(s,A6_INPUT_QUP,0x20,0);
++    wr(s,A6_INPUT_QUP,0x1c,0x7c);wr(s,A6_INPUT_QUP,0x404,0x38000fc);
++    wr(s,A6_INPUT_QUP,0x20,0);
 +    wr(s,A6_INPUT_QUP,0x28,0x300);wr(s,A6_INPUT_QUP,0x408,1);
 +    return 0;
 +}
@@ -3262,7 +3432,8 @@ index 0000000..acff47e
 +    for (;;) {
 +        uint32_t op=rd(s,A6_INPUT_QUP,0x18),status=rd(s,A6_INPUT_QUP,0x404),error=rd(s,A6_INPUT_QUP,0x1c);
 +        if ((status&0x38000fcu) || (error&0x7c)) {
-+            s->error_register=0x02000404;s->error_value=status;return -1;
++            s->error_register=(status&0x38000fcu)?0x02000404:0x0200001c;
++            s->error_value=(status&0x38000fcu)?status:error;return -1;
 +        }
 +        if (bytes && received<bytes+2 && (op&(1u<<5))) {
 +            uint32_t word=rd(s,A6_INPUT_QUP,0x218);
@@ -3284,6 +3455,8 @@ index 0000000..acff47e
 +}
 +static int command(struct a6_input *s,uint8_t cmd,const uint8_t *data,unsigned n,uint8_t *out,unsigned bytes) {
 +    if (n>3 || bytes>11 || (n && !data) || (bytes && !out)) return -1;
++    s->command=cmd;
++    s->error_register=s->error_value=0;
 +    if (qup_reset(s)) return -1;
 +    uint8_t tags[8]={0x81,0x90,bytes?0x82:0x83,(uint8_t)(n+1),cmd,0,0,0};
 +    for(unsigned i=0;i<n;++i)tags[5+i]=data[i];
@@ -3294,7 +3467,9 @@ index 0000000..acff47e
 +        else error=phase(s,read_tags,4,out,bytes,0);
 +    }
 +    /* Reset on success and failure: never leave the I2C bus claimed. */
++    uint32_t failed_reg=s->error_register,failed_value=s->error_value;
 +    if (state(s,0)) error=-1;
++    if (failed_reg) { s->error_register=failed_reg;s->error_value=failed_value; }
 +    return error;
 +}
 +static int pon(struct a6_input *s,uint8_t *value) {
@@ -3318,25 +3493,33 @@ index 0000000..acff47e
 +    }
 +    /* Turn on only the two clocks and pins belonging to BLSP1 QUP2. */
 +    wr(s,A6_INPUT_GCC,0x45004,rd(s,A6_INPUT_GCC,0x45004)|(1u<<10));
-+    if (wait_bits(s,A6_INPUT_GCC,0x1008,1u<<31,0,1000)) return -1;
++    if (wait_bits(s,A6_INPUT_GCC,0x1008,1u<<31,0,1000)) goto failed;
 +    wr(s,A6_INPUT_GCC,0x3004,1); /* XO, divide by one (RCG2 HID=1) */
 +    wr(s,A6_INPUT_GCC,0x3000,rd(s,A6_INPUT_GCC,0x3000)|1);
-+    if (wait_bits(s,A6_INPUT_GCC,0x3000,1,0,1000)) return -1;
++    if (wait_bits(s,A6_INPUT_GCC,0x3000,1,0,1000)) goto failed;
 +    wr(s,A6_INPUT_GCC,0x3010,rd(s,A6_INPUT_GCC,0x3010)|1);
-+    if (wait_bits(s,A6_INPUT_GCC,0x3010,1u<<31,0,1000)) return -1;
++    if (wait_bits(s,A6_INPUT_GCC,0x3010,1u<<31,0,1000)) goto failed;
 +    pin(s,6,3,0,0);pin(s,7,3,0,0);pin(s,59,0,0,0);
 +    /* Both fixed touch supplies share GPIO139. Enable without power cycling. */
 +    wr(s,A6_INPUT_TLMM,139*0x1000+4,rd(s,A6_INPUT_TLMM,139*0x1000+4)|2);
 +    pin(s,139,0,0,1);bus->delay(bus->context,150000);
 +    uint8_t id[3],boot=0,integrity=0,panel[11],enable[2]={1,0};
-+    if (command(s,0x52,0,0,id,3) || command(s,0x55,0,0,&boot,1) || boot!=0x20 ||
-+        command(s,0x21,0,0,&integrity,1) || integrity!=0x80 || command(s,0x23,0,0,panel,11)) return -1;
-+    if (!((unsigned)panel[0]<<8|panel[1]) || !((unsigned)panel[2]<<8|panel[3])) return -1;
++    if (command(s,0x52,0,0,id,3) || command(s,0x55,0,0,&boot,1)) goto failed;
++    if (boot!=0x20) { s->error_register=0x05000055;s->error_value=boot;goto failed; }
++    if (command(s,0x21,0,0,&integrity,1)) goto failed;
++    if (integrity!=0x80) { s->error_register=0x05000021;s->error_value=integrity;goto failed; }
++    if (command(s,0x23,0,0,panel,11)) goto failed;
++    if (!((unsigned)panel[0]<<8|panel[1]) || !((unsigned)panel[2]<<8|panel[3])) {
++        s->error_register=0x05000023;s->error_value=(uint32_t)panel[0]<<24|(uint32_t)panel[1]<<16|(uint32_t)panel[2]<<8|panel[3];goto failed;
++    }
 +    /* Board DT overrides panel defaults: touchscreen-size-x/y = 4096.
 +     * These are sensor units, independent of the 1080x2220 display pixels. */
 +    s->max_x=4095;s->max_y=4095;
-+    if (command(s,0x30,enable,2,0,0) || command(s,0x62,0,0,0,0) || command(s,0x10,0,0,0,0)) return -1;
-+    s->touch_ready=1;return 0;
++    if (command(s,0x30,enable,2,0,0) || command(s,0x62,0,0,0,0) || command(s,0x10,0,0,0,0)) goto failed;
++    s->touch_ready=1;probe_register=probe_value=probe_command=0;return 0;
++failed:
++    probe_register=s->error_register;probe_value=s->error_value;probe_command=s->command;
++    return -1;
 +}
 +int a6_input_decode(struct a6_input *s,const uint8_t e[8]) {
 +    if (!s || !e || !e[0] || (e[0]&3)) return 0;
@@ -3374,10 +3557,10 @@ index 0000000..acff47e
 +}
 diff --git c/iokit/Kernel/arm/A6Input.h w/iokit/Kernel/arm/A6Input.h
 new file mode 100644
-index 0000000..8ffbe93
+index 0000000..7a4b2dd
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Input.h
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,37 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#ifndef A6_INPUT_H
 +#define A6_INPUT_H
@@ -3401,6 +3584,7 @@ index 0000000..8ffbe93
 +    unsigned max_x,max_y;
 +    unsigned pon_channel;
 +    uint32_t error_register,error_value;
++    uint8_t command;
 +    uint8_t touch_ready,pon_ready,buttons,stable[3],candidate[3],samples[3];
 +    uint16_t changed;
 +};
@@ -3408,6 +3592,8 @@ index 0000000..8ffbe93
 +int a6_input_poll(struct a6_input *); /* 1 touch change; button changes in bits 1..3 */
 +int a6_input_decode(struct a6_input *,const uint8_t event[8]);
 +void a6_input_release(struct a6_input *);
++/* Last completed hardware probe only; no live MMIO access or object pointer. */
++void a6_input_probe_status(uint32_t *reg,uint32_t *value,uint32_t *command);
 +#ifdef __cplusplus
 +}
 +#endif

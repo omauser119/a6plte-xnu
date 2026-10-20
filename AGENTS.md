@@ -176,3 +176,15 @@ private receipt artifacts/boot-f260bf3-cpu0.private.log. User reports it reached
 dyld, with S6SY761 probe failed and dyld cache '(null)' not loaded '(null)'.
 Need exact input reg/value and A6PLTE dyld preflight/signed/map lines; async
 question pending. This confirms first-CPU path to dyld, not working touch/SMP.
+
+Next diagnostics: explicit W1C of QUP I2C error status before transfers, keep
+the original FIFO/bus error across cleanup, report sensor register/boot/integrity
+failures and command. Host ASan/UBSan regression includes stale NACK, ongoing
+FIFO error plus failed cleanup, and sensor stuck in bootloader. dyld_diag now
+retains preflight/split-cache, signature errno/coverage, mmap and map2 results;
+prints a compact summary immediately before PID1 panic, including saved touch
+probe status. No files or signature checks modified. Actual cache refusal cause
+still unknown; do not infer missing libSystem from dyld's fallback message.
+Native-header probes for A6Input.c and dyld_diag.c pass. Existing core BSD units
+need Apple Clang allocator builtins and macOS SDK (local iOS SDK lacks MAP_32BIT);
+validate those and the full link in Actions. SMP remains cpus=1 in all images.
