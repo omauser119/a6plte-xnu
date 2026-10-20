@@ -66,6 +66,16 @@ mapping diagnostics are included. This is not yet a successful launchd boot.
 The preceding checkpoint image `ba06ed0` was accepted by fastboot; actual
 checkpoint creation/reuse and physical touch with `333bb5d` need screen results.
 
+The `333bb5d` hardware run stopped in `__memmove_chk` (`16 < 32`) after HFS
+journal setup. Apple's catalog writer copied the adjacent 16-byte `userInfo`
+and `finderInfo` fields through a pointer to the first field. The HFS patch now
+copies each field separately and zeros the two fork records separately, with
+XNU's strict bounds checks kept enabled. A regression test runs the actual
+catalog create/update/read functions against Apple's on-disk types and XNU's
+guard: the old source reproduces the exact failure, and the corrected source
+preserves all 32 Finder bytes, both forks and neighboring bytes. Hardware
+confirmation of this fix is pending.
+
 All boot profiles currently use `cpus=1`: SMP is temporarily disabled at the
 user's request. The CPU0-only image reaches dyld. The retained SMP code describes
 eight Cortex-A53 CPUs in two clusters, with PSCI startup, per-CPU GICv2/timers,

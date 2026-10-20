@@ -338,3 +338,20 @@ artifacts/boot-333bb5d-cpu0.private.log. This is now the latest PHONE BOOTED
 image, no flash. Screen result pending: async question asks S6SY761 ready/probe
 status, checkpoint reused/saving lines, and final dyld error if it stops.
 Do not infer physical touch or successful launchd from fastboot's OKAY.
+
+Latest 333bb5d hardware result: journal start=end=0x200 reset message, then
+`memmove_chk object size check failed ... (16 < 32)`, subrs.c:725, caller
+`0xfffffff007297cd4`. Exact native disassembly places that caller after the
+panic call in ___memmove_chk, not at the original HFS copy. Both buildrecord
+and catrec_update in Apple's hfs_catalog.c pass a 32-byte copy into 16-byte
+userInfo (adjacent finderInfo holds the other half). The actual strict native
+guard reproduces this exact failure with the original catalog source. The fix
+copies userInfo/finderInfo separately on create/update/read, and zeroes dataFork
+and resourceFork individually; no fortify bypass or on-disk format changes.
+tests/test_hfs_finderinfo.py uses the real Apple disk structs, actual catalog
+functions and extracted XNU __memmove_chk/__memset_chk, with ASan/UBSan. Both
+positive and original-source negative controls passed; 32 Finder bytes, six
+inode types, 2-byte alignments, both forks, fixed disk sizes, guards and stale
+inode rejection checked. Aggregate HFS patch updated, full CI/hardware pending.
+This panic must be fixed before on-disk checkpoints can be evaluated; it does
+not establish the prior shared-region/map2 refusal's cause. Keep CPU0 only.

@@ -1,3 +1,86 @@
+diff --git c/core/hfs_catalog.c w/core/hfs_catalog.c
+index 98fcb51..dff4fe5 100644
+--- c/core/hfs_catalog.c
++++ w/core/hfs_catalog.c
+@@ -1602,7 +1602,12 @@ catrec_update(const CatalogKey *ckp, CatalogRecord *crp, struct update_state *st
+ 			dir->textEncoding = descp->cd_encoding;
+ 		}
+ 		dir->folderCount      = attrp->ca_dircount;
+-		bcopy(&attrp->ca_finderinfo[0], &dir->userInfo, 32);
++		/*
++		 * Finder info consists of two distinct 16-byte on-disk fields.
++		 * Keep each copy within its field under XNU's strict fortify checks.
++		 */
++		bcopy(attrp->ca_finderinfo, &dir->userInfo, sizeof(dir->userInfo));
++		bcopy(attrp->ca_finderinfo + sizeof(dir->userInfo), &dir->finderInfo, sizeof(dir->finderInfo));
+ 		/*
+ 		 * Update the BSD Info if it was already initialized on
+ 		 * disk or if the runtime values have been modified.
+@@ -1669,7 +1674,8 @@ catrec_update(const CatalogKey *ckp, CatalogRecord *crp, struct update_state *st
+ 		} else {
+ 			file->textEncoding = descp->cd_encoding;
+ 		}
+-		bcopy(&attrp->ca_finderinfo[0], &file->userInfo, 32);
++		bcopy(attrp->ca_finderinfo, &file->userInfo, sizeof(file->userInfo));
++		bcopy(attrp->ca_finderinfo + sizeof(file->userInfo), &file->finderInfo, sizeof(file->finderInfo));
+ 		/*
+ 		 * Update the BSD Info if it was already initialized on
+ 		 * disk or if the runtime values have been modified.
+@@ -3699,6 +3705,12 @@ buildrecord(struct cat_attr *attrp, cnid_t cnid, u_int32_t encoding,
+ 	u_int32_t createtime = to_hfs_time(attrp->ca_itime);
+ 
+ 	struct HFSPlusBSDInfo * bsdp = NULL;
++	_Static_assert(sizeof(attrp->ca_finderinfo) ==
++	    sizeof(crp->hfsPlusFolder.userInfo) + sizeof(crp->hfsPlusFolder.finderInfo),
++	    "HFS folder Finder info size");
++	_Static_assert(sizeof(attrp->ca_finderinfo) ==
++	    sizeof(crp->hfsPlusFile.userInfo) + sizeof(crp->hfsPlusFile.finderInfo),
++	    "HFS file Finder info size");
+ 
+ 	if (type == S_IFDIR) {
+ 		crp->recordType = kHFSPlusFolderRecord;
+@@ -3712,7 +3724,9 @@ buildrecord(struct cat_attr *attrp, cnid_t cnid, u_int32_t encoding,
+ 		crp->hfsPlusFolder.backupDate = 0;
+ 		crp->hfsPlusFolder.textEncoding = encoding;
+ 		crp->hfsPlusFolder.folderCount = 0;
+-		bcopy(attrp->ca_finderinfo, &crp->hfsPlusFolder.userInfo, 32);
++		bcopy(attrp->ca_finderinfo, &crp->hfsPlusFolder.userInfo, sizeof(crp->hfsPlusFolder.userInfo));
++		bcopy(attrp->ca_finderinfo + sizeof(crp->hfsPlusFolder.userInfo),
++		    &crp->hfsPlusFolder.finderInfo, sizeof(crp->hfsPlusFolder.finderInfo));
+ 		bsdp = &crp->hfsPlusFolder.bsdInfo;
+ 		bsdp->special.linkCount = 1;
+ 		*recordSize = sizeof(HFSPlusCatalogFolder);
+@@ -3728,7 +3742,9 @@ buildrecord(struct cat_attr *attrp, cnid_t cnid, u_int32_t encoding,
+ 		crp->hfsPlusFile.backupDate = 0;
+ 		crp->hfsPlusFile.textEncoding = encoding;
+ 		crp->hfsPlusFile.reserved2 = 0;
+-		bcopy(attrp->ca_finderinfo, &crp->hfsPlusFile.userInfo, 32);
++		bcopy(attrp->ca_finderinfo, &crp->hfsPlusFile.userInfo, sizeof(crp->hfsPlusFile.userInfo));
++		bcopy(attrp->ca_finderinfo + sizeof(crp->hfsPlusFile.userInfo),
++		    &crp->hfsPlusFile.finderInfo, sizeof(crp->hfsPlusFile.finderInfo));
+ 		bsdp = &crp->hfsPlusFile.bsdInfo;
+ 		/* BLK/CHR need to save the device info */
+ 		if (type == S_IFBLK || type == S_IFCHR) {
+@@ -3736,7 +3752,8 @@ buildrecord(struct cat_attr *attrp, cnid_t cnid, u_int32_t encoding,
+ 		} else {
+ 			bsdp->special.linkCount = 1;
+ 		}
+-		bzero(&crp->hfsPlusFile.dataFork, 2*sizeof(HFSPlusForkData));
++		bzero(&crp->hfsPlusFile.dataFork, sizeof(crp->hfsPlusFile.dataFork));
++		bzero(&crp->hfsPlusFile.resourceFork, sizeof(crp->hfsPlusFile.resourceFork));
+ 		*recordSize = sizeof(HFSPlusCatalogFile);
+ 	}
+ 
+@@ -3914,7 +3931,8 @@ getbsdattr(struct hfsmount *hfsmp, const struct HFSPlusCatalogFile *crp, struct
+ 	
+ 	attrp->ca_fileid = crp->fileID;
+ 
+-	bcopy(&crp->userInfo, attrp->ca_finderinfo, 32);
++	bcopy(&crp->userInfo, attrp->ca_finderinfo, sizeof(crp->userInfo));
++	bcopy(&crp->finderInfo, attrp->ca_finderinfo + sizeof(crp->userInfo), sizeof(crp->finderInfo));
+ }
+ 
+ /*
 diff --git c/core/hfs_iokit.cpp w/core/hfs_iokit.cpp
 index 34be23f..d328907 100644
 --- c/core/hfs_iokit.cpp
