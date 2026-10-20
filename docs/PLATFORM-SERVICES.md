@@ -13,7 +13,8 @@ framework compatibility have not been hardware-tested.
 | Service | Implemented behavior | Limit |
 | --- | --- | --- |
 | `IOWatchDogTimer` (`A6PLTEWatchdog`) | Native IOKit diagnostic timer; records requests and expiry count, prints an expiry message | No hardware watchdog, reset register, panic or reboot on expiry |
-| `AppleKeyStore` | Discoverable, explicitly marked stub, administrator connection allowed | Every external selector returns unsupported; no keybag, SEP, hardware keys, encryption or fabricated success |
+| `AppleKeyStore` | Stub state queries 17/35 return bounded DER; selector 7 reports unlocked state, 14 returns system handle, 101 consumes an assertion | No SEP, hardware keys, keybag encryption or cryptographic operations |
+| `AppleSmartBattery` | Explicit IOPMPowerSource stub reporting 100%, installed, not charging | No fuel-gauge measurement; marked `A6Stub` and `A6ActualChargeMeasured=false` |
 | `IOSurfaceRoot` | Zeroed, page-aligned CPU buffers, shared through native IOKit memory mappings | A6 ABI, one surface per connection, 8 MiB per surface and 32 MiB total; no GPU or global IOSurface-ID lookup |
 | `IOMobileFramebuffer` | Actual inherited screen geometry, read-only scanout mapping and bounded CPU rectangle writes | A6 ABI, RGB888/XRGB8888, no mode switching, GPU, page flip or VBL callback |
 
@@ -82,3 +83,32 @@ real watchdog timer callback observes its deadline. PID1 reads it through
 `SYS_sysctlbyname` after each sleep/wakeup and prints the numeric mask. `31`
 means all four startup paths completed and the timer expired without requesting
 reset. It does not certify untested user-client operations or iOS private ABI.
+
+## Original physical input
+
+`A6Input.c`, `A6HIDWire.c` and `A6HID.cpp` implement board input independently of
+Sweet HID. The controller is Samsung S6SY761 at I2C address 0x48 on BLSP1 QUP2
+(0x078b6000), using TLMM pins 6/7, IRQ pin 59 and supply enable pin 139. Polling
+uses short FIFO transfers with bounded waits and no DMA. The board DT overrides
+the sensor range to 0..4095 on each axis; these units are normalized into HID
+coordinates for the physical 1080x2220 display.
+
+Volume-up uses GPIO85. Power and volume-down use read-only PM8953 PON RT_STS
+commands through the SPMI observer channel. Button debounce requires three
+samples. The driver never issues PMIC power/reset commands or firmware updates.
+
+The event services expose the public Apple event-service queue representation:
+ESUC connection type, open/close/copy selectors, native IOSharedDataQueue memory
+and notifications, digitizer collections with ten contacts, and consumer keys
+for volume/power. There are at most eight clients per service. Queue congestion
+coalesces pending state; draining the queue retries the latest state, including
+releases. Replay and live delivery are serialized. The client cannot inject
+input or expose controller registers. Element output and matching-event copy
+remain unsupported. This is a subset of IOHIDFamily; successful iOS/backboardd
+integration has not yet been demonstrated.
+
+ASan/UBSan tests cover QUP repeated START, tagged FIFO reads, sensor decoding,
+contact bounds/releases, read-only PON commands, button debounce, timeouts and
+HID packet bounds. Native compilation/linking passed. Hardware probing and
+actual button/touch events still need confirmation. A failed probe is reported
+as such rather than producing simulated contacts.

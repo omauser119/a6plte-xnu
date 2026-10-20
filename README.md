@@ -52,16 +52,25 @@ package format or a flash operation for this profile.
 
 ## Verification status
 
-All three jobs in [Actions run 39299095063](https://github.com/omauser119/a6plte-xnu/actions/runs/39299095063)
-passed for source `9caba04`. Native Apple Clang compilation and NOUNDEFS linking,
-Linux ASan/UBSan tests and packaging all passed. The downloaded userdata-root
-image also passed the complete kernel/payload/CRC/version/profile verification.
-See [the build receipt](docs/STORAGE.md#root-volume-on-userdata) for hashes and
-local paths. The first hardware boot reached launchd image activation but exited
-with SIGKILL, namespace 9 / code 14 (`EXEC_EXIT_REASON_WRONG_PLATFORM`). This
-DEVELOPMENT kernel uses a macOS configuration, which requires the native
-`unentitled_ios_sim_launch=1` boot argument to admit an iOS PID1 without spawn
-attributes. The userdata bridge now supplies that argument; signature validation
-is unchanged. The repackaged image uses the same verified kernel and has been
-sent through fastboot successfully; its launchd result is still pending.
+All jobs in [Actions run 39414369814](https://github.com/omauser119/a6plte-xnu/actions/runs/39414369814)
+passed for native source `f260bf3`, including Apple Clang, linking with no undefined
+symbols, ASan/UBSan host checks and both image profiles. Download just the kernel
+with `python3 scripts/download-ci-kernel.py 39414369814`, then package it locally.
+The downloader verifies the GitHub archive SHA256 before extraction.
+
+Hardware confirmed native launchd image activation and successful 16-KiB code
+signature verification on the 4-KiB kernel. Dyld then reported that its shared
+cache was not loaded and `libSystem.B.dylib` was unavailable; split-cache and
+mapping diagnostics are included. This is not yet a successful launchd boot.
+
+The new profile exposes eight Cortex-A53 CPUs in two clusters, with PSCI startup,
+per-CPU GICv2/timers, SGI IPIs and a cross-CPU framebuffer lock. The first SMP
+attempt found a pre-MMU string lookup table, fixed with PC-relative code and a
+relocation regression check. The next attempt reached CPU registration and
+reported a missing kernel PRNG. Source `f260bf3` installs native HMAC-SHA256 DRBG
+instances through XNU's kernel PRNG API before registering/starting APs. This
+latest image is built and verified; eight online CPUs still require hardware
+confirmation. See [platform services](docs/PLATFORM-SERVICES.md) for the input
+implementation and remaining compatibility limits.
+
 Historical hardware reports elsewhere describe XNU 12377.

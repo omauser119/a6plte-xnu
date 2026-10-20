@@ -151,3 +151,13 @@ For fast artifact fetch use scripts/download-ci-kernel.py RUN_ID. It downloads
 only the linked kernel in parallel ranges and verifies GitHub archive SHA256;
 package locally and run check-userdata-boot.py. No need to download both boot
 images as well (slow CDN was ~50 KiB/s per connection).
+
+
+f260bf3: all Actions 39414369814 passed. Latest ready image:
+build/verified-f260bf3/images/xnu-8796-userdata-boot.img (17094656 bytes), SHA256
+9f5962a1517096493493b0f3db400fb5d0f09026a05bf00155da39f41d1cbbdd.
+Kernel SHA256 b498e8ce26c7d10379672d00eac0227f55783084a60aedd700650144d1d2be6e.
+Verified native early-stage disassembly has three ADRP strings and no pointer
+lookup, SMP/PRNG markers and full kernel/payload CRC/profile. Not booted yet:
+fastboot devices empty; wait for hardware reset, readiness question pending.
+No renewed pasta approval is needed. UART and USB network remain disabled.
