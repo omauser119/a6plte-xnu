@@ -69,15 +69,15 @@ prepared volume. The ramdisk is not formatted or copied onto userdata by this pr
 
 ## Root volume on userdata
 
-The user has issued **«чеснок»** and selected `/sbin/launchd`. Build the image now;
-do not run `fastboot boot` or reboot the phone until the user issues **«паста»**
-as a command. Mentioning that word while defining this rule is not activation.
-USB stays disabled and UART remains prohibited.
+The user has issued **«чеснок»**, selected `/sbin/launchd` and authorized the
+hardware test with **«паста»** on 2026-10-20. USB stays disabled and UART remains
+prohibited. The test uses `fastboot boot`; permanent flashing was only discussed.
 
 `scripts/package-boot.sh --root=userdata artifacts/kernel.a6plte` produces
 `artifacts/xnu-8796-userdata-boot.img`. It contains the kernel and bridge, no rootfs.
 The bridge donates a checked 256 MiB RAM arena and supplies
-`rd=a6userdata launchdsuffix=release`. The ramdisk image and `a6-init` remain
+`unentitled_ios_sim_launch=1 rd=a6userdata launchdsuffix=release`.
+The ramdisk image and `a6-init` remain
 available separately as `artifacts/xnu-8796-boot.img`.
 
 The native BSD root path uses the dynamically assigned userdata device number;
@@ -93,9 +93,11 @@ board root; executable validation is unchanged.
 
 The user prepares the filesystem, `/sbin/launchd` and its runtime files.
 Preparation does not format userdata, replace those files or write another
-partition. A read-only fetch of the current first 4 KiB found no HFS+/HFSX
-signature at byte 1024; mounting the prepared volume and running launchd are
-still hardware checks. Raw partition contents stay in private artifacts.
+partition. The latest read-only fetch of the first 4 KiB found a valid HFSX
+primary header: 4096-byte blocks and 4194304 blocks, a 16 GiB filesystem within
+the userdata slice. Its alternate header is beyond the 32-bit offset supported
+by lk2nd's fetch parser, so the native 64-bit kernel performs that check before
+mounting. Raw partition contents stay in private artifacts.
 
 The candidate from source `9caba04` is available in the `xnu-8796-boot-image`
 artifact of [Actions run 39299095063](https://github.com/omauser119/a6plte-xnu/actions/runs/39299095063).
@@ -109,5 +111,15 @@ selection, no embedded rootfs and no USB enable argument. The native BootArgs
 ABI is checked against the 8796 header (736 bytes, 608-byte command line).
 The image is saved locally as
 `build/verified-9caba04/images/xnu-8796-userdata-boot.img` and
-`artifacts/xnu-8796-userdata-boot.img`.
-This candidate has not been booted on the phone; the **«паста»** gate still applies.
+`artifacts/xnu-8796-userdata-boot.img` at the time of that receipt.
+
+The first hardware boot reached launchd activation and reported SIGKILL with
+namespace 9 / code 0xe: `EXEC_EXIT_REASON_WRONG_PLATFORM`. This is the macOS
+DEVELOPMENT profile's iOS exec policy. The userdata bridge now supplies XNU's
+existing `unentitled_ios_sim_launch=1` argument without disabling signature or
+page-hash validation. The original native kernel is unchanged. The rebuilt bridge
+and image passed `check-userdata-boot.py`, including CRC and exact kernel payload,
+and fastboot acknowledged the second boot. The launchd result is pending.
+The current `artifacts/xnu-8796-userdata-boot.img` is 16,992,256 bytes, SHA-256
+`01434528a7b6a8ee4f67f87b0c76ce8be4e5fc2d007ea46a2a9aad7407143a41`.
+The immutable `build/verified-9caba04/images/` copy retains the first CI image.

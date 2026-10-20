@@ -25,6 +25,8 @@ magic,version,size,va,entry,span,length,crc,flags,ramdisk=pack.HEADER.unpack_fro
 assert (magic,version,size,flags,ramdisk)==(b'A6XNU01\0',1,64,0,0)
 assert span==length and len(payload)==64+span and zlib.crc32(payload[64:])==crc
 assert b'rd=a6userdata launchdsuffix=release\0' in bridge
+assert b'unentitled_ios_sim_launch=1 ' in bridge
+assert '_unentitled_ios_sim_launch' in symbols
 assert b'Root: userdata HFS+; PID1: /sbin/launchd\n\0' in bridge
 assert b'rd=md0' not in bridge and b'a6_usb=1' not in bridge
-print('PASS: complete CRC, native kernel, no embedded rootfs, userdata HFS+ root, launchd PID1 and USB disabled')
+print('PASS: complete CRC, native kernel, no embedded rootfs, userdata HFS+ root, iOS launch compatibility, launchd PID1 and USB disabled')

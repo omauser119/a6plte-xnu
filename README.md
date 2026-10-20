@@ -7,7 +7,7 @@ The requested image mounts a user-prepared bare HFS+/HFSX volume on GPT
 `userdata` and selects `/sbin/launchd` as PID1. It contains no embedded rootfs.
 USB code is retained but disabled by default. UART is prohibited; console and
 panic output use the inherited framebuffer. Do not format userdata or replace
-the user's files. Hardware boot waits for the user's command **«паста»**.
+the user's files. The user issued **«паста»** and hardware testing has started.
 
 ## Build
 
@@ -57,5 +57,11 @@ passed for source `9caba04`. Native Apple Clang compilation and NOUNDEFS linking
 Linux ASan/UBSan tests and packaging all passed. The downloaded userdata-root
 image also passed the complete kernel/payload/CRC/version/profile verification.
 See [the build receipt](docs/STORAGE.md#root-volume-on-userdata) for hashes and
-local paths. The image is **not yet tested on the phone**; hardware boot still
-waits for **«паста»**. Historical hardware reports elsewhere describe XNU 12377.
+local paths. The first hardware boot reached launchd image activation but exited
+with SIGKILL, namespace 9 / code 14 (`EXEC_EXIT_REASON_WRONG_PLATFORM`). This
+DEVELOPMENT kernel uses a macOS configuration, which requires the native
+`unentitled_ios_sim_launch=1` boot argument to admit an iOS PID1 without spawn
+attributes. The userdata bridge now supplies that argument; signature validation
+is unchanged. The repackaged image uses the same verified kernel and has been
+sent through fastboot successfully; its launchd result is still pending.
+Historical hardware reports elsewhere describe XNU 12377.
