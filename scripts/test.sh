@@ -36,7 +36,7 @@ clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_hf
 "$ROOT/artifacts/test-hfs-volume"
 python3 "$ROOT/tests/test_bootimg.py"
 python3 "$ROOT/tests/test_crc32.py"
-clang -I"$ROOT/xnu" -DA6PLTE=1 -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_xnu_early.c" "$ROOT/xnu/pexpert/arm/a6plte/early.c" "$ROOT/xnu/pexpert/arm/a6plte/fb.c" -o "$ROOT/artifacts/test-xnu-early"
+clang -pthread -I"$ROOT/xnu" -DA6PLTE=1 -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_xnu_early.c" "$ROOT/xnu/pexpert/arm/a6plte/early.c" "$ROOT/xnu/pexpert/arm/a6plte/fb.c" -o "$ROOT/artifacts/test-xnu-early"
 "$ROOT/artifacts/test-xnu-early"
 clang -DA6PLTE=1 -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_xnu_fb_scroll.c" "$ROOT/xnu/pexpert/arm/a6plte/fb.c" -o "$ROOT/artifacts/test-xnu-fb-scroll"
 "$ROOT/artifacts/test-xnu-fb-scroll"

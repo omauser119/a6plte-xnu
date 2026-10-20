@@ -5,8 +5,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
 static uintptr_t pa;
 static uintptr_t map(uintptr_t p,uintptr_t n) { assert(p==pa && n==3240*2220); return p; }
+static void *writer(void *arg) {
+    (void)arg;
+    for (unsigned n=0;n<80;++n) a6_xnu_puts("Concurrent CPU framebuffer line\n");
+    return NULL;
+}
 int main(void) {
     unsigned char *b=calloc(1,3240*2220); assert(b); pa=(uintptr_t)b;
     struct a6_display display;
@@ -26,6 +32,17 @@ int main(void) {
     assert(display.info.size==3240*2220 && display.info.bits_per_pixel==24);
     assert(display.physical_address==pa && display.virtual_address==pa);
     a6_xnu_puts("test mapped console output\n");
+    /* Concurrent scrolling must yield the same pixels as the serialized text.
+     * Identical lines make the expected image independent of thread order. */
+    a6_xnu_early_entry(&a);assert(a6_xnu_map_console(map));
+    for (unsigned n=0;n<640;++n) a6_xnu_puts("Concurrent CPU framebuffer line\n");
+    unsigned char *expected=malloc(3240*2220);assert(expected);
+    memcpy(expected,b,3240*2220);
+    a6_xnu_early_entry(&a);assert(a6_xnu_map_console(map));
+    pthread_t writers[8];
+    for(unsigned n=0;n<8;++n) assert(!pthread_create(&writers[n],NULL,writer,NULL));
+    for(unsigned n=0;n<8;++n) assert(!pthread_join(writers[n],NULL));
+    assert(!memcmp(expected,b,3240*2220));free(expected);
     /* Real XNU assert metadata has unaligned 64-bit pointers at +4 and +12. */
     unsigned char descriptor[20];
     uint32_t info=2129u<<8;

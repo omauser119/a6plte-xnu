@@ -27,6 +27,8 @@ assert span==length and len(payload)==64+span and zlib.crc32(payload[64:])==crc
 assert b'rd=a6userdata launchdsuffix=release\0' in bridge
 assert b'unentitled_ios_sim_launch=1 ' in bridge
 assert '_unentitled_ios_sim_launch' in symbols
+assert b'cpus=8 ' in bridge and b'A6PLTE Cortex-A53 SMP8 PSCI\0' in k
+assert '_a6_start_other_cpus' in symbols and '_a6_secondary_entry' in symbols
 assert b'Root: userdata HFS+; PID1: /sbin/launchd\n\0' in bridge
 assert b'rd=md0' not in bridge and b'a6_usb=1' not in bridge
 print('PASS: complete CRC, native kernel, no embedded rootfs, userdata HFS+ root, iOS launch compatibility, launchd PID1 and USB disabled')

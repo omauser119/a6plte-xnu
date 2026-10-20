@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static unsigned nodes, ctrr, seed_seen, kernel_seen, ramdisk_seen;
+static unsigned nodes, ctrr, seed_seen, kernel_seen, ramdisk_seen, cpu_seen, ids_seen, cluster_seen;
 static uint8_t seed[256];
 static uint32_t u32(const uint8_t *p) {
     return (uint32_t)p[0] | (uint32_t)p[1]<<8 | (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24;
@@ -40,6 +40,13 @@ static size_t read_node(const uint8_t *b, size_t size, size_t off, unsigned dept
         if(!strcmp(name,"memory-map") && !strcmp(key,"RAMDisk")) {
             assert(len==16 && u64(data)==0x47000000 && u64(data+8)==0x2000000); ++ramdisk_seen;
         }
+        if(!strncmp(name,"cpu",3) && name[3]>='0' && name[3]<='7' && name[4]==0) {
+            unsigned n=(unsigned)(name[3]-'0');
+            if(!strcmp(key,"reg")) { assert(len==4 && u32(data)==(n%4+((n/4)<<8)));cpu_seen|=1u<<n; }
+            if(!strcmp(key,"cpu-id")) { assert(len==4 && u32(data)==n);ids_seen|=1u<<n; }
+            if(!strcmp(key,"l2-cache-id")) { assert(len==4 && u32(data)==n/4);cluster_seen|=1u<<n; }
+            if(!strcmp(key,"state")) assert(!strcmp((const char *)data,n?"stopped":"running"));
+        }
         off+=len;
         unsigned pad=(4-len%4)%4;
         assert(pad<=size-off);
@@ -52,16 +59,17 @@ static size_t read_node(const uint8_t *b, size_t size, size_t off, unsigned dept
 }
 
 int main(void) {
-    uint8_t storage[4096+32];
+    uint8_t storage[8192+32];
     for(unsigned i=0;i<sizeof(seed);++i) seed[i]=(uint8_t)i;
     for(unsigned mode=0;mode<2;++mode) {
         uint64_t rd=mode ? 0x47000000 : 0,bytes=mode ? 0x2000000 : 0;
-        nodes=ctrr=seed_seen=kernel_seen=ramdisk_seen=0;
+        nodes=ctrr=seed_seen=kernel_seen=ramdisk_seen=cpu_seen=ids_seen=cluster_seen=0;
         memset(storage,0xa5,sizeof(storage));
-        unsigned size=a6_make_adt(storage+16,4096,0x44a04000,0x7ffc000,0x1400000,19200000,seed,sizeof(seed),rd,bytes);
-        assert(size && size<4096);
+        unsigned size=a6_make_adt(storage+16,8192,0x44a04000,0x7ffc000,0x1400000,19200000,seed,sizeof(seed),rd,bytes);
+        assert(size && size<8192);
         assert(read_node(storage+16,size,0,0)==size);
-        assert(nodes==7 && ctrr==1 && seed_seen==1 && kernel_seen==1 && ramdisk_seen==mode);
+        assert(cpu_seen==255 && ids_seen==255 && cluster_seen==255);
+        assert(nodes==14 && ctrr==1 && seed_seen==1 && kernel_seen==1 && ramdisk_seen==mode);
         for(unsigned cap=0;cap<size;++cap) {
             memset(storage,0xa5,sizeof(storage));
             assert(a6_make_adt(storage+16,cap,0x44a04000,0x7ffc000,0x1400000,19200000,seed,sizeof(seed),rd,bytes)==0);

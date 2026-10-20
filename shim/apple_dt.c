@@ -27,8 +27,14 @@ unsigned a6_make_adt(void *buf,unsigned cap,uint64_t dest,uint64_t arena,uint64_
     prop(&a,"kernel-ctrr-to-be-enabled",&zero32,4);
     node(&a,1+(ramdisk_bytes!=0),0,"memory-map"); uint64_t kr[2]={dest,span}; prop(&a,"Kernel",kr,sizeof(kr));
     if(ramdisk_bytes) { uint64_t rd[2]={ramdisk,ramdisk_bytes}; prop(&a,"RAMDisk",rd,sizeof(rd)); }
-    node(&a,0,1,"cpus");
-    node(&a,6,0,"cpu0"); str(&a,"device_type","cpu"); str(&a,"state","running"); prop(&a,"reg",&zero32,4); prop(&a,"cpu-id",&zero32,4); prop(&a,"timebase-frequency",&freq,4); str(&a,"compatible","arm,cortex-a53");
+    node(&a,0,8,"cpus");
+    for (uint32_t cpu=0;cpu<8;++cpu) {
+        char name[5]={'c','p','u',(char)('0'+cpu),0};
+        uint32_t mpidr=(cpu&3)|((cpu>>2)<<8),l2=cpu>>2;
+        node(&a,7,0,name);str(&a,"device_type","cpu");str(&a,"state",cpu?"stopped":"running");
+        prop(&a,"reg",&mpidr,4);prop(&a,"cpu-id",&cpu,4);prop(&a,"timebase-frequency",&freq,4);
+        str(&a,"compatible","arm,cortex-a53");prop(&a,"l2-cache-id",&l2,4);
+    }
     node(&a,2,0,"arm-io"); str(&a,"device_type","msm8953"); prop(&a,"ranges",r,sizeof(r));
     /* pmap_compute_max_asids() requires this node; absent properties select XNU defaults. */
     node(&a,0,0,"defaults");

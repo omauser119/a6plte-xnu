@@ -78,6 +78,20 @@ MPIDR 0,1,2,3,0x100,0x101,0x102,0x103. Нельзя ограничиться с�
 SHA256 a70b9ed5881e18eeaa72aca1cc10f8a36a532aac427c521bc16166f2ef0d1e47.
 Ядро build/verified-664d6e1/kernel/kernel.a6plte, SHA256
 f59d9f5d5072ad27fcda55813956c5e9ca5305c028bc6a6a6b54d930992e7e98.
-На телефон этот образ ещё не отправлен: fastboot не обнаружен, задан вопрос
-о возврате аппаратной перезагрузкой в lk2nd; ждать фактического подключения,
-не спрашивать заново разрешение pasta и не перезагружать в Odin.
+Образ 664d6e1 загружен через fastboot boot (OKAY), пользователь прислал фото:
+`16 KiB signature verified; 4 KiB page hashes ready`. Следующий отказ dyld:
+shared cache `(null)` not loaded, `/usr/lib/libSystem.B.dylib` отсутствует как
+отдельный файл, PID1 namespace 6 / subcode 1. Пока не доказана причина отказа
+shared cache: проверять mapping/slide, не подменять userspace.
+
+bf20c51: все задания Actions 39405039587 успешны (совместимость/AKS/батарея/FB).
+На телефоне пока проверено только ядро 664d6e1.
+
+Добавлен SMP-путь: MAX_CPUS=8, два кластера MPIDR AFF1/AFF0, восемь DT CPU,
+PSCI CPU_ON, собственный physical AP entry -> native per-CPU stacks/MMU,
+GICv2 banked init и SGI1 IPI, native registration/start + ожидание online.
+Framebuffer защищён reentrant межъядерной блокировкой только после MMU;
+до MMU атомики не используются. Host ASan/UBSan тесты (включая восемь
+параллельных писателей и точное сравнение framebuffer) прошли. Native asm/C
+probes прошли. SMP пока не проверен на телефоне; честный итог — только после
+отчёта online и реальной работы AP. Sweet HID не использовать.

@@ -2411,6 +2411,148 @@ index 0000000..8dedf5c
 +options   CONFIG_KERNEL_TBI		# <kernel_tbi>
 +
 +options A6PLTE # <a6plte>
+diff --git c/iokit/Kernel/IOCPU.cpp w/iokit/Kernel/IOCPU.cpp
+index fd70a82..b5d478f 100644
+--- c/iokit/Kernel/IOCPU.cpp
++++ w/iokit/Kernel/IOCPU.cpp
+@@ -64,6 +64,12 @@ static OSSharedPtr<OSString> gIOCPUStateNames[kIOCPUStateCount];
+ 
+ /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+ 
++#if A6PLTE
++extern "C" kern_return_t a6_cpu_start(cpu_id_t);
++extern "C" void a6_cpu_signal(cpu_id_t);
++extern "C" void a6_xnu_interrupt_init(void);
++#endif
++
+ #if !USE_APPLEARMSMP
+ 
+ void
+@@ -90,52 +96,81 @@ kern_return_t
+ PE_cpu_start(cpu_id_t target,
+     vm_offset_t start_paddr, vm_offset_t arg_paddr)
+ {
++#if A6PLTE
++	(void)start_paddr;(void)arg_paddr;return a6_cpu_start(target);
++#else
++
+ 	IOCPU *targetCPU = (IOCPU *)target;
+ 
+ 	if (targetCPU == NULL) {
+ 		return KERN_FAILURE;
+ 	}
+ 	return targetCPU->startCPU(start_paddr, arg_paddr);
++#endif
+ }
+ 
+ void
+ PE_cpu_halt(cpu_id_t target)
+ {
++#if A6PLTE
++	(void)target;for (;;) { __asm__ volatile("wfi"); }
++#else
++
+ 	IOCPU *targetCPU = (IOCPU *)target;
+ 
+ 	targetCPU->haltCPU();
++#endif
+ }
+ 
+ void
+ PE_cpu_signal(cpu_id_t source, cpu_id_t target)
+ {
++#if A6PLTE
++	(void)source;a6_cpu_signal(target);return;
++#else
++
+ 	IOCPU *sourceCPU = (IOCPU *)source;
+ 	IOCPU *targetCPU = (IOCPU *)target;
+ 
+ 	sourceCPU->signalCPU(targetCPU);
++#endif
+ }
+ 
+ void
+ PE_cpu_signal_deferred(cpu_id_t source, cpu_id_t target)
+ {
++#if A6PLTE
++	(void)source;a6_cpu_signal(target);return;
++#else
++
+ 	IOCPU *sourceCPU = (IOCPU *)source;
+ 	IOCPU *targetCPU = (IOCPU *)target;
+ 
+ 	sourceCPU->signalCPUDeferred(targetCPU);
++#endif
+ }
+ 
+ void
+ PE_cpu_signal_cancel(cpu_id_t source, cpu_id_t target)
+ {
++#if A6PLTE
++	(void)source;(void)target;return;
++#else
++
+ 	IOCPU *sourceCPU = (IOCPU *)source;
+ 	IOCPU *targetCPU = (IOCPU *)target;
+ 
+ 	sourceCPU->signalCPUCancel(targetCPU);
++#endif
+ }
+ 
+ void
+ PE_cpu_machine_init(cpu_id_t target, boolean_t bootb)
+ {
++#if A6PLTE
++	(void)bootb;a6_xnu_interrupt_init();a6_cpu_signal(target);return;
++#else
++
+ 	IOCPU *targetCPU = OSDynamicCast(IOCPU, (OSObject *)target);
+ 
+ 	if (targetCPU == NULL) {
+@@ -148,11 +183,16 @@ PE_cpu_machine_init(cpu_id_t target, boolean_t bootb)
+ 		ml_set_is_quiescing(false);
+ 	}
+ #endif /* defined(__arm64__) */
++#endif
+ }
+ 
+ void
+ PE_cpu_machine_quiesce(cpu_id_t target)
+ {
++#if A6PLTE
++	(void)target;return;
++#else
++
+ 	IOCPU *targetCPU = (IOCPU*)target;
+ #if defined(__arm64__)
+ 	if (targetCPU->getCPUNumber() == (UInt32)master_cpu) {
+@@ -160,6 +200,7 @@ PE_cpu_machine_quiesce(cpu_id_t target)
+ 	}
+ #endif /* defined(__arm64__) */
+ 	targetCPU->quiesceCPU();
++#endif
+ }
+ 
+ #if defined(__arm64__)
+@@ -176,6 +217,9 @@ PE_cpu_perfmon_interrupt_install_handler(perfmon_interrupt_handler_func handler)
+ void
+ PE_cpu_perfmon_interrupt_enable(cpu_id_t target, boolean_t enable)
+ {
++#if A6PLTE
++	(void)target;(void)enable; /* No PMU interrupt driver is registered. */
++#else
+ 	IOCPU *targetCPU = (IOCPU*)target;
+ 
+ 	if (targetCPU == nullptr) {
+@@ -188,6 +232,7 @@ PE_cpu_perfmon_interrupt_enable(cpu_id_t target, boolean_t enable)
+ 	} else {
+ 		targetCPU->getProvider()->disableInterrupt(1);
+ 	}
++#endif
+ }
+ #endif
+ 
 diff --git c/iokit/Kernel/IOKitDebug.cpp w/iokit/Kernel/IOKitDebug.cpp
 index f9a8664..da996db 100644
 --- c/iokit/Kernel/IOKitDebug.cpp
@@ -2563,10 +2705,10 @@ index 0000000..95fa433
 +#endif
 diff --git c/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
 new file mode 100644
-index 0000000..f50bf72
+index 0000000..e8a3c39
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,96 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if A6PLTE
 +
@@ -2577,8 +2719,9 @@ index 0000000..f50bf72
 +#include <machine/machine_routines.h>
 +#include <pexpert/arm64/board_config.h>
 +
-+static_assert(MAX_CPUS == 1, "A6PLTE platform expert currently supports the boot CPU only");
++static_assert(MAX_CPUS == 8, "A6PLTE has eight Cortex-A53 CPUs");
 +extern void a6_start_platform_services(IOService *provider);
++extern "C" void a6_start_other_cpus(void);
 +
 +/*
 + * The low-level PE code already owns the framebuffer, GICv2 and boot CPU.
@@ -2618,12 +2761,8 @@ index 0000000..f50bf72
 +		return false;
 +	}
 +
-+	/*
-+	 * arm_init already registered the single boot processor and the low-level
-+	 * GIC path owns its interrupts. Complete the CPU-discovery contract normally
-+	 * supplied by IOCPUInterruptController, so kperf's ml_wait_max_cpus can wake.
-+	 */
-+	ml_set_max_cpus(MAX_CPUS);
++	/* Register the real topology, then start APs through the board PSCI/GIC path. */
++	a6_start_other_cpus();
 +	/* Keep PM's separate sleep/wake panic watchdog disabled as well. */
 +	gIOKitDebug |= kIOSleepWakeWdogOff;
 +	a6_start_platform_services(this);
@@ -6868,7 +7007,7 @@ index 5bd6f23..0581eb3 100644
  
  CFLAGS_ARM64	= -Darm64 -DARM64 -D__ARM64__ -DLP64 -DPAGE_SIZE_FIXED -DVM_KERNEL_LINK_ADDRESS=$(ARM64_LINK_ADDR) \
 diff --git c/osfmk/arm/arm_init.c w/osfmk/arm/arm_init.c
-index e26a1d7..c7ac878 100644
+index e26a1d7..50b4325 100644
 --- c/osfmk/arm/arm_init.c
 +++ w/osfmk/arm/arm_init.c
 @@ -346,6 +346,10 @@ arm_init(
@@ -6910,6 +7049,17 @@ index e26a1d7..c7ac878 100644
  	kernel_startup_initialize_upto(STARTUP_SUB_KPRINTF);
  	kprintf("kprintf initialized\n");
  
+@@ -673,6 +690,10 @@ arm_init_cpu(
+ 
+ 
+ 	machine_set_current_thread(cpu_data_ptr->cpu_active_thread);
++#if A6PLTE
++	extern void a6_xnu_interrupt_init(void);
++	a6_xnu_interrupt_init();
++#endif
+ 
+ #if APPLE_ARM64_ARCH_FAMILY
+ 	configure_late_apple_regs();
 diff --git c/osfmk/arm/commpage/commpage_asm.s w/osfmk/arm/commpage/commpage_asm.s
 index da0bbba..8fc36ac 100644
 --- c/osfmk/arm/commpage/commpage_asm.s
@@ -7107,10 +7257,10 @@ index 0000000..513b4f1
 +#endif
 diff --git c/osfmk/arm64/a6plte_interrupts.c w/osfmk/arm64/a6plte_interrupts.c
 new file mode 100644
-index 0000000..8570b16
+index 0000000..473651e
 --- /dev/null
 +++ w/osfmk/arm64/a6plte_interrupts.c
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,56 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if defined(A6PLTE)
 +#include <machine/machine_routines.h>
@@ -7121,23 +7271,42 @@ index 0000000..8570b16
 +#include "../../pexpert/arm/a6plte/gic.h"
 +static struct a6_gic gic;
 +static int initialized;
++static unsigned char local_ready[8],targets[8];
++extern void cpu_signal_handler(void);
++extern void a6_smp_local_ready(unsigned);
 +static uint32_t mmio_read(uintptr_t a) { return *(volatile uint32_t *)a; }
 +static void mmio_write(uintptr_t a,uint32_t v) { *(volatile uint32_t *)a=v; }
 +static void sync_io(void) { __asm__ volatile("dsb sy; isb" ::: "memory"); }
 +void a6_xnu_interrupt_init(void) {
-+    if(initialized) return;
-+    gic=(struct a6_gic){.dist=ml_io_map(A6_GICD_PA,0x1000),.cpu=ml_io_map(A6_GICC_PA,0x1000),
++    uint64_t mpidr;__asm__ volatile("mrs %0,mpidr_el1":"=r"(mpidr));
++    unsigned cpu=(unsigned)(mpidr&3)+4*(unsigned)((mpidr>>8)&1);
++    if (__atomic_load_n(&local_ready[cpu],__ATOMIC_ACQUIRE)) return;
++    if(!__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)) {
++      gic=(struct a6_gic){.dist=ml_io_map(A6_GICD_PA,0x1000),.cpu=ml_io_map(A6_GICC_PA,0x1000),
 +                       .read=mmio_read,.write=mmio_write,.barrier=sync_io};
-+    if(a6_gic_init(&gic)) panic("A6PLTE: GICv2 initialization failed");
-+    initialized=1;
-+    kprintf("A6PLTE: GICv2 ready; virtual timer IRQ %u\n",A6_VTIMER_IRQ);
++      if(a6_gic_init(&gic)) panic("A6PLTE: GICv2 initialization failed");
++      __atomic_store_n(&initialized,1,__ATOMIC_RELEASE);
++    } else if(a6_gic_local_init(&gic)) panic("A6PLTE: per-CPU GIC initialization failed");
++    /* ITARGETSR0 is banked and reports this interface's actual target bit. */
++    unsigned target=mmio_read(gic.dist+0x800)&255;
++    if (!target || (target&(target-1))) panic("A6PLTE: invalid GIC CPU target mask %x",target);
++    __atomic_store_n(&targets[cpu],(unsigned char)target,__ATOMIC_RELEASE);
++    __atomic_store_n(&local_ready[cpu],1,__ATOMIC_RELEASE);
++    a6_smp_local_ready(cpu);
++    kprintf("A6PLTE: CPU%u GICv2 ready; timer IRQ %u, target %x\n",cpu,A6_VTIMER_IRQ,target);
++}
++void a6_xnu_send_ipi(unsigned cpu) {
++    if (cpu>=8 || !__atomic_load_n(&initialized,__ATOMIC_ACQUIRE)) return;
++    a6_gic_send_ipi(&gic,__atomic_load_n(&targets[cpu],__ATOMIC_ACQUIRE));
 +}
 +void a6_xnu_handle_irq(void) {
 +    if(!initialized) panic("A6PLTE: interrupt before GIC initialization");
 +    uint32_t token;
 +    unsigned irq=a6_gic_ack(&gic,&token);
 +    if(irq>=1020) return;
-+    if(irq==A6_VTIMER_IRQ) {
++    if(irq==A6_IPI_IRQ) {
++        a6_gic_end(&gic,token);cpu_signal_handler();return;
++    } else if(irq==A6_VTIMER_IRQ) {
 +        getCpuDatap()->cpu_decrementer=-1;
 +        rtclock_intr(TRUE);
 +    } else {
@@ -7146,6 +7315,85 @@ index 0000000..8570b16
 +        kprintf("A6PLTE: masked unhandled IRQ %u\n",irq);
 +    }
 +    a6_gic_end(&gic,token);
++}
++#endif
+diff --git c/osfmk/arm64/a6plte_smp.c w/osfmk/arm64/a6plte_smp.c
+new file mode 100644
+index 0000000..c4ac217
+--- /dev/null
++++ w/osfmk/arm64/a6plte_smp.c
+@@ -0,0 +1,73 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#if A6PLTE
++#include <kern/processor.h>
++#include <kern/debug.h>
++#include <kern/misc_protos.h>
++#include <arm/machine_routines.h>
++#include <arm/cpu_data_internal.h>
++#include <vm/pmap.h>
++#include <pexpert/pexpert.h>
++
++extern void a6_secondary_entry(void);
++extern void a6_xnu_send_ipi(unsigned);
++static uint32_t local_mask;
++/* Written before touching a stack by the physical PSCI entry, for diagnosis. */
++uint32_t a6_secondary_stage[8];
++const char a6_smp_profile[]="A6PLTE Cortex-A53 SMP8 PSCI";
++
++void a6_smp_local_ready(unsigned cpu) {
++    if (cpu<8) __atomic_fetch_or(&local_mask,1u<<cpu,__ATOMIC_RELEASE);
++}
++static int cpu_index(cpu_id_t id) {
++    uintptr_t value=(uintptr_t)id;
++    return value && value<=8?(int)value-1:-1;
++}
++static int64_t psci_cpu_on(uint64_t mpidr,uint64_t entry,uint64_t context) {
++    register uint64_t x0 __asm__("x0")=0xc4000003;
++    register uint64_t x1 __asm__("x1")=mpidr;
++    register uint64_t x2 __asm__("x2")=entry;
++    register uint64_t x3 __asm__("x3")=context;
++    __asm__ volatile("dsb sy\n\tsmc #0" : "+r"(x0),"+r"(x1),"+r"(x2),"+r"(x3) ::
++        "x4","x5","x6","x7","x8","x9","x10","x11","x12","x13","x14","x15","x16","x17","memory");
++    return (int64_t)x0;
++}
++kern_return_t a6_cpu_start(cpu_id_t target) {
++    int n=cpu_index(target);
++    const ml_topology_info_t *topology=ml_get_topology_info();
++    if (n<0 || (unsigned)n>=topology->num_cpus) return KERN_INVALID_ARGUMENT;
++    uint64_t context=(uintptr_t)CpuDataEntries[n].cpu_data_paddr;
++    if (!context) return KERN_FAILURE;
++    int64_t result=psci_cpu_on(topology->cpus[n].phys_id,
++        ml_static_vtop((vm_offset_t)a6_secondary_entry),context);
++    kprintf("A6PLTE CPU%u: PSCI CPU_ON MPIDR %x -> %lld\n",n,topology->cpus[n].phys_id,result);
++    return result==0?KERN_SUCCESS:KERN_FAILURE;
++}
++void a6_cpu_signal(cpu_id_t target) {
++    int n=cpu_index(target);if (n>=0) a6_xnu_send_ipi((unsigned)n);
++}
++void a6_start_other_cpus(void) {
++    const ml_topology_info_t *topology=ml_get_topology_info();
++    processor_t processors[8]={0};unsigned count=topology->num_cpus;
++    if (count>8) panic("A6PLTE: invalid CPU topology");
++    for (unsigned n=0;n<count;++n) {
++        const ml_topology_cpu_t *cpu=&topology->cpus[n];
++        ml_processor_info_t info={0};ipi_handler_t ipi=NULL;perfmon_interrupt_handler_func pmi=NULL;
++        info.cpu_id=(cpu_id_t)(uintptr_t)(n+1);info.log_id=cpu->cpu_id;info.phys_id=cpu->phys_id;
++        info.cluster_id=cpu->cluster_id;info.cluster_type=cpu->cluster_type;
++        info.l2_cache_id=cpu->l2_cache_id;info.l2_cache_size=cpu->l2_cache_size;
++        kern_return_t result=ml_processor_register(&info,&processors[n],&ipi,&pmi);
++        if (result!=KERN_SUCCESS) panic("A6PLTE: CPU%u registration failed %d",n,result);
++    }
++    ml_set_max_cpus(count);
++    /* Native cpu_machine_init expects a self-IPI to clear SIGPdisabled. */
++    a6_cpu_signal((cpu_id_t)(uintptr_t)(ml_get_boot_cpu_number()+1));
++    for (unsigned n=0;n<count;++n) {
++        if (n==(unsigned)ml_get_boot_cpu_number()) continue;
++        kern_return_t result=processor_start_reason(processors[n],REASON_SYSTEM,WAIT_FOR_START);
++        kprintf("A6PLTE CPU%u: processor_start -> %d, EL1/GIC mask %x, entry stage %u\n",
++            n,result,__atomic_load_n(&local_mask,__ATOMIC_ACQUIRE),a6_secondary_stage[n]);
++    }
++    kprintf("A6PLTE SMP: %u Cortex-A53 registered; local-ready mask %x\n",
++        count,__atomic_load_n(&local_mask,__ATOMIC_ACQUIRE));
 +}
 +#endif
 diff --git c/osfmk/arm64/arm_vm_init.c w/osfmk/arm64/arm_vm_init.c
@@ -7288,6 +7536,71 @@ index b9549da..b5f5756 100644
  #define __USES_V_CRYPTO_INTRINSICS 1
  #else
  #define __USES_V_CRYPTO_INTRINSICS 0
+diff --git c/osfmk/arm64/cpu.c w/osfmk/arm64/cpu.c
+index 94e9130..d0228bd 100644
+--- c/osfmk/arm64/cpu.c
++++ w/osfmk/arm64/cpu.c
+@@ -943,7 +943,11 @@ cpu_start(int cpu)
+ 			break;
+ 		}
+ #endif
++#if A6PLTE
++		return PE_cpu_start(cpu_data_ptr->cpu_id, (vm_offset_t)NULL, (vm_offset_t)NULL);
++#else
+ 		(void) PE_cpu_start(cpu_data_ptr->cpu_id, (vm_offset_t)NULL, (vm_offset_t)NULL);
++#endif
+ 	}
+ 
+ 	return KERN_SUCCESS;
+diff --git c/osfmk/arm64/machine_routines.c w/osfmk/arm64/machine_routines.c
+index 76582da..ae8ae73 100644
+--- c/osfmk/arm64/machine_routines.c
++++ w/osfmk/arm64/machine_routines.c
+@@ -95,7 +95,7 @@ TUNABLE_WRITEABLE(boolean_t, skip_second_stage_lock_on_dev_fused, "skip_second_s
+ #define MPIDR_CPU_ID(mpidr_el1_val)             (((mpidr_el1_val) & MPIDR_AFF0_MASK) >> MPIDR_AFF0_SHIFT)
+ #define MPIDR_CLUSTER_ID(mpidr_el1_val)         (((mpidr_el1_val) & MPIDR_AFF1_MASK) >> MPIDR_AFF1_SHIFT)
+ 
+-#if HAS_CLUSTER
++#if HAS_CLUSTER || A6PLTE
+ static uint8_t cluster_initialized = 0;
+ #endif
+ 
+@@ -1037,7 +1037,7 @@ ml_parse_cpu_topology(void)
+ 		 * on the value provided by EDT. Instead, use the MPIDR value to see if we have
+ 		 * seen this exact cluster before. If so, then reuse that cluster ID for this CPU.
+ 		 */
+-#if HAS_CLUSTER
++#if HAS_CLUSTER || A6PLTE
+ 		uint32_t phys_cluster_id = MPIDR_CLUSTER_ID(cpu->phys_id);
+ #else
+ 		uint32_t phys_cluster_id = (cpu->cluster_type == CLUSTER_TYPE_P);
+@@ -1071,7 +1071,7 @@ ml_parse_cpu_topology(void)
+ 			ml_read_reg_range(child, "cpm-impl-reg", &cluster->cpm_IMPL_pa, &cluster->cpm_IMPL_len);
+ 		}
+ 
+-#if HAS_CLUSTER
++#if HAS_CLUSTER || A6PLTE
+ 		if (MPIDR_CPU_ID(cpu->phys_id) > cluster_max_cpu_phys_id[phys_cluster_id]) {
+ 			cluster_max_cpu_phys_id[phys_cluster_id] = MPIDR_CPU_ID(cpu->phys_id);
+ 		}
+@@ -1091,7 +1091,7 @@ ml_parse_cpu_topology(void)
+ 
+ 	}
+ 
+-#if HAS_CLUSTER
++#if HAS_CLUSTER || A6PLTE
+ 	/*
+ 	 * Build the cluster offset array, ensuring that the region reserved
+ 	 * for each physical cluster contains enough entries to be indexed
+@@ -1409,7 +1409,7 @@ ml_processor_register(ml_processor_info_t *in_processor_info,
+ 	this_cpu_datap->cpu_l3_id = in_processor_info->l3_cache_id;
+ 	this_cpu_datap->cpu_l3_size = in_processor_info->l3_cache_size;
+ 
+-#if HAS_CLUSTER
++#if HAS_CLUSTER || A6PLTE
+ 	this_cpu_datap->cluster_master = !OSTestAndSet(this_cpu_datap->cpu_cluster_id, &cluster_initialized);
+ #else /* HAS_CLUSTER */
+ 	this_cpu_datap->cluster_master = is_boot_cpu;
 diff --git c/osfmk/arm64/pcb.c w/osfmk/arm64/pcb.c
 index 7b98a33..16dec90 100644
 --- c/osfmk/arm64/pcb.c
@@ -7376,7 +7689,7 @@ index c40c6ea..88f2300 100644
  #else
  	/* Run the registered interrupt handler. */
 diff --git c/osfmk/arm64/start.s w/osfmk/arm64/start.s
-index e5336e5..9ce3051 100644
+index e5336e5..c2f4d1c 100644
 --- c/osfmk/arm64/start.s
 +++ w/osfmk/arm64/start.s
 @@ -33,7 +33,9 @@
@@ -7389,13 +7702,14 @@ index e5336e5..9ce3051 100644
  #include <arm64/exception_asm.h>
  
  #if __ARM_KERNEL_PROTECT__
-@@ -88,6 +90,28 @@
+@@ -88,6 +90,30 @@
  #endif /* defined(KERNEL_INTEGRITY_KTRR) */
  .endmacro
  
 +#if defined(A6PLTE)
 +/* No virtual stack is usable until the bootstrap mappings are active. */
 +.macro A6_BOOT_STAGE
++	cbnz x21, 99f
 +	mov x28, sp
 +	mov x27, lr
 +	adrp x1, EXT(a6_xnu_early_stack)@page
@@ -7406,6 +7720,7 @@ index e5336e5..9ce3051 100644
 +	bl EXT(a6_xnu_stage)
 +	mov lr, x27
 +	mov sp, x28
++99:
 +.endmacro
 +
 +.macro A6_EARLY_VECTOR
@@ -7418,7 +7733,7 @@ index e5336e5..9ce3051 100644
  /*
   * Checks the reset handler for global and CPU-specific reset-assist functions,
   * then jumps to the reset handler with boot args and cpu data. This is copied
-@@ -198,8 +222,8 @@ Lskip_cpu_reset_handler:
+@@ -198,8 +224,8 @@ Lskip_cpu_reset_handler:
  	.align 3
  	.global EXT(LowResetVectorEnd)
  LEXT(LowResetVectorEnd)
@@ -7428,7 +7743,7 @@ index e5336e5..9ce3051 100644
  LEXT(SleepToken)
  	.space	(stSize_NUM),0
  #endif
-@@ -232,6 +256,38 @@ LEXT(_start)
+@@ -232,6 +258,38 @@ LEXT(_start)
  	.align 12, 0
  	.global	EXT(LowExceptionVectorBase)
  LEXT(LowExceptionVectorBase)
@@ -7467,7 +7782,7 @@ index e5336e5..9ce3051 100644
  	/* EL1 SP 0 */
  	b		.
  	.align	7
-@@ -267,6 +323,7 @@ LEXT(LowExceptionVectorBase)
+@@ -267,6 +325,7 @@ LEXT(LowExceptionVectorBase)
  	b		.
  	.align	7
  	b		.
@@ -7475,7 +7790,7 @@ index e5336e5..9ce3051 100644
  	.align 12, 0
  
  #if defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR)
-@@ -281,6 +338,28 @@ LEXT(bootstrap_instructions)
+@@ -281,6 +340,28 @@ LEXT(bootstrap_instructions)
  #endif /* defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) */
  	.align 2
  	.globl EXT(resume_idle_cpu)
@@ -7504,7 +7819,47 @@ index e5336e5..9ce3051 100644
  LEXT(resume_idle_cpu)
  	adrp	lr, EXT(arm_init_idle_cpu)@page
  	add		lr, lr, EXT(arm_init_idle_cpu)@pageoff
-@@ -383,13 +462,15 @@ start_cpu:
+@@ -288,6 +369,39 @@ LEXT(resume_idle_cpu)
+ 
+ 	.align 2
+ 	.globl EXT(start_cpu)
++#if A6PLTE
++	.globl EXT(a6_secondary_entry)
++LEXT(a6_secondary_entry)
++	msr DAIFSet, #15
++	mov x21, x0                 // PSCI context: physical cpu_data_t
++	mrs x9, CurrentEL
++	cmp x9, #8
++	b.ne 90f
++	mov x9, #1
++	lsl x9, x9, #31
++	msr HCR_EL2, x9
++	mov x9, #3
++	msr CNTHCTL_EL2, x9
++	msr CNTVOFF_EL2, xzr
++	adr x9, 90f
++	msr ELR_EL2, x9
++	mov x9, #0x3c5
++	msr SPSR_EL2, x9
++	eret
++90:
++	adrp x20, EXT(const_boot_args)@page
++	add x20, x20, EXT(const_boot_args)@pageoff
++	adrp x9, EXT(LowExceptionVectorBase)@page
++	add x9, x9, EXT(LowExceptionVectorBase)@pageoff
++	msr VBAR_EL1, x9
++	ldrsh x10, [x21, CPU_NUMBER_GS]
++	adrp x9, EXT(a6_secondary_stage)@page
++	add x9, x9, EXT(a6_secondary_stage)@pageoff
++	mov w11, #1
++	str w11, [x9, x10, lsl #2]
++	dsb sy
++	b EXT(start_cpu)
++#endif
+ LEXT(start_cpu)
+ 	adrp	lr, EXT(arm_init_cpu)@page
+ 	add		lr, lr, EXT(arm_init_cpu)@pageoff
+@@ -383,13 +497,15 @@ start_cpu:
   *   arg5 - Scratch register
   *   arg6 - Scratch register
   *   arg7 - Scratch register
@@ -7521,7 +7876,7 @@ index e5336e5..9ce3051 100644
  	and		$6, $1, #(ARM_TTE_BLOCK_L2_MASK)	// Get address bits of block mapping
  	orr		$6, $5, $6
  	mov		$5, $3
-@@ -456,8 +537,18 @@ start_cpu:
+@@ -456,8 +572,18 @@ start_cpu:
  	.globl EXT(start_first_cpu)
  LEXT(start_first_cpu)
  
@@ -7542,7 +7897,7 @@ index e5336e5..9ce3051 100644
  	msr		DAIFSet, #(DAIFSC_ALL)				// Disable all interrupts
  
  	mov		x20, x0
-@@ -468,6 +559,12 @@ LEXT(start_first_cpu)
+@@ -468,6 +594,12 @@ LEXT(start_first_cpu)
  	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
  	MSR_VBAR_EL1_X0
  
@@ -7555,7 +7910,7 @@ index e5336e5..9ce3051 100644
  
  	// Get the kernel memory parameters from the boot args
  	ldr		x22, [x20, BA_VIRT_BASE]			// Get the kernel virt base
-@@ -525,7 +622,11 @@ LEXT(start_first_cpu)
+@@ -525,7 +657,11 @@ LEXT(start_first_cpu)
  	mov		x0, #(ARM_TTE_EMPTY)				// Load invalid entry template
  	mov		x1, x25								// Start at V=P pagetable root
  	mov		x2, #(TTE_PGENTRIES)				// Load number of entries per page
@@ -7567,7 +7922,7 @@ index e5336e5..9ce3051 100644
  
  Linvalidate_bootstrap:							// do {
  	str		x0, [x1], #(1 << TTE_SHIFT)			//   Invalidate and advance
-@@ -602,6 +703,7 @@ Lkernelcache_base_found:
+@@ -602,6 +738,7 @@ Lkernelcache_base_found:
  	 * x5 - total number of L2 entries to allocate
  	 */
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
@@ -7575,7 +7930,7 @@ index e5336e5..9ce3051 100644
  	/* create_bootstrap_mapping(vbase, pbase, num_ents, L1 table, freeptr) */
  	create_bootstrap_mapping x0,  x4,  x5, x1, x2, x6, x10, x11, x12, x13
  
-@@ -609,6 +711,30 @@ Lkernelcache_base_found:
+@@ -609,6 +746,30 @@ Lkernelcache_base_found:
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
  	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
  
@@ -7606,19 +7961,28 @@ index e5336e5..9ce3051 100644
  	/* Ensure TTEs are visible */
  	dsb		ish
  
-@@ -720,6 +846,11 @@ common_start:
+@@ -720,6 +881,20 @@ common_start:
  1:
  
  	// Set up the exception vectors
 +#if defined(A6PLTE)
-+	/* Use the physical reporter across the MMU transition, then its KVA alias. */
++	/* APs already use the final TTBR1: install real IRQ/exception vectors.
++	 * Only the first CPU needs the MMU-transition physical reporter. */
++	cbz x21, 91f
++	adrp x0, EXT(ExceptionVectorsBase)@page
++	add x0, x0, EXT(ExceptionVectorsBase)@pageoff
++	add x0, x0, x22
++	sub x0, x0, x23
++	b 92f
++91:
 +	adrp x0, EXT(LowExceptionVectorBase)@page
 +	add x0, x0, EXT(LowExceptionVectorBase)@pageoff
++92:
 +#else
  #if __ARM_KERNEL_PROTECT__
  	/* If this is not the first reset of the boot CPU, the alternate mapping
  	 * for the exception vectors will be set up, so use it.  Otherwise, we
-@@ -733,6 +864,7 @@ common_start:
+@@ -733,6 +908,7 @@ common_start:
  	add		x0, x0, EXT(ExceptionVectorsBase)@pageoff
  	add		x0, x0, x22									// Convert exception vector address to KVA
  	sub		x0, x0, x23
@@ -7626,7 +7990,7 @@ index e5336e5..9ce3051 100644
  1:
  	MSR_VBAR_EL1_X0
  
-@@ -763,6 +895,9 @@ common_start:
+@@ -763,6 +939,9 @@ common_start:
  	msr		CPACR_EL1, x0
  #endif
  
@@ -7636,7 +8000,7 @@ index e5336e5..9ce3051 100644
  	// Clear thread pointer
  	msr		TPIDR_EL1, xzr						// Set thread register
  
-@@ -774,10 +909,11 @@ common_start:
+@@ -774,10 +953,11 @@ common_start:
  	// Initialization common to all non-virtual Apple targets
  #endif  // APPLE_ARM64_ARCH_FAMILY
  
@@ -7650,7 +8014,7 @@ index e5336e5..9ce3051 100644
  
  
  #if HAS_CLUSTER
-@@ -790,6 +926,15 @@ common_start:
+@@ -790,6 +970,15 @@ common_start:
  	// If x21 != 0, we're doing a warm reset, so we need to trampoline to the kernel pmap.
  	cbnz	x21, Ltrampoline
  
@@ -7667,7 +8031,7 @@ index e5336e5..9ce3051 100644
  	add		x0, x20, x22
  	sub		x0, x0, x23
 diff --git c/osfmk/conf/files.arm64 w/osfmk/conf/files.arm64
-index c40d57b..ab2e33d 100644
+index c40d57b..6701347 100644
 --- c/osfmk/conf/files.arm64
 +++ w/osfmk/conf/files.arm64
 @@ -1,3 +1,4 @@
@@ -7684,7 +8048,7 @@ index c40d57b..ab2e33d 100644
  osfmk/arm64/bcopy.s standard
  osfmk/arm64/bzero.s standard
  osfmk/arm/caches.c		standard
-@@ -104,3 +105,10 @@ osfmk/arm64/machine_remote_time.c optional config_mach_bridge_recv_time
+@@ -104,3 +105,12 @@ osfmk/arm64/machine_remote_time.c optional config_mach_bridge_recv_time
  osfmk/arm64/corecrypto/sha256_compress_arm64.s	standard
  
  osfmk/arm/counter.c	standard
@@ -7695,6 +8059,8 @@ index c40d57b..ab2e33d 100644
 +osfmk/arm64/start.s optional a6plte
 +
 +osfmk/arm64/a6plte_diagnostics.c optional a6plte
++
++osfmk/arm64/a6plte_smp.c optional a6plte
 diff --git c/osfmk/console/serial_console.c w/osfmk/console/serial_console.c
 index e5b23f2..99b447b 100644
 --- c/osfmk/console/serial_console.c
@@ -8133,10 +8499,10 @@ index 0000000..731e33d
 +#endif
 diff --git c/pexpert/arm/a6plte/early.c w/pexpert/arm/a6plte/early.c
 new file mode 100644
-index 0000000..1c855df
+index 0000000..fdf74cc
 --- /dev/null
 +++ w/pexpert/arm/a6plte/early.c
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,157 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if defined(A6PLTE)
 +#include "fb.h"
@@ -8153,19 +8519,42 @@ index 0000000..1c855df
 +static unsigned written;
 +enum { DEFERRED, BOOTSTRAP, MAPPED };
 +static int state;
-+/* One boot CPU. A timer can switch between printf callers in the middle of a
-+ * scroll; protect the cursor, pending ring and pixel stores as one operation.
-+ * Do not use scheduler/lock APIs: this path also runs with the MMU off. */
-+static uint64_t console_enter(void) {
-+#ifdef __aarch64__
-+    uint64_t flags;
-+    __asm__ volatile("mrs %0,daif\n\tmsr daifset,#3" : "=r"(flags) :: "memory");
-+    return flags;
-+#else
-+    return 0;
++static uint64_t console_owner;
++static unsigned console_depth;
++#define A6_CONSOLE_LOCKED (1ULL<<63)
++#ifndef __aarch64__
++static _Thread_local unsigned char console_host_token;
 +#endif
++/* Serialize all CPUs as well as IRQ/FIQ writers. Before the final mappings
++ * only the boot CPU runs: exclusive atomics are deliberately avoided while
++ * translation is off. The owner can reenter when reporting a synchronous
++ * exception, and no scheduler/allocator APIs are needed in the panic path. */
++static uint64_t console_enter(void) {
++    uint64_t flags=0,token;
++#ifdef __aarch64__
++    __asm__ volatile("mrs %0,daif\n\tmsr daifset,#3" : "=r"(flags) :: "memory");
++    __asm__ volatile("mrs %0,mpidr_el1":"=r"(token));token=(token&0xffff)+1;
++#else
++    token=(uintptr_t)&console_host_token;
++#endif
++    if (state==MAPPED) {
++        if (__atomic_load_n(&console_owner,__ATOMIC_RELAXED)!=token) {
++            for (;;) {
++                uint64_t expected=0;
++                if (__atomic_compare_exchange_n(&console_owner,&expected,token,0,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED)) break;
++#ifdef __aarch64__
++                __asm__ volatile("yield");
++#endif
++            }
++        }
++        ++console_depth;flags|=A6_CONSOLE_LOCKED;
++    }
++    return flags;
 +}
 +static void console_leave(uint64_t flags) {
++    if ((flags&A6_CONSOLE_LOCKED) && --console_depth==0)
++        __atomic_store_n(&console_owner,0,__ATOMIC_RELEASE);
++    flags&=~A6_CONSOLE_LOCKED;
 +#ifdef __aarch64__
 +    __asm__ volatile("msr daif,%0" :: "r"(flags) : "memory");
 +#else
@@ -8189,7 +8578,9 @@ index 0000000..1c855df
 +    if(state!=DEFERRED) a6_fb_putc(&screen,c);
 +    console_leave(flags);
 +}
-+void a6_xnu_puts(const char *s) { while(*s) a6_xnu_putc(*s++); }
++void a6_xnu_puts(const char *s) {
++    uint64_t flags=console_enter();while(*s) a6_xnu_putc(*s++);console_leave(flags);
++}
 +void a6_xnu_early_entry(const void *ptr) {
 +    const struct a6_boot_args *args=ptr;
 +    unsigned depth=args->video.depth & 255;
@@ -8224,8 +8615,9 @@ index 0000000..1c855df
 +}
 +void a6_xnu_early_fault(uint64_t vector, uint64_t esr, uint64_t elr,
 +                       uint64_t far, uint64_t sctlr, uint64_t descriptor) {
++    uint64_t flags=console_enter();
 +    a6_xnu_puts("\nXNU EARLY EL1 EXCEPTION\nVECTOR: ");
-+    if(state==DEFERRED) return;
++    if(state==DEFERRED) { console_leave(flags);return; }
 +    a6_fb_hex(&screen,vector);
 +    a6_fb_puts(&screen,"\nESR: "); a6_fb_hex(&screen,esr);
 +    a6_fb_puts(&screen,"\nELR: "); a6_fb_hex(&screen,elr);
@@ -8249,6 +8641,7 @@ index 0000000..1c855df
 +        }
 +    }
 +    a6_fb_puts(&screen,"\nCPU halted for diagnosis.\n");
++    console_leave(flags);
 +}
 +int a6_xnu_map_console(uintptr_t (*map)(uintptr_t,uintptr_t)) {
 +    if(state==MAPPED) return 1;
@@ -8542,10 +8935,10 @@ index 0000000..504e307
 +};
 diff --git c/pexpert/arm/a6plte/gic.c w/pexpert/arm/a6plte/gic.c
 new file mode 100644
-index 0000000..cfe3527
+index 0000000..5f170e5
 --- /dev/null
 +++ w/pexpert/arm/a6plte/gic.c
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,62 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if defined(A6PLTE)
 +#include "gic.h"
@@ -8559,6 +8952,15 @@ index 0000000..cfe3527
 +        g->write(g->dist+0x180+(i/32)*4,~0u);
 +        g->write(g->dist+0x280+(i/32)*4,~0u);
 +    }
++    g->write(g->dist,g->read(g->dist)|1u);
++    return a6_gic_local_init(g);
++}
++int a6_gic_local_init(struct a6_gic *g) {
++    if(!g || !g->dist || !g->cpu || !g->read || !g->write || !g->barrier) return -1;
++    /* Only banked SGI/PPI registers here. AP startup must not mask global SPIs. */
++    g->write(g->cpu,0);
++    g->write(g->dist+0x180,~0u);
++    g->write(g->dist+0x280,~0u);
 +    /* Virtual timer is level-sensitive. PPI configuration may be read-only. */
 +    uint32_t cfg=g->read(g->dist+0xc04);
 +    cfg&=~(2u<<((A6_VTIMER_IRQ-16)*2));
@@ -8567,15 +8969,21 @@ index 0000000..cfe3527
 +    unsigned shift=(A6_VTIMER_IRQ%4)*8;
 +    uint32_t val=g->read(pri);
 +    g->write(pri,(val&~(255u<<shift))|(0x80u<<shift));
++    pri=g->dist+0x400+(A6_IPI_IRQ&~3u);shift=(A6_IPI_IRQ%4)*8;
++    val=g->read(pri);g->write(pri,(val&~(255u<<shift))|(0x80u<<shift));
 +    g->write(g->cpu+4,0xff); /* priority mask */
 +    g->write(g->cpu+8,0);    /* binary point */
-+    g->write(g->dist+0x100,1u<<A6_VTIMER_IRQ);
++    g->write(g->dist+0x100,(1u<<A6_VTIMER_IRQ)|(1u<<A6_IPI_IRQ));
 +    g->barrier();
 +    g->write(g->dist,g->read(g->dist)|1u);
 +    /* EOImodeNS=0: EOIR performs both priority drop and deactivation. */
 +    g->write(g->cpu,1);
 +    g->barrier();
 +    return 0;
++}
++void a6_gic_send_ipi(struct a6_gic *g,unsigned mask) {
++    if (!g || !mask || (mask&~255u)) return;
++    g->barrier();g->write(g->dist+0xf00,(mask<<16)|A6_IPI_IRQ);g->barrier();
 +}
 +unsigned a6_gic_ack(struct a6_gic *g,uint32_t *token) {
 +    *token=g->read(g->cpu+0x0c);
@@ -8595,10 +9003,10 @@ index 0000000..cfe3527
 +#endif
 diff --git c/pexpert/arm/a6plte/gic.h w/pexpert/arm/a6plte/gic.h
 new file mode 100644
-index 0000000..5f57270
+index 0000000..e68f740
 --- /dev/null
 +++ w/pexpert/arm/a6plte/gic.h
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,23 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#ifndef A6_GIC_H
 +#define A6_GIC_H
@@ -8607,6 +9015,7 @@ index 0000000..5f57270
 +#define A6_GICD_PA 0x0b000000u
 +#define A6_GICC_PA 0x0b002000u
 +#define A6_VTIMER_IRQ 20u /* DT arm,armv8-timer: PPI 4 + 16, not generic IRQ 27. */
++#define A6_IPI_IRQ 1u
 +struct a6_gic {
 +    uintptr_t dist, cpu;
 +    uint32_t (*read)(uintptr_t);
@@ -8615,6 +9024,8 @@ index 0000000..5f57270
 +    unsigned lines;
 +};
 +int a6_gic_init(struct a6_gic *);
++int a6_gic_local_init(struct a6_gic *);
++void a6_gic_send_ipi(struct a6_gic *,unsigned);
 +unsigned a6_gic_ack(struct a6_gic *,uint32_t *);
 +void a6_gic_end(struct a6_gic *,uint32_t);
 +void a6_gic_mask(struct a6_gic *,unsigned);
@@ -8833,7 +9244,7 @@ index e1d1571..126638e 100644
  uint32_t
 diff --git c/pexpert/pexpert/arm64/A6PLTE.h w/pexpert/pexpert/arm64/A6PLTE.h
 new file mode 100644
-index 0000000..8f22a22
+index 0000000..2bdedbf
 --- /dev/null
 +++ w/pexpert/pexpert/arm64/A6PLTE.h
 @@ -0,0 +1,23 @@
@@ -8854,8 +9265,8 @@ index 0000000..8f22a22
 +#define NO_MONITOR 1
 +#define NO_ECORE 1
 +#define MAX_L2_CLINE 6
-+#define MAX_CPUS 1
-+#define MAX_CPU_CLUSTERS 1
++#define MAX_CPUS 8
++#define MAX_CPU_CLUSTERS 2
 +#define NO_XNU_PLATFORM_ERROR_HANDLER 1
 +#define PLATFORM_PANIC_LOG_DISABLED 1
 +/* Intentionally absent: Apple PAC/AIC/CTRR/SPTM, PAN, LSE, 16K pages, SME. */
