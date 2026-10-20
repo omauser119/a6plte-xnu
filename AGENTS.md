@@ -131,3 +131,23 @@ regression check to host and native platform builds. Readiness question pending.
 32541a4 and 521c50d (own HID and DT calibration) passed all native Actions.
 HID hardware not yet booted. Sensor axes use the board DT's 4096-unit ranges
 (max 4095); display stays 1080x2220. No Sweet HID sources were used.
+
+
+350d906 native build passed all Actions 39411714320. Downloaded kernel
+SHA256 c0d8d8af7ab208286a61bd98556ed50f9353c358219e8c6991270a607be4c271.
+Locally packaged/checked userdata image SHA256
+d41d34f6c07da2b47324ebecdbdc100cccf82c52b378050e4972fc4575847fa9,
+boot accepted, early MMU issue passed. User now reports
+`random_cpu_init: kernel prng has not been installed` during AP registration.
+The standalone port had only the boot HMAC-DRBG fallback, no external corecrypto
+kext. 97dbdb4 moves registration/start after EARLY_BOOT/spllo; that alone is
+insufficient and must NOT be booted as the PRNG fix.
+f260bf3 explicitly installs native HMAC-SHA256 DRBG root/per-CPU instances via
+register_and_init_prng, using real bootseed, distinct root-derived CPU seeds,
+per-generator locks with IRQs masked and native entropy refresh/reseed.
+random_cpu_init guard stays intact. Native header probe passed, full CI pending.
+Readiness question pending after the PRNG panic.
+For fast artifact fetch use scripts/download-ci-kernel.py RUN_ID. It downloads
+only the linked kernel in parallel ranges and verifies GitHub archive SHA256;
+package locally and run check-userdata-boot.py. No need to download both boot
+images as well (slow CDN was ~50 KiB/s per connection).
