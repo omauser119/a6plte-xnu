@@ -59,3 +59,5 @@ python3 "$ROOT/tests/test_sha512.py"
 
 clang -std=c17 -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_input.c" "$ROOT/xnu/iokit/Kernel/arm/A6Input.c" "$ROOT/xnu/iokit/Kernel/arm/A6HIDWire.c" -o "$ROOT/artifacts/test-input"
 "$ROOT/artifacts/test-input"
+
+python3 "$ROOT/tests/test_early_relocations.py" "$ROOT/artifacts/xnu-early.macho.o" "$ROOT/artifacts/xnu-fb.macho.o"

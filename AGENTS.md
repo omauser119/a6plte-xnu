@@ -116,3 +116,18 @@ collections/ten contacts and consumer volume/power keys. This is a subset of
 IOHIDFamily, not proof of working backboardd/UI. Hardware not tested yet.
 Host ASan/UBSan tests cover FIFO repeated START, coordinates/slots/release,
 PON read-only commands, debounce, bounded timeout, HID wire sizes/capacity.
+
+
+Hardware 952dec2 boot accepted (image SHA256
+84f52d5f1bf7b7a2ba6b37d78a164ee4385878a87a10111f3a387653a92bd8c1),
+but failed on the FIRST CPU before MMU: ESR 0x96000000, ELR physical
+0x44c0e360, FAR 0xfffffff007085220. Matched linked disassembly precisely:
+_a6_xnu_puts+0xa0 reads virtual string selected by _a6_xnu_stage's compiler
+lookup table. Longer SMP-locked puts changed optimizer decisions. It is not
+an AP fault. Fix 350d906 applies -fno-jump-tables to early.c/fb.c; compiled
+stage now uses direct ADRP/ADD strings, with no absolute relocations. Add
+regression check to host and native platform builds. Readiness question pending.
+
+32541a4 and 521c50d (own HID and DT calibration) passed all native Actions.
+HID hardware not yet booted. Sensor axes use the board DT's 4096-unit ranges
+(max 4095); display stays 1080x2220. No Sweet HID sources were used.

@@ -58,3 +58,5 @@ for source in \
 done
 A6_COMPONENT=osfmk python3 scripts/probe-platform.py tests/boot_abi.c > artifacts/check-boot-abi.log 2>&1 || { cat artifacts/check-boot-abi.log; exit 1; }
 echo 'Platform compilation passed. These objects are NOT a linked or bootable XNU kernel.'
+
+python3 "$ROOT/tests/test_early_relocations.py" "$ROOT/artifacts/xnu-early.macho.o" "$ROOT/artifacts/xnu-fb.macho.o"
