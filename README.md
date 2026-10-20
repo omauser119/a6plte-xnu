@@ -52,10 +52,10 @@ package format or a flash operation for this profile.
 
 ## Verification status
 
-All jobs in [Actions run 39420499935](https://github.com/omauser119/a6plte-xnu/actions/runs/39420499935)
-passed for native source `bc1271e`, including Apple Clang, linking with no undefined
+All jobs in [Actions run 39445871601](https://github.com/omauser119/a6plte-xnu/actions/runs/39445871601)
+passed for native source `665a2d5`, including Apple Clang, linking with no undefined
 symbols, ASan/UBSan host checks and both image profiles. Download just the kernel
-with `python3 scripts/download-ci-kernel.py 39420499935`, then package it locally.
+with `python3 scripts/download-ci-kernel.py 39445871601`, then package it locally.
 The downloader verifies the GitHub archive SHA256 before extraction.
 
 Hardware confirmed native launchd image activation and successful 16-KiB code
@@ -79,6 +79,10 @@ failure across cleanup and reports the sensor command/register/value. Before
 a PID1 panic it repeats the saved split-cache, signature errno/coverage, mmap
 and shared-region results in a compact framebuffer summary. These are
 diagnostics, not confirmation that the touchscreen or launchd now works.
+The userdata block strategy now accepts large filesystem buffers while retaining
+whole-request partition bounds; native-strategy tests cover 1-MiB reads/writes,
+cross-boundary rejection and the unchanged raw I/O cap. The next hardware boot
+must confirm whether this fixes the reported cache signature `EINVAL`.
 See [platform services](docs/PLATFORM-SERVICES.md) for input compatibility limits.
 
 Historical hardware reports elsewhere describe XNU 12377.

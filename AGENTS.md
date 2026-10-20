@@ -241,3 +241,15 @@ Receipt in same directory. Not booted yet: fastboot empty; hardware-reset
 readiness question already pending. Load a verified ready image as soon as the
 phone returns; no new pasta authorization required. The driver bug is fixed,
 but whether it resolves this actual signature failure still needs hardware.
+
+Full native 665a2d5 has now PASSED all Actions 39445871601, downloaded and
+packaged. USE THIS image instead of the never-booted binary hotfix above:
+build/verified-665a2d5/images/xnu-8796-userdata-cpu0-boot.img, 17094656 bytes,
+SHA256 b0992daac96d59239bca527b783c2bd6345033e66a431ac9f54d3b397de7c351.
+Kernel build/verified-665a2d5/kernel/kernel.a6plte, SHA256
+3ce28c0d29741ec701af6186d79f377f7c1db63266a58fc2ef37691da96174a2.
+Actual native strategy disassembly verified: 64-KiB rejection removed, checked
+a6_slice_io still called. Full image checks passed; receipts in verified path.
+Watcher session 45300 completed successfully. This image is NOT booted yet:
+fastboot still empty, physical-reset question already pending. The hotfix was
+never loaded and is superseded. No new pasta permission needed to boot 665a2d5.
