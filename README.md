@@ -85,4 +85,31 @@ cross-boundary rejection and the unchanged raw I/O cap. The next hardware boot
 must confirm whether this fixes the reported cache signature `EINVAL`.
 See [platform services](docs/PLATFORM-SERVICES.md) for input compatibility limits.
 
+## Persistent code-signature conversion
+
+The 16-KiB-to-4-KiB hash conversion now checkpoints to hidden
+`/.a6cs4k-v2-<SHA256>` files on the userdata root. The first run still verifies
+the source against its original CodeDirectory. Every 4 MiB it appends a bounded,
+SHA256-checked record and uses HFS `F_FULLFSYNC` to commit it. A later boot reuses
+complete records and resumes after the last valid record, including after an
+interrupted first run. A torn or corrupt tail is recomputed. The key includes
+the full CodeDirectory, source file ID, size, modification/change times, base
+offset and hash geometry; source changes during conversion reject publication.
+
+Cache files must be regular, root-owned, mode 0600, have one link and belong to
+the userdata root mount. Symlinks and other mounts are rejected. This experimental
+port trusts root-owned derived hash metadata; record checksums detect corruption,
+not malicious replacement by root. Native VM faults still hash the actual 4-KiB
+page against the table. Cache I/O failure falls back to source verification.
+The explicitly writable userdata HFS root is mounted writable before launchd,
+because dyld needs checkpoints before launchd can perform a remount. The driver's
+read-only GPT attribute and `a6_userdata_rw=0` remain effective.
+
+An empty `shared_region_check_np` probe still returns its native `ENOMEM`, which
+dyld uses to proceed with mapping. On this board it is no longer printed as an
+unexpected `vm_shared_region_start_address() failed`; no address or successful
+mapping is fabricated. Actual signature and map2 failures remain in the PID1
+panic summary. The reported stop around cache part “44” still needs its exact
+failure/errno to establish whether it is a signature failure or a map failure.
+
 Historical hardware reports elsewhere describe XNU 12377.

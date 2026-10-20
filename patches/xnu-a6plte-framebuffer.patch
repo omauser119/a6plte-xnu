@@ -14,10 +14,10 @@ index e3d2f34..81d54f9 100644
  		    fl->f_fn, count ? fl->f_type : 0);
  		free((char *)fl);
 diff --git c/bsd/conf/files w/bsd/conf/files
-index 4427401..4ddfd32 100644
+index 4427401..ea60157 100644
 --- c/bsd/conf/files
 +++ w/bsd/conf/files
-@@ -594,3 +594,7 @@ bsd/skywalk/packet/packet_kern.c		optional skywalk
+@@ -594,3 +594,9 @@ bsd/skywalk/packet/packet_kern.c		optional skywalk
  bsd/skywalk/packet/pbufpool.c			optional skywalk
  bsd/skywalk/packet/pbufpool_kern.c		optional skywalk
  bsd/dev/cpu_copy_in_cksum_gen.c			optional skywalk
@@ -25,6 +25,8 @@ index 4427401..4ddfd32 100644
 +bsd/dev/a6plte/compat.c optional a6plte
 +
 +bsd/dev/a6plte/dyld_diag.c optional a6plte
++bsd/dev/a6plte/cs_cache.c optional a6plte
++bsd/dev/a6plte/cs_cache_vfs.c optional a6plte
 diff --git c/bsd/conf/files.arm64 w/bsd/conf/files.arm64
 index a77bd10..5fc6f17 100644
 --- c/bsd/conf/files.arm64
@@ -191,12 +193,337 @@ index 0000000..f4913d5
 +    if (kernel_thread_start(sample_thread,NULL,&thread)==KERN_SUCCESS) thread_deallocate(thread);
 +}
 +#endif
+diff --git c/bsd/dev/a6plte/cs_cache.c w/bsd/dev/a6plte/cs_cache.c
+new file mode 100644
+index 0000000..6b144e1
+--- /dev/null
++++ w/bsd/dev/a6plte/cs_cache.c
+@@ -0,0 +1,118 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* Portable journal protocol. The VFS adapter owns permission/identity checks.
++ * Checksums detect corruption and interrupted writes; they are not signatures.
++ * The cache is trusted root-owned metadata, never an alternative CodeDirectory.
++ */
++#include "cs_cache.h"
++#ifdef KERNEL
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <libkern/crypto/sha2.h>
++#else
++#include <string.h>
++#include <errno.h>
++#include <openssl/sha.h>
++#endif
++
++static void put32(unsigned char *p, uint32_t x) {
++    for (unsigned i=0;i<4;++i) p[i]=(unsigned char)(x>>(i*8));
++}
++static void put64(unsigned char *p, uint64_t x) {
++    for (unsigned i=0;i<8;++i) p[i]=(unsigned char)(x>>(i*8));
++}
++static void digest(unsigned char *out, const unsigned char *header,
++    const unsigned char *data, size_t size) {
++    SHA256_CTX hash;
++    SHA256_Init(&hash); SHA256_Update(&hash,header,A6_CSC_HEADER_SIZE);
++    if (size) SHA256_Update(&hash,data,size);
++    SHA256_Final(out,&hash);
++}
++static int valid(const struct a6_csc *c) {
++    return c && c->limit && c->limit<=UINT32_MAX &&
++        c->hash_size && c->hash_size<=48 && c->io.read &&
++        (!c->writable || (c->io.write && c->io.resize && c->io.sync));
++}
++static uint64_t pages(uint64_t bytes) { return (bytes+4095)/4096; }
++static void header(const struct a6_csc *c, unsigned char *h) {
++    memset(h,0,A6_CSC_HEADER_SIZE); memcpy(h,"A6CS4K02",8);
++    put32(h+8,2); put32(h+12,22); put64(h+16,c->limit);
++    put32(h+24,c->hash_size); put64(h+32,pages(c->limit)*c->hash_size);
++    memcpy(h+40,c->key,32); digest(h+96,h,NULL,0);
++}
++static uint64_t record_offset(const struct a6_csc *c, uint64_t position) {
++    return A6_CSC_HEADER_SIZE + (position/A6_CSC_SOURCE_CHUNK)*
++        (A6_CSC_HEADER_SIZE + pages(A6_CSC_SOURCE_CHUNK)*c->hash_size);
++}
++static size_t record_size(const struct a6_csc *c, uint64_t position) {
++    uint64_t length=c->limit-position;
++    if (length>A6_CSC_SOURCE_CHUNK) length=A6_CSC_SOURCE_CHUNK;
++    return (size_t)(pages(length)*c->hash_size);
++}
++static void record_header(const struct a6_csc *c, unsigned char *h,
++    uint64_t position, size_t bytes) {
++    memset(h,0,A6_CSC_HEADER_SIZE); memcpy(h,"A6CSREC2",8);
++    put32(h+8,(uint32_t)(position/A6_CSC_SOURCE_CHUNK));
++    put32(h+12,(uint32_t)bytes);
++    uint64_t end=position+A6_CSC_SOURCE_CHUNK;
++    put64(h+16,end<c->limit?end:c->limit); memcpy(h+32,c->key,32);
++}
++int a6_csc_load(struct a6_csc *c, unsigned char *hashes) {
++    unsigned char h[A6_CSC_HEADER_SIZE], expected[A6_CSC_HEADER_SIZE], sum[32];
++    if (!valid(c) || !hashes) return EINVAL;
++    c->position=0; header(c,expected);
++    int error=0;
++    if (c->io.size>=A6_CSC_HEADER_SIZE) {
++        error=c->io.read(c->io.cookie,0,h,sizeof(h));
++        if (error) return error; /* Never destroy a journal after a read error. */
++    }
++    if (c->io.size<A6_CSC_HEADER_SIZE || memcmp(h,expected,sizeof(h))) {
++        /* A changed CodeDirectory/file identity never reuses an old record. */
++        if (!c->writable) return 0;
++        error=c->io.resize(c->io.cookie,0);
++        if (!error) error=c->io.write(c->io.cookie,0,expected,sizeof(expected));
++        if (!error) error=c->io.sync(c->io.cookie);
++        if (!error) c->io.size=sizeof(expected);
++        return error;
++    }
++    while (c->position<c->limit) {
++        uint64_t off=record_offset(c,c->position);
++        size_t bytes=record_size(c,c->position);
++        unsigned char *target=hashes+pages(c->position)*c->hash_size;
++        if (off>c->io.size || sizeof(h)+bytes>c->io.size-off) break;
++        error=c->io.read(c->io.cookie,off,h,sizeof(h));
++        if (error) break;
++        memcpy(sum,h+96,32); memset(h+96,0,32);
++        record_header(c,expected,c->position,bytes);
++        if (memcmp(h,expected,sizeof(h))) break;
++        error=c->io.read(c->io.cookie,off+sizeof(h),target,bytes);
++        if (!error) {
++            digest(expected,h,target,bytes);
++            if (memcmp(sum,expected,32)) error=EIO;
++        }
++        if (error) { memset(target,0,bytes); break; }
++        uint64_t next=c->position+A6_CSC_SOURCE_CHUNK;
++        c->position=next<c->limit?next:c->limit;
++    }
++    /* Only complete, independently checked records are visible to the caller.
++     * A missing/torn tail is normal after a reset; overwrite it on next save. */
++    return 0;
++}
++int a6_csc_save(struct a6_csc *c, const unsigned char *hashes, uint64_t position) {
++    unsigned char h[A6_CSC_HEADER_SIZE];
++    if (!valid(c) || !hashes || !c->writable || c->position>=c->limit ||
++        position<=c->position || position>c->limit ||
++        (position!=c->limit && position%A6_CSC_SOURCE_CHUNK) ||
++        position-c->position>A6_CSC_SOURCE_CHUNK) return EINVAL;
++    uint64_t end=c->position+A6_CSC_SOURCE_CHUNK;
++    if (position!=(end<c->limit?end:c->limit)) return EINVAL;
++    uint64_t off=record_offset(c,c->position);
++    size_t bytes=record_size(c,c->position);
++    const unsigned char *data=hashes+pages(c->position)*c->hash_size;
++    record_header(c,h,c->position,bytes); digest(h+96,h,data,bytes);
++    int error=c->io.write(c->io.cookie,off+sizeof(h),data,bytes);
++    if (!error) error=c->io.write(c->io.cookie,off,h,sizeof(h));
++    if (!error) error=c->io.resize(c->io.cookie,off+sizeof(h)+bytes);
++    if (!error) error=c->io.sync(c->io.cookie);
++    if (!error) { c->position=position; c->io.size=off+sizeof(h)+bytes; }
++    return error;
++}
+diff --git c/bsd/dev/a6plte/cs_cache.h w/bsd/dev/a6plte/cs_cache.h
+new file mode 100644
+index 0000000..8d3d1f3
+--- /dev/null
++++ w/bsd/dev/a6plte/cs_cache.h
+@@ -0,0 +1,37 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef A6PLTE_CS_CACHE_H
++#define A6PLTE_CS_CACHE_H
++#include <stdint.h>
++#include <stddef.h>
++
++/* One append-only, checksummed record per 4 MiB of authenticated source.
++ * A reset can lose the last record, but cannot commit its unchecked tail. */
++#define A6_CSC_SOURCE_CHUNK (UINT64_C(4) * 1024 * 1024)
++#define A6_CSC_HEADER_SIZE 512u
++struct a6_csc_io {
++    void *cookie;
++    int (*read)(void *, uint64_t, void *, size_t);
++    int (*write)(void *, uint64_t, const void *, size_t);
++    int (*resize)(void *, uint64_t);
++    int (*sync)(void *);
++    uint64_t size;
++};
++struct a6_csc {
++    struct a6_csc_io io;
++    unsigned char key[32];
++    uint64_t limit, position;
++    unsigned hash_size;
++    int writable;
++};
++int a6_csc_load(struct a6_csc *, unsigned char *);
++int a6_csc_save(struct a6_csc *, const unsigned char *, uint64_t);
++
++#ifdef KERNEL
++#include <sys/vnode.h>
++struct a6_cs_cache;
++struct a6_cs_cache *a6_cs_cache_open(vnode_t, const void *, size_t,
++    int64_t, uint64_t, unsigned, unsigned char *, uint64_t *);
++int a6_cs_cache_save(struct a6_cs_cache *, const unsigned char *, uint64_t);
++int a6_cs_cache_close(struct a6_cs_cache *);
++#endif
++#endif
+diff --git c/bsd/dev/a6plte/cs_cache_vfs.c w/bsd/dev/a6plte/cs_cache_vfs.c
+new file mode 100644
+index 0000000..1722103
+--- /dev/null
++++ w/bsd/dev/a6plte/cs_cache_vfs.c
+@@ -0,0 +1,152 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* Persistent 4K hash checkpoints, confined to the userdata root filesystem.
++ * This experimental port trusts root-owned cache metadata (as it trusts the
++ * supplied root filesystem). Checksums are not authentication against root.
++ * A read-only disk, unsafe file, or cache I/O error falls back to full native
++ * CodeDirectory verification. Source changes invalidate the entire checkpoint.
++ */
++#if A6PLTE
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/vnode.h>
++#include <sys/vnode_internal.h>
++#include <sys/fcntl.h>
++#include <sys/stat.h>
++#include <sys/mount.h>
++#include <sys/uio.h>
++#include <sys/proc.h>
++#include <sys/kauth.h>
++#include <kern/kalloc.h>
++#include <kern/locks.h>
++#include <libkern/crypto/sha2.h>
++#include "cs_cache.h"
++
++struct a6_cs_cache {
++    struct a6_csc journal;
++    vnode_t source, file;
++    int mode;
++    uint64_t identity[8];
++};
++static LCK_GRP_DECLARE(cache_group,"a6plte codesign cache");
++static LCK_MTX_DECLARE(cache_lock,&cache_group);
++
++static int source_identity(vnode_t vp, uint64_t *id) {
++    struct vnode_attr a; VATTR_INIT(&a);
++    VATTR_WANTED(&a,va_fileid); VATTR_WANTED(&a,va_data_size);
++    VATTR_WANTED(&a,va_modify_time); VATTR_WANTED(&a,va_change_time);
++    int error=vnode_getattr(vp,&a,vfs_context_kernel());
++    if (error) return error;
++    if (!VATTR_IS_SUPPORTED(&a,va_fileid) || !VATTR_IS_SUPPORTED(&a,va_data_size) ||
++        !VATTR_IS_SUPPORTED(&a,va_modify_time) || !VATTR_IS_SUPPORTED(&a,va_change_time)) return ENOTSUP;
++    id[0]=a.va_fileid; id[1]=a.va_data_size;
++    id[2]=(uint64_t)a.va_modify_time.tv_sec; id[3]=(uint64_t)a.va_modify_time.tv_nsec;
++    id[4]=(uint64_t)a.va_change_time.tv_sec; id[5]=(uint64_t)a.va_change_time.tv_nsec;
++    id[6]=id[7]=0; return 0;
++}
++static int cache_read(void *cookie, uint64_t off, void *data, size_t size) {
++    struct a6_cs_cache *c=cookie; int resid=0;
++    if (off>INT64_MAX || size>INT_MAX || size>INT64_MAX-off) return EINVAL;
++    int error=vn_rdwr(UIO_READ,c->file,data,(int)size,(off_t)off,UIO_SYSSPACE,0,
++        vfs_context_ucred(vfs_context_kernel()),&resid,vfs_context_proc(vfs_context_kernel()));
++    return error?error:resid?EIO:0;
++}
++static int cache_write(void *cookie, uint64_t off, const void *data, size_t size) {
++    struct a6_cs_cache *c=cookie; int resid=0;
++    if (off>INT64_MAX || size>INT_MAX || size>INT64_MAX-off) return EINVAL;
++    int error=vn_rdwr(UIO_WRITE,c->file,(caddr_t)data,(int)size,(off_t)off,UIO_SYSSPACE,IO_UNIT,
++        vfs_context_ucred(vfs_context_kernel()),&resid,vfs_context_proc(vfs_context_kernel()));
++    return error?error:resid?EIO:0;
++}
++static int cache_resize(void *cookie, uint64_t size) {
++    struct a6_cs_cache *c=cookie; struct vnode_attr a;
++    if (size>64*1024*1024) return EINVAL;
++    VATTR_INIT(&a); VATTR_SET(&a,va_data_size,size);
++    return vnode_setattr(c->file,&a,vfs_context_kernel());
++}
++static int cache_sync(void *cookie) {
++    struct a6_cs_cache *c=cookie;
++    /* HFS F_FULLFSYNC commits file/catalog data and reaches the eMMC flush. */
++    return VNOP_IOCTL(c->file,F_FULLFSYNC,NULL,0,vfs_context_kernel());
++}
++static int safe_file(struct a6_cs_cache *c) {
++    struct vnode_attr a; VATTR_INIT(&a);
++    VATTR_WANTED(&a,va_uid); VATTR_WANTED(&a,va_mode);
++    VATTR_WANTED(&a,va_nlink); VATTR_WANTED(&a,va_data_size);
++    if (!vnode_isreg(c->file) || c->file==c->source ||
++        vnode_mount(c->file)!=vnode_mount(rootvnode) ||
++        vnode_parent(c->file)!=rootvnode) return EPERM;
++    int error=vnode_getattr(c->file,&a,vfs_context_kernel());
++    if (error) return error;
++    if (!VATTR_IS_SUPPORTED(&a,va_uid) || !VATTR_IS_SUPPORTED(&a,va_mode) ||
++        !VATTR_IS_SUPPORTED(&a,va_nlink) || !VATTR_IS_SUPPORTED(&a,va_data_size) ||
++        a.va_uid!=0 || (a.va_mode&0777)!=0600 || a.va_nlink!=1 ||
++        a.va_data_size>64*1024*1024) return EPERM;
++    c->journal.io.size=a.va_data_size; return 0;
++}
++struct a6_cs_cache *a6_cs_cache_open(vnode_t source, const void *cd, size_t cd_size,
++    int64_t base, uint64_t limit, unsigned hash_size, unsigned char *hashes, uint64_t *position) {
++    extern int a6_userdata_root_selected(void);
++    *position=0;
++    if (!rootvnode || !a6_userdata_root_selected() || !source->v_name ||
++        strncmp(source->v_name,"dyld_shared_cache_arm64",23) ||
++        !vnode_isreg(source) || vnode_mount(source)!=vnode_mount(rootvnode)) return NULL;
++    struct a6_cs_cache *c=kalloc_type(struct a6_cs_cache,Z_WAITOK|Z_ZERO);
++    if (!c) return NULL;
++    c->source=source;
++    int error=source_identity(source,c->identity);
++    if (error) { kfree_type(struct a6_cs_cache,c); return NULL; }
++    SHA256_CTX h; SHA256_Init(&h);
++    SHA256_Update(&h,"A6CS4K02",8); SHA256_Update(&h,cd,cd_size);
++    SHA256_Update(&h,c->identity,sizeof(c->identity));
++    SHA256_Update(&h,&base,sizeof(base)); SHA256_Update(&h,&limit,sizeof(limit));
++    SHA256_Update(&h,&hash_size,sizeof(hash_size)); SHA256_Final(c->journal.key,&h);
++    char path[96]; const char hex[]="0123456789abcdef";
++    memcpy(path,"/.a6cs4k-v2-",12);
++    for (unsigned i=0;i<32;++i) { path[12+i*2]=hex[c->journal.key[i]>>4]; path[13+i*2]=hex[c->journal.key[i]&15]; }
++    path[76]=0;
++    c->mode=FREAD|FWRITE;
++    lck_mtx_lock(&cache_lock);
++    error=vnode_open(path,c->mode|O_CREAT|O_NOFOLLOW,0600,
++        VNODE_LOOKUP_NOFOLLOW|VNODE_LOOKUP_NOCROSSMOUNT,&c->file,vfs_context_kernel());
++    if (error==EROFS) {
++        c->mode=FREAD;
++        error=vnode_open(path,FREAD|O_NOFOLLOW,0,
++            VNODE_LOOKUP_NOFOLLOW|VNODE_LOOKUP_NOCROSSMOUNT,&c->file,vfs_context_kernel());
++    }
++    if (!error) error=safe_file(c);
++    c->journal.limit=limit; c->journal.hash_size=hash_size;
++    c->journal.writable=(c->mode&FWRITE)!=0;
++    c->journal.io.cookie=c; c->journal.io.read=cache_read; c->journal.io.write=cache_write;
++    c->journal.io.resize=cache_resize; c->journal.io.sync=cache_sync;
++    if (!error) error=a6_csc_load(&c->journal,hashes);
++    if (error) {
++        printf("A6PLTE codesign cache: %s unavailable errno %d; verifying source\n",source->v_name,error);
++        if (c->file) vnode_close(c->file,c->mode,vfs_context_kernel());
++        lck_mtx_unlock(&cache_lock); kfree_type(struct a6_cs_cache,c); return NULL;
++    }
++    *position=c->journal.position;
++    if (*position) printf("A6PLTE codesign cache: %s reused %llu / %llu MiB%s\n",
++        source->v_name,*position>>20,limit>>20,*position==limit?" (complete)":"; resuming");
++    else if (c->journal.writable) printf("A6PLTE codesign cache: %s saving 4 MiB checkpoints on userdata\n",source->v_name);
++    return c;
++}
++int a6_cs_cache_save(struct a6_cs_cache *c, const unsigned char *hashes, uint64_t position) {
++    if (!c || !c->journal.writable || position==c->journal.position) return 0;
++    if (position!=c->journal.limit && position%A6_CSC_SOURCE_CHUNK) return 0;
++    int error=a6_csc_save(&c->journal,hashes,position);
++    if (error) {
++        c->journal.writable=0;
++        printf("A6PLTE codesign cache: %s checkpoint errno %d; verification continues\n",c->source->v_name,error);
++    }
++    return error;
++}
++int a6_cs_cache_close(struct a6_cs_cache *c) {
++    if (!c) return 0;
++    uint64_t identity[8]; int error=source_identity(c->source,identity);
++    if (!error && memcmp(identity,c->identity,sizeof(identity))) error=ESTALE;
++    if (error && (c->mode&FWRITE)) { cache_resize(c,0); cache_sync(c); }
++    vnode_close(c->file,c->mode,vfs_context_kernel());
++    lck_mtx_unlock(&cache_lock); kfree_type(struct a6_cs_cache,c);
++    return error;
++}
++#endif
 diff --git c/bsd/dev/a6plte/dyld_diag.c w/bsd/dev/a6plte/dyld_diag.c
 new file mode 100644
-index 0000000..a585d21
+index 0000000..7cbc1cd
 --- /dev/null
 +++ w/bsd/dev/a6plte/dyld_diag.c
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,142 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Read-only diagnostics for user-provided split dyld caches. No file changes. */
 +#if A6PLTE
@@ -211,6 +538,15 @@ index 0000000..a585d21
 +#include "dyld_diag.h"
 +static unsigned present,missing_files,bad_files,signatures;
 +static char first_issue[384],last_signature[192],last_mmap[192],last_map[128],blob_failure[192];
++static unsigned region_checks;
++static int region_check_result;
++static uint64_t region_address;
++void a6_dyld_note_check(int result,uint64_t address) {
++    ++region_checks;region_check_result=result;region_address=address;
++    /* KERN_INVALID_ADDRESS is the normal pre-map empty-region probe. Do not
++     * invent a mapping or return success: dyld must perform the real map2. */
++    if (result==0) printf("A6PLTE dyld: shared cache mapped at 0x%llx\n",(unsigned long long)address);
++}
 +void a6_dyld_note_signature(const char *name,int error,int64_t coverage,uint64_t offset,const char *stage) {
 +    snprintf(last_signature,sizeof(last_signature),"%s errno %d coverage %lld / %llu (%s)",
 +        name,error,(long long)coverage,(unsigned long long)offset,stage);
@@ -249,6 +585,8 @@ index 0000000..a585d21
 +    if (last_mmap[0]) printf("dyld last mmap: %s\n",last_mmap);
 +    if (last_map[0]) printf("dyld last map2: %s\n",last_map);
 +    else printf("dyld: map2 syscall not reached\n");
++    if (region_checks) printf("dyld region check: kr %d address 0x%llx (%u checks)\n",
++        region_check_result,(unsigned long long)region_address,region_checks);
 +}
 +static uint32_t le32(const unsigned char *p) {
 +    return p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
@@ -330,10 +668,10 @@ index 0000000..a585d21
 +#endif
 diff --git c/bsd/dev/a6plte/dyld_diag.h w/bsd/dev/a6plte/dyld_diag.h
 new file mode 100644
-index 0000000..795796f
+index 0000000..018a984
 --- /dev/null
 +++ w/bsd/dev/a6plte/dyld_diag.h
-@@ -0,0 +1,11 @@
+@@ -0,0 +1,12 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#ifndef A6PLTE_DYLD_DIAG_H
 +#define A6PLTE_DYLD_DIAG_H
@@ -343,6 +681,7 @@ index 0000000..795796f
 +void a6_dyld_note_blob(const char *,int,int,unsigned,int64_t,int64_t);
 +void a6_dyld_note_mmap(const char *,int,uint64_t,uint64_t);
 +void a6_dyld_note_map(unsigned,unsigned,int);
++void a6_dyld_note_check(int,uint64_t);
 +void a6_dyld_report(void);
 +#endif
 diff --git c/bsd/dev/a6plte/gpt.c w/bsd/dev/a6plte/gpt.c
@@ -1353,10 +1692,10 @@ index 0000000..d9a45df
 +#endif
 diff --git c/bsd/dev/a6plte/userdata.c w/bsd/dev/a6plte/userdata.c
 new file mode 100644
-index 0000000..5209cc9
+index 0000000..a3d3f65
 --- /dev/null
 +++ w/bsd/dev/a6plte/userdata.c
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,173 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Native BSD block/raw devices exposing only the GPT userdata slice. */
 +#include <sys/param.h>
@@ -1529,6 +1868,7 @@ index 0000000..5209cc9
 +    return 0;
 +}
 +int a6_userdata_root_selected(void) { return selected_root; }
++int a6_userdata_root_writable(void) { return selected_root && published && userdata.writable; }
 diff --git c/bsd/kern/bsd_init.c w/bsd/kern/bsd_init.c
 index 4df41ba..2052967 100644
 --- c/bsd/kern/bsd_init.c
@@ -1978,10 +2318,20 @@ index 9de68e1..66a3528 100644
  	int spacetype = IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32;
  
 diff --git c/bsd/kern/ubc_subr.c w/bsd/kern/ubc_subr.c
-index 9b553be..c54139d 100644
+index 9b553be..50d2771 100644
 --- c/bsd/kern/ubc_subr.c
 +++ w/bsd/kern/ubc_subr.c
-@@ -371,7 +371,11 @@ cs_validate_codedirectory(const CS_CodeDirectory *cd, size_t length)
+@@ -78,6 +78,9 @@
+ #include <security/mac_framework.h>
+ #include <stdbool.h>
+ #include <stdatomic.h>
++#if A6PLTE
++#include <dev/a6plte/cs_cache.h>
++#endif
+ #include <libkern/amfi/amfi.h>
+ 
+ /* XXX These should be in a BSD accessible Mach header, but aren't. */
+@@ -371,7 +374,11 @@ cs_validate_codedirectory(const CS_CodeDirectory *cd, size_t length)
  	if (ntohl(cd->magic) != CSMAGIC_CODEDIRECTORY) {
  		return EBADEXEC;
  	}
@@ -1994,7 +2344,7 @@ index 9b553be..c54139d 100644
  		printf("disallowing unsupported code signature page shift: %u\n", cd->pageSize);
  		return EBADEXEC;
  	}
-@@ -3874,6 +3878,13 @@ ubc_cs_convert_to_multilevel_hash(struct cs_blob *blob)
+@@ -3874,6 +3881,13 @@ ubc_cs_convert_to_multilevel_hash(struct cs_blob *blob)
  static void
  cs_blob_cleanup(struct cs_blob *blob)
  {
@@ -2008,7 +2358,7 @@ index 9b553be..c54139d 100644
  	if (blob->csb_entitlements != NULL) {
  		amfi->OSEntitlements_invalidate(blob->csb_entitlements);
  		osobject_release(blob->csb_entitlements);
-@@ -4336,6 +4347,11 @@ accelerate_entitlement_queries(
+@@ -4336,6 +4350,11 @@ accelerate_entitlement_queries(
  	 */
  	assert(ret == KERN_NOT_SUPPORTED);
  
@@ -2020,7 +2370,7 @@ index 9b553be..c54139d 100644
  	ret = amfi->OSEntitlements.adjustContextWithoutMonitor(
  		cs_blob->csb_entitlements,
  		cs_blob);
-@@ -4580,6 +4596,115 @@ reconstitute_code_signature(
+@@ -4580,6 +4599,126 @@ reconstitute_code_signature(
  	return 0;
  }
  
@@ -2063,6 +2413,7 @@ index 9b553be..c54139d 100644
 +	const size_t io_size = 64 * 1024, signed_size = 16 * 1024;
 +	unsigned char *buffer;
 +	uint64_t limit, pages, hash_bytes, position, next_report = 64 * 1024 * 1024;
++	struct a6_cs_cache *cache;
 +	off_t file_size;
 +	int error;
 +
@@ -2086,11 +2437,15 @@ index 9b553be..c54139d 100644
 +	blob->csb_a6_4k_hashes = kalloc_data((vm_size_t)hash_bytes, Z_WAITOK | Z_ZERO);
 +	if (blob->csb_a6_4k_hashes == NULL) return ENOMEM;
 +	blob->csb_a6_4k_hash_bytes = (vm_size_t)hash_bytes;
++	cache = a6_cs_cache_open(vp, cd, ntohl(cd->length), blob->csb_base_offset,
++	    limit, md->cs_size, blob->csb_a6_4k_hashes, &position);
++	if (position == limit) return a6_cs_cache_close(cache);
 +	buffer = kalloc_data(io_size, Z_WAITOK);
-+	if (buffer == NULL) return ENOMEM; /* caller cleans up the blob */
++	if (buffer == NULL) { a6_cs_cache_close(cache); return ENOMEM; } /* caller cleans up the blob */
++	next_report = ((position / (64 * 1024 * 1024)) + 1) * (64 * 1024 * 1024);
 +	printf("A6PLTE codesign: checking 16 KiB slots for %s (%llu MiB)\n",
 +	    vp->v_name ? vp->v_name : "(unnamed)", limit >> 20);
-+	for (position = 0; position < limit;) {
++	for (; position < limit;) {
 +		size_t length = MIN((uint64_t)io_size, limit - position);
 +		int resid = 0;
 +		error = vn_rdwr(UIO_READ, vp, (caddr_t)buffer, (int)length,
@@ -2108,8 +2463,8 @@ index 9b553be..c54139d 100644
 +			md->cs_update(&context, buffer + chunk, amount);
 +			md->cs_final(actual, &context);
 +			if (bcmp(actual, expected, md->cs_size) != 0) {
-+				printf("A6PLTE codesign: 16 KiB hash mismatch at file offset 0x%llx\n",
-+				    blob->csb_base_offset + (off_t)offset);
++				printf("A6PLTE codesign: %s 16 KiB hash mismatch at file offset 0x%llx\n",
++				    vp->v_name ? vp->v_name : "(unnamed)", blob->csb_base_offset + (off_t)offset);
 +				error = EBADEXEC;
 +				goto out;
 +			}
@@ -2121,13 +2476,19 @@ index 9b553be..c54139d 100644
 +			}
 +		}
 +		position += length;
++		/* The optional journal commits only whole verified source chunks. An
++		 * unavailable/full/read-only cache never skips signature validation. */
++		a6_cs_cache_save(cache, blob->csb_a6_4k_hashes, position);
 +		if (position >= next_report) {
-+			printf("A6PLTE codesign: verified %llu MiB\n", position >> 20);
++			printf("A6PLTE codesign: %s verified %llu / %llu MiB\n",
++			    vp->v_name ? vp->v_name : "(unnamed)", position >> 20, limit >> 20);
 +			next_report += 64 * 1024 * 1024;
 +		}
 +	}
 +out:
 +	kfree_data(buffer, io_size);
++	int cache_error = a6_cs_cache_close(cache);
++	if (!error && cache_error) error = cache_error;
 +	if (!error) printf("A6PLTE codesign: 16 KiB signature verified; 4 KiB page hashes ready\n");
 +	return error;
 +}
@@ -2136,7 +2497,7 @@ index 9b553be..c54139d 100644
  int
  ubc_cs_blob_add(
  	struct vnode    *vp,
-@@ -4604,6 +4729,11 @@ ubc_cs_blob_add(
+@@ -4604,6 +4743,11 @@ ubc_cs_blob_add(
  	boolean_t record_mtime = false;
  	kern_return_t kr = KERN_DENIED;
  	errno_t error = -1;
@@ -2148,7 +2509,7 @@ index 9b553be..c54139d 100644
  
  #if HAS_APPLE_PAC
  	void *signed_entitlements = NULL;
-@@ -4626,6 +4756,9 @@ ubc_cs_blob_add(
+@@ -4626,6 +4770,9 @@ ubc_cs_blob_add(
  	 */
  	error = cs_blob_init_validated(addr, size, &tmp_blob, &cd);
  	if (error != 0) {
@@ -2158,7 +2519,7 @@ index 9b553be..c54139d 100644
  		printf("unable to create a validated cs_blob object: %d\n", error);
  		return error;
  	}
-@@ -4635,6 +4768,7 @@ ubc_cs_blob_add(
+@@ -4635,6 +4782,7 @@ ubc_cs_blob_add(
  	tmp_blob.csb_base_offset = base_offset;
  
  	/* Perform 1st stage reconstitution */
@@ -2166,7 +2527,7 @@ index 9b553be..c54139d 100644
  	error = reconstitute_code_signature(&tmp_blob);
  	if (error != 0) {
  		goto out;
-@@ -4695,6 +4829,7 @@ ubc_cs_blob_add(
+@@ -4695,6 +4843,7 @@ ubc_cs_blob_add(
  	unsigned int cs_flags = tmp_blob.csb_flags;
  	unsigned int signer_type = tmp_blob.csb_signer_type;
  
@@ -2174,7 +2535,7 @@ index 9b553be..c54139d 100644
  	error = mac_vnode_check_signature(
  		vp,
  		&tmp_blob,
-@@ -4746,18 +4881,26 @@ ubc_cs_blob_add(
+@@ -4746,18 +4895,26 @@ ubc_cs_blob_add(
  #endif
  
  	/* Perform 2nd stage reconstitution */
@@ -2201,7 +2562,7 @@ index 9b553be..c54139d 100644
  	error = validate_auxiliary_signed_blobs(&tmp_blob);
  	if (error != 0) {
  		goto out;
-@@ -4771,6 +4914,7 @@ ubc_cs_blob_add(
+@@ -4771,6 +4928,7 @@ ubc_cs_blob_add(
  	 * that is the last part of signature validation which can shift the code
  	 * signature around.
  	 */
@@ -2209,7 +2570,7 @@ index 9b553be..c54139d 100644
  	error = accelerate_entitlement_queries(&tmp_blob);
  	if (error != 0) {
  		goto out;
-@@ -4791,6 +4935,7 @@ ubc_cs_blob_add(
+@@ -4791,6 +4949,7 @@ ubc_cs_blob_add(
  	 * in the beginning, right after structural validation, however, multilevel
  	 * hashing can change some offets.
  	 */
@@ -2217,7 +2578,7 @@ index 9b553be..c54139d 100644
  	blob_start_offset = tmp_blob.csb_base_offset + tmp_blob.csb_start_offset;
  	blob_end_offset = tmp_blob.csb_base_offset + tmp_blob.csb_end_offset;
  	if (blob_start_offset >= blob_end_offset) {
-@@ -4996,6 +5141,11 @@ ubc_cs_blob_add(
+@@ -4996,6 +5155,11 @@ ubc_cs_blob_add(
  	error = 0;      /* success ! */
  
  out:
@@ -2229,7 +2590,7 @@ index 9b553be..c54139d 100644
  	if (error) {
  		if (error != EAGAIN) {
  			printf("check_signature[pid: %d]: error = %d\n", proc_getpid(current_proc()), error);
-@@ -5115,6 +5265,10 @@ ubc_cs_blob_add_supplement(
+@@ -5115,6 +5279,10 @@ ubc_cs_blob_add_supplement(
  
  	vnode_unlock(orig_vp);
  
@@ -2240,7 +2601,7 @@ index 9b553be..c54139d 100644
  	blob_ro = zalloc_ro(ZONE_ID_CS_BLOB, Z_WAITOK | Z_NOFAIL);
  	tmp_blob.csb_ro_addr = blob_ro;
  	tmp_blob.csb_vnode = vp;
-@@ -5689,6 +5843,7 @@ cs_validate_hash(
+@@ -5689,6 +5857,7 @@ cs_validate_hash(
  	off_t                   offset; /* page offset in the file */
  	size_t                  size;
  	off_t                   codeLimit = 0;
@@ -2248,7 +2609,7 @@ index 9b553be..c54139d 100644
  	const char              *lower_bound, *upper_bound;
  	vm_offset_t             kaddr, blob_addr;
  
-@@ -5726,12 +5881,27 @@ cs_validate_hash(
+@@ -5726,12 +5895,27 @@ cs_validate_hash(
  			if (hashtype->cs_digest_size > sizeof(actual_hash)) {
  				panic("hash size too large");
  			}
@@ -2277,7 +2638,7 @@ index 9b553be..c54139d 100644
  			hash = hashes(cd, (uint32_t)(offset >> blob->csb_hash_pageshift),
  			    hashtype->cs_size,
  			    lower_bound, upper_bound);
-@@ -5764,8 +5934,16 @@ cs_validate_hash(
+@@ -5764,8 +5948,16 @@ cs_validate_hash(
  	} else {
  		*tainted = 0;
  
@@ -2582,10 +2943,28 @@ index d047621..f3e1dac 100644
  	if (dq->dq_id == 0) {
  		dq->dq_flags &= ~DQ_MOD;
 diff --git c/bsd/vfs/vfs_subr.c w/bsd/vfs/vfs_subr.c
-index 66b3cb7..125d3ee 100644
+index 66b3cb7..f25cb3e 100644
 --- c/bsd/vfs/vfs_subr.c
 +++ w/bsd/vfs/vfs_subr.c
-@@ -11021,7 +11021,7 @@ rmdir_remove_orphaned_appleDouble(vnode_t vp, vfs_context_t ctx, int * restart_f
+@@ -1152,6 +1152,17 @@ vfs_rootmountalloc_internal(struct vfstable *vfsp, const char *devname)
+ 	mp->mnt_vtable = vfsp;
+ 	mp->mnt_op = vfsp->vfc_vfsops;
+ 	mp->mnt_flag = MNT_RDONLY | MNT_ROOTFS;
++#if A6PLTE
++	/* launchd cannot remount / until dyld is running. The explicitly writable,
++	 * GPT-bounded userdata root must therefore be writable from its first HFS
++	 * mount, so authenticated hash checkpoints survive early userspace failure.
++	 * a6_userdata_rw=0 and the GPT read-only attribute keep the root read-only. */
++	extern int a6_userdata_root_writable(void);
++	if (!strcmp(vfsp->vfc_name, "hfs") && a6_userdata_root_writable()) {
++		mp->mnt_flag &= ~MNT_RDONLY;
++		printf("A6PLTE ROOT: writable userdata HFS root for persistent checkpoints\n");
++	}
++#endif
+ 	mp->mnt_vnodecovered = NULLVP;
+ 	//mp->mnt_stat.f_type = vfsp->vfc_typenum;
+ 	mp->mnt_flag |= vfsp->vfc_flags & MNT_VISFLAGMASK;
+@@ -11021,7 +11032,7 @@ rmdir_remove_orphaned_appleDouble(vnode_t vp, vfs_context_t ctx, int * restart_f
  	uio_t auio = NULL;
  	int eofflag, siz = UIO_BUFF_SIZE, alloc_size = 0, nentries = 0;
  	int open_flag = 0, full_erase_flag = 0;
@@ -2702,10 +3081,29 @@ index 5b51e9c..3a94ed4 100644
  	context.vc_thread = current_thread();
  	context.vc_ucred = cred;
 diff --git c/bsd/vm/vm_unix.c w/bsd/vm/vm_unix.c
-index 336c84d..375f359 100644
+index 336c84d..aec372c 100644
 --- c/bsd/vm/vm_unix.c
 +++ w/bsd/vm/vm_unix.c
-@@ -2994,6 +2994,12 @@ shared_region_map_and_slide_2_np(
+@@ -2118,6 +2118,18 @@ shared_region_check_np(
+ 		} else {
+ 			/* retrieve address of its first mapping... */
+ 			kr = vm_shared_region_start_address(shared_region, &start_address, task);
++#if A6PLTE
++			if (proc_getpid(p)==1) {
++				extern void a6_dyld_note_check(int,uint64_t);
++				a6_dyld_note_check(kr,start_address);
++			}
++			/* An empty shared region is dyld's ordinary first probe, before
++			 * map2. Preserve ENOMEM and the real mapping path, but don't label
++			 * this expected state as the cause of a later cache load failure. */
++			if (kr==KERN_INVALID_ADDRESS) {
++				error=ENOMEM;
++			} else
++#endif
+ 			if (kr != KERN_SUCCESS) {
+ 				SHARED_REGION_TRACE_ERROR(("shared_region: %p [%d(%s)] "
+ 				    "check_np(0x%llx) "
+@@ -2994,6 +3006,12 @@ shared_region_map_and_slide_2_np(
  done:
  	kfree_data(shared_files, files_count * sizeof(shared_files[0]));
  	kfree_data(mappings, mappings_count * sizeof(mappings[0]));

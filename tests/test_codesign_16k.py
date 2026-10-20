@@ -104,6 +104,16 @@ static void kfree_data(void *p,size_t n) { (void)n; assert(p); --live_allocation
 static int vfs_context_current(void) { return 0; }
 static int kauth_cred_get(void) { return 0; }
 static int current_proc(void) { return 0; }
+struct a6_cs_cache;
+static struct a6_cs_cache *a6_cs_cache_open(struct vnode *vp,const void *cd,size_t n,
+ int64_t base,uint64_t limit,unsigned hash_size,unsigned char *hashes,uint64_t *position) {
+ (void)vp;(void)cd;(void)n;(void)base;(void)limit;(void)hash_size;(void)hashes;
+ *position=0;return NULL;
+}
+static int a6_cs_cache_save(struct a6_cs_cache *c,const unsigned char *hashes,uint64_t position) {
+ (void)c;(void)hashes;(void)position;return 0;
+}
+static int a6_cs_cache_close(struct a6_cs_cache *c) { (void)c;return 0; }
 static int vnode_size(struct vnode *vp,off_t *n,int ctx) { (void)ctx;*n=vp->size;return 0; }
 static int vn_rdwr(int op,struct vnode *vp,char *p,int n,off_t off,int space,int flags,int cred,int *resid,int proc) {
  (void)op;(void)space;(void)flags;(void)cred;(void)proc;

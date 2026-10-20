@@ -257,3 +257,36 @@ Private receipt artifacts/boot-665a2d5-cpu0.private.log. Screen result pending:
 ask last lines, `dyld blob failure` and fcntl stage after last signature if it
 fails again. The binary hotfix was never loaded and is superseded. SMP off,
 no flash/UART/USB-network startup. No new pasta permission required.
+
+User now explicitly requests persistent, incremental on-disk 16K-to-4K hash
+conversion and reports `vm shared region start address failed`, then says an
+error started at “44” of `dyld_shared_cache_arm64.*`. Exact filename/errno not
+provided; an async question for the last signature/blob/map2 lines is pending.
+Do not assert the root cause from “44”. The previous prohibition on file changes
+does not block the explicitly requested derived cache files on userdata; do not
+replace the user's userspace, format or write other partitions.
+
+New source: cs_cache.c append-only, independently SHA256-checked records per
+4 MiB of verified source, HFS F_FULLFSYNC, resume through the last intact record.
+cs_cache_vfs.c confines `/.a6cs4k-v2-<key>` files to the userdata root, root uid,
+0600, one link, regular file, no symlinks/cross-mount lookup; identity binds full
+CodeDirectory + inode/size/mtime/ctime/base/hash geometry. Source changed during
+verification causes ESTALE and invalidates the checkpoint. Cached tables are
+trusted root-owned derived metadata, not cryptographically authenticated against
+a malicious root; document this rather than claiming checksums are signatures.
+Actual fault pages remain hash-checked; source/signature validation is retained
+on misses. Cache errors/full disk fall back without publishing an unchecked
+partial table. The first run necessarily computes unsaved portions again.
+
+VFS used to mount every root read-only before launchd; it now mounts only an
+explicitly writable, selected userdata HFS root writable from the start, so
+checkpoint creation works before dyld. GPT readonly and a6_userdata_rw=0 remain.
+An empty native shared-region probe returns KERN_INVALID_ADDRESS/ENOMEM by design
+before the first map2. Preserve that error and real mapping, reduce only the
+misleading ERROR trace for this normal case, retain the actual last check/map2.
+This does not establish or fix an unreported mapping refusal. SMP stays cpus=1.
+New ASan/UBSan tests exercise real journal/core and VFS adapter, all torn final
+record lengths, corruption, resumed prefix, source changes, read-only reuse,
+ENOSPC/fsync failure, permission/link/mount checks and balanced resources. Existing
+signature/fault and full host tests pass. Native cs_cache.c/dyld_diag.c probes
+pass; cs_cache_vfs uses real kalloc_type Apple builtins and must pass native CI.
