@@ -52,16 +52,19 @@ package format or a flash operation for this profile.
 
 ## Verification status
 
-All jobs in [Actions run 39445871601](https://github.com/omauser119/a6plte-xnu/actions/runs/39445871601)
-passed for native source `665a2d5`, including Apple Clang, linking with no undefined
-symbols, ASan/UBSan host checks and both image profiles. Download just the kernel
-with `python3 scripts/download-ci-kernel.py 39445871601`, then package it locally.
+All jobs in [Actions run 39473267592](https://github.com/omauser119/a6plte-xnu/actions/runs/39473267592)
+passed for native source `333bb5d`, including Apple Clang, linking with no undefined
+symbols, ASan/UBSan host checks and both image profiles. This includes persistent
+hash conversion and the QUP STOP/FIFO completion fix. Download just the kernel
+with `python3 scripts/download-ci-kernel.py 39473267592`, then package it locally.
 The downloader verifies the GitHub archive SHA256 before extraction.
 
 Hardware confirmed native launchd image activation and successful 16-KiB code
 signature verification on the 4-KiB kernel. Dyld then reported that its shared
 cache was not loaded and `libSystem.B.dylib` was unavailable; split-cache and
 mapping diagnostics are included. This is not yet a successful launchd boot.
+The preceding checkpoint image `ba06ed0` was accepted by fastboot; actual
+checkpoint creation/reuse and physical touch with `333bb5d` need screen results.
 
 All boot profiles currently use `cpus=1`: SMP is temporarily disabled at the
 user's request. The CPU0-only image reaches dyld. The retained SMP code describes

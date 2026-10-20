@@ -315,3 +315,17 @@ Regression models delayed physical STOP and reproduces the exact cmd21/reg18/40
 failure with the prior actual driver. Fixed actual driver passes it and a
 SERVICE-only (lagging DONE) transfer, ASan/UBSan and native A6Input.c header probe.
 This demonstrates source defects, not proof of working touch on the phone.
+
+333bb5d: ALL Actions 39473267592 succeeded (native compile, NOUNDEFS link, host
+tests and packaging). Verified downloaded kernel SHA256
+14852edc5624f43140ab6dc6d752f6144b5ee2be6408ef72caa7782976fcedb6.
+READY image: build/verified-333bb5d/images/xnu-8796-userdata-cpu0-boot.img,
+17094656 bytes, SHA256
+ffeb92cb7e28118b3cbe5f940bb1d3eecca734be518853381bd0186afa09d6ed.
+Image CRC/root/CPU0/USB/BootArgs profile checks passed, receipt next to kernel;
+linked native cache open/save/close, writable-root and input symbols verified.
+Includes both persistent hash conversion and own I2C completion fix. NOT BOOTED
+yet: fastboot empty after ba06ed0 activation. Readiness question pending: return
+from the current run to lk2nd after preserving final error lines if any. A second
+pending question asks whether ba06ed0 shows checkpoint saving and final dyld
+signature/blob/map2. No new pasta permission needed. Do not flash boot or LK.
