@@ -40,3 +40,29 @@ macOS отклонял iOS PID1 без атрибутов posix_spawn. В userda
 `01434528a7b6a8ee4f67f87b0c76ce8be4e5fc2d007ea46a2a9aad7407143a41`.
 Результат второго запуска пока не сообщён. Основной заголовок userdata HFSX
 проверен чтением: 4096-байтные блоки, 4194304 блока, том 16 ГиБ.
+
+## Следующая проверка и дополнения
+
+Второй запуск прошёл WRONG_PLATFORM, но пользователь сообщил отказ подписи
+dyld shared cache: `unsupported code signature page shift: 14`.
+Добавлена настоящая проверка 16-КиБ CodeDirectory на 4-КиБ ядре: перед
+публикацией подписи проверяются полные блоки и выводятся 4-КиБ хеши; VM fault
+проверяет реальные страницы по этим хешам, без I/O под VM lock и без чтения
+16 КиБ из 4-КиБ буфера. Исходные CodeDirectory/cdhash не изменяются.
+ASan/UBSan тесты с четырьмя алгоритмами, порчей данных, scatter, частичными
+страницами и ошибками выделения/I/O прошли; native ubc_subr.c компилируется.
+
+Пользователь дополнительно запросил адаптацию ios-sweet 0050–0057 и 0064:
+permissive Sandbox, crash heap strings (SIGABRT/SIGTRAP, SpringBoard),
+HFS rename swap, process sampler 16 кадров/40 снимков, AKS selectors 35/101,
+ограничение частоты показа кадров, CONFIG_EXT_RESOLVER off, work interval.
+Исходники патчей скачаны в reference/ios-sweet-patches, commit
+`11da58bd050672960c0a83b5bef2176047eea479`; требуется адаптация, ещё не включены.
+Также нужны идентичность Samsung Galaxy A6+, реальные размеры дисплея,
+явный стаб батареи 100%, реальные кнопки громкости/питания и тачскрин S6SY761.
+**HID Sweet запрещён последним указанием пользователя: писать собственный HID.**
+Тачскрин: I2C QUP 0x078b6000, адрес 0x48, IRQ TLMM GPIO59; volume-up GPIO85,
+power/resin (volume-down) PM8953 PON. Данные из reference/a6plte-r4.dts.
+Последний запрос: SMP всех восьми Cortex-A53. DT использует PSCI smc;
+MPIDR 0,1,2,3,0x100,0x101,0x102,0x103. Нельзя ограничиться сменой cpus=1:
+нужны per-CPU trampoline/MMU/IRQ/таймер и реальная проверка включения.

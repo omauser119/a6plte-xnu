@@ -1478,10 +1478,37 @@ index 9de68e1..66a3528 100644
  	int spacetype = IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32;
  
 diff --git c/bsd/kern/ubc_subr.c w/bsd/kern/ubc_subr.c
-index 9b553be..8fd49b8 100644
+index 9b553be..4d2882d 100644
 --- c/bsd/kern/ubc_subr.c
 +++ w/bsd/kern/ubc_subr.c
-@@ -4336,6 +4336,11 @@ accelerate_entitlement_queries(
+@@ -371,7 +371,11 @@ cs_validate_codedirectory(const CS_CodeDirectory *cd, size_t length)
+ 	if (ntohl(cd->magic) != CSMAGIC_CODEDIRECTORY) {
+ 		return EBADEXEC;
+ 	}
+-	if ((cd->pageSize != PAGE_SHIFT_4K) && (cd->pageSize != PAGE_SHIFT)) {
++	if ((cd->pageSize != PAGE_SHIFT_4K) && (cd->pageSize != PAGE_SHIFT)
++#if A6PLTE
++	    && !(PAGE_SHIFT == PAGE_SHIFT_4K && cd->pageSize == 14)
++#endif
++	    ) {
+ 		printf("disallowing unsupported code signature page shift: %u\n", cd->pageSize);
+ 		return EBADEXEC;
+ 	}
+@@ -3874,6 +3878,13 @@ ubc_cs_convert_to_multilevel_hash(struct cs_blob *blob)
+ static void
+ cs_blob_cleanup(struct cs_blob *blob)
+ {
++#if A6PLTE
++	if (blob->csb_a6_4k_hashes != NULL) {
++		kfree_data(blob->csb_a6_4k_hashes, blob->csb_a6_4k_hash_bytes);
++		blob->csb_a6_4k_hashes = NULL;
++		blob->csb_a6_4k_hash_bytes = 0;
++	}
++#endif
+ 	if (blob->csb_entitlements != NULL) {
+ 		amfi->OSEntitlements_invalidate(blob->csb_entitlements);
+ 		osobject_release(blob->csb_entitlements);
+@@ -4336,6 +4347,11 @@ accelerate_entitlement_queries(
  	 */
  	assert(ret == KERN_NOT_SUPPORTED);
  
@@ -1493,6 +1520,199 @@ index 9b553be..8fd49b8 100644
  	ret = amfi->OSEntitlements.adjustContextWithoutMonitor(
  		cs_blob->csb_entitlements,
  		cs_blob);
+@@ -4580,6 +4596,115 @@ reconstitute_code_signature(
+ 	return 0;
+ }
+ 
++#if A6PLTE
++/* Original CodeDirectory and cdhash stay intact. Never read a 16 KiB slot
++ * from the 4 KiB buffer passed by the locked VM fault path. Instead, before
++ * publishing the blob, authenticate whole slots from one kernel I/O snapshot
++ * and derive per-4-KiB hashes from those same bytes. Faults then check the
++ * actual resident page against the derived digest, including after file edits.
++ */
++static const unsigned char *
++a6_cs_slot_hash(const struct cs_blob *blob, uint32_t page)
++{
++	const CS_CodeDirectory *cd = blob->csb_cd;
++	uint64_t slot = page;
++	uint32_t count = ntohl(cd->nCodeSlots);
++	if (ntohl(cd->version) >= CS_SUPPORTSSCATTER && ntohl(cd->scatterOffset)) {
++		const SC_Scatter *s = (const SC_Scatter *)((const char *)cd + ntohl(cd->scatterOffset));
++		uint64_t preceding = 0;
++		for (; ntohl(s->count) != 0; ++s) {
++			uint32_t base = ntohl(s->base), n = ntohl(s->count);
++			if (page >= base && (uint64_t)page - base < n) {
++				slot = preceding + page - base;
++				goto found;
++			}
++			preceding += n;
++		}
++		return NULL;
++	}
++found:
++	if (slot >= count) return NULL;
++	return (const unsigned char *)cd + ntohl(cd->hashOffset) + slot * blob->csb_hashtype->cs_size;
++}
++
++static int
++a6_cs_prepare_4k_hashes(struct vnode *vp, struct cs_blob *blob)
++{
++	const CS_CodeDirectory *cd = blob->csb_cd;
++	const struct cs_hash *md = blob->csb_hashtype;
++	const size_t io_size = 64 * 1024, signed_size = 16 * 1024;
++	unsigned char *buffer;
++	uint64_t limit, pages, hash_bytes, position, next_report = 64 * 1024 * 1024;
++	off_t file_size;
++	int error;
++
++	if (blob->csb_hash_pageshift <= PAGE_SHIFT) return 0;
++	if (PAGE_SHIFT != PAGE_SHIFT_4K || blob->csb_hash_pageshift != 14 ||
++	    blob->csb_hash_firstlevel_pageshift != 0 || md == NULL ||
++	    md->cs_size == 0 || md->cs_size > CS_HASH_MAX_SIZE ||
++	    md->cs_digest_size > CS_HASH_MAX_SIZE || blob->csb_base_offset < 0) return EBADEXEC;
++	limit = ntohl(cd->codeLimit);
++	pages = (limit + FOURK_PAGE_SIZE - 1) / FOURK_PAGE_SIZE;
++	hash_bytes = pages * md->cs_size;
++	if (limit == 0 || hash_bytes > 64 * 1024 * 1024) return EBADEXEC;
++	/* Older XNU's coverage and page validator use the 32-bit codeLimit. */
++	if (ntohl(cd->version) >= CS_SUPPORTSCODELIMIT64 && OSSwapBigToHostInt64(cd->codeLimit64) > UINT32_MAX) return EBADEXEC;
++	if (!(ntohl(cd->version) >= CS_SUPPORTSSCATTER && ntohl(cd->scatterOffset)) &&
++	    (limit + signed_size - 1) / signed_size != ntohl(cd->nCodeSlots)) return EBADEXEC;
++	error = vnode_size(vp, &file_size, vfs_context_current());
++	if (error) return error;
++	if (file_size < blob->csb_base_offset || limit > (uint64_t)(file_size - blob->csb_base_offset)) return EBADEXEC;
++
++	blob->csb_a6_4k_hashes = kalloc_data((vm_size_t)hash_bytes, Z_WAITOK | Z_ZERO);
++	if (blob->csb_a6_4k_hashes == NULL) return ENOMEM;
++	blob->csb_a6_4k_hash_bytes = (vm_size_t)hash_bytes;
++	buffer = kalloc_data(io_size, Z_WAITOK);
++	if (buffer == NULL) return ENOMEM; /* caller cleans up the blob */
++	printf("A6PLTE codesign: checking 16 KiB slots for %s (%llu MiB)\n",
++	    vp->v_name ? vp->v_name : "(unnamed)", limit >> 20);
++	for (position = 0; position < limit;) {
++		size_t length = MIN((uint64_t)io_size, limit - position);
++		int resid = 0;
++		error = vn_rdwr(UIO_READ, vp, (caddr_t)buffer, (int)length,
++		    blob->csb_base_offset + (off_t)position, UIO_SYSSPACE, 0,
++		    kauth_cred_get(), &resid, current_proc());
++		if (error || resid != 0) { if (!error) error = EIO; break; }
++		for (size_t chunk = 0; chunk < length; chunk += signed_size) {
++			uint64_t offset = position + chunk;
++			const unsigned char *expected = a6_cs_slot_hash(blob, (uint32_t)(offset >> 14));
++			unsigned char actual[CS_HASH_MAX_SIZE];
++			union cs_hash_union context;
++			size_t amount = MIN(length - chunk, signed_size);
++			if (expected == NULL) continue; /* scatter hole, remains unvalidated */
++			md->cs_init(&context);
++			md->cs_update(&context, buffer + chunk, amount);
++			md->cs_final(actual, &context);
++			if (bcmp(actual, expected, md->cs_size) != 0) {
++				printf("A6PLTE codesign: 16 KiB hash mismatch at file offset 0x%llx\n",
++				    blob->csb_base_offset + (off_t)offset);
++				error = EBADEXEC;
++				goto out;
++			}
++			for (size_t sub = 0; sub < amount; sub += FOURK_PAGE_SIZE) {
++				md->cs_init(&context);
++				md->cs_update(&context, buffer + chunk + sub, MIN(amount - sub, FOURK_PAGE_SIZE));
++				md->cs_final(actual, &context);
++				bcopy(actual, blob->csb_a6_4k_hashes + ((offset + sub) >> PAGE_SHIFT_4K) * md->cs_size, md->cs_size);
++			}
++		}
++		position += length;
++		if (position >= next_report) {
++			printf("A6PLTE codesign: verified %llu MiB\n", position >> 20);
++			next_report += 64 * 1024 * 1024;
++		}
++	}
++out:
++	kfree_data(buffer, io_size);
++	if (!error) printf("A6PLTE codesign: 16 KiB signature verified; 4 KiB page hashes ready\n");
++	return error;
++}
++#endif
++
+ int
+ ubc_cs_blob_add(
+ 	struct vnode    *vp,
+@@ -4758,6 +4883,10 @@ ubc_cs_blob_add(
+ 	}
+ 
+ 	/* Ensure security critical auxiliary blobs still exist */
++#if A6PLTE
++	error = a6_cs_prepare_4k_hashes(vp, &tmp_blob);
++	if (error != 0) goto out;
++#endif
+ 	error = validate_auxiliary_signed_blobs(&tmp_blob);
+ 	if (error != 0) {
+ 		goto out;
+@@ -5115,6 +5244,10 @@ ubc_cs_blob_add_supplement(
+ 
+ 	vnode_unlock(orig_vp);
+ 
++#if A6PLTE
++	error = a6_cs_prepare_4k_hashes(vp, &tmp_blob);
++	if (error != 0) goto out;
++#endif
+ 	blob_ro = zalloc_ro(ZONE_ID_CS_BLOB, Z_WAITOK | Z_NOFAIL);
+ 	tmp_blob.csb_ro_addr = blob_ro;
+ 	tmp_blob.csb_vnode = vp;
+@@ -5689,6 +5822,7 @@ cs_validate_hash(
+ 	off_t                   offset; /* page offset in the file */
+ 	size_t                  size;
+ 	off_t                   codeLimit = 0;
++	unsigned                hash_pageshift = 0;
+ 	const char              *lower_bound, *upper_bound;
+ 	vm_offset_t             kaddr, blob_addr;
+ 
+@@ -5726,12 +5860,27 @@ cs_validate_hash(
+ 			if (hashtype->cs_digest_size > sizeof(actual_hash)) {
+ 				panic("hash size too large");
+ 			}
+-			if (offset & ((1U << blob->csb_hash_pageshift) - 1)) {
++			hash_pageshift = blob->csb_hash_pageshift;
++#if A6PLTE
++			if (hash_pageshift > PAGE_SHIFT) hash_pageshift = PAGE_SHIFT_4K;
++#endif
++			if (offset & ((1U << hash_pageshift) - 1)) {
+ 				panic("offset not aligned to cshash boundary");
+ 			}
+ 
+ 			codeLimit = ntohl(cd->codeLimit);
+ 
++#if A6PLTE
++			if (blob->csb_hash_pageshift > PAGE_SHIFT) {
++				uint64_t index = (uint64_t)offset >> PAGE_SHIFT_4K;
++				hash = NULL;
++				if (blob->csb_a6_4k_hashes != NULL && offset < codeLimit &&
++				    index < blob->csb_a6_4k_hash_bytes / hashtype->cs_size &&
++				    a6_cs_slot_hash(blob, (uint32_t)(offset >> 14)) != NULL) {
++					hash = blob->csb_a6_4k_hashes + index * hashtype->cs_size;
++				}
++			} else
++#endif
+ 			hash = hashes(cd, (uint32_t)(offset >> blob->csb_hash_pageshift),
+ 			    hashtype->cs_size,
+ 			    lower_bound, upper_bound);
+@@ -5764,8 +5913,16 @@ cs_validate_hash(
+ 	} else {
+ 		*tainted = 0;
+ 
+-		size = (1U << blob->csb_hash_pageshift);
++		size = (1U << hash_pageshift);
+ 		*bytes_processed = size;
++#if A6PLTE
++		/* Preserve the original slot's NX rule for a short final 16 KiB block. */
++		if (blob->csb_hash_pageshift > PAGE_SHIFT &&
++		    (codeLimit & ((1U << 14) - 1)) &&
++		    offset >= (codeLimit & ~((off_t)(1U << 14) - 1))) {
++			*tainted |= CS_VALIDATE_NX;
++		}
++#endif
+ 
+ 		const uint32_t *asha1, *esha1;
+ 		if ((off_t)(offset + size) > codeLimit) {
 diff --git c/bsd/kern/uipc_syscalls.c w/bsd/kern/uipc_syscalls.c
 index f2bd38e..50625c0 100644
 --- c/bsd/kern/uipc_syscalls.c
@@ -1617,6 +1837,22 @@ index 42e23d8..c355403 100644
  	char opaque[48];
  #else
  	char opaque[32];
+diff --git c/bsd/sys/ubc_internal.h w/bsd/sys/ubc_internal.h
+index 87cc1eb..b3580e5 100644
+--- c/bsd/sys/ubc_internal.h
++++ w/bsd/sys/ubc_internal.h
+@@ -126,6 +126,11 @@ struct cs_blob {
+ #endif
+ 	int             csb_hash_pageshift;
+ 	int             csb_hash_firstlevel_pageshift;   /* First hash this many bytes, then hash the hashes together */
++#if A6PLTE
++	/* Derived only after checking each complete 16 KiB signed block. */
++	unsigned char   *csb_a6_4k_hashes;
++	vm_size_t       csb_a6_4k_hash_bytes;
++#endif
+ 	const CS_CodeDirectory *csb_cd;
+ 	const char      *csb_teamid;
+ #if CONFIG_SUPPLEMENTAL_SIGNATURES
 diff --git c/bsd/sys/uio_internal.h w/bsd/sys/uio_internal.h
 index 74a2036..a499cd6 100644
 --- c/bsd/sys/uio_internal.h
