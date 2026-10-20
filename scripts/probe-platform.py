@@ -63,6 +63,8 @@ if mig_generated: flags+=['-I'+str(r/'build/kernel-headers/mach'),'-I'+str(r/'bu
 if source.endswith(('.cpp', '.cc')):
     sdk=Path(os.environ.get('SDK',str(Path.home()/'.local/share/theos/sdks/iPhoneOS16.5.sdk')))
     flags += ['-idirafter',str(sdk/'usr/include/c++/v1')]
+if source in ('pexpert/arm/a6plte/early.c', 'pexpert/arm/a6plte/fb.c'):
+    flags += ['-fno-jump-tables'] # No absolute string/dispatch tables before MMU.
 assembly=source.endswith('/genassym.c')
 if assembly: flags+=['-fno-integrated-as']
 if source.startswith(('iokit/Kernel/arm/A6HID', 'iokit/Kernel/arm/A6Input')) or source in ('pexpert/arm/a6plte/early.c','pexpert/arm/a6plte/fb.c','libkern/crypto/a6plte_kmem_rng.c','libkern/crypto/a6plte_sha512.c','libkern/crypto/a6plte_sha512_digest.c','iokit/Kernel/arm/A6PlatformServices.cpp','iokit/Kernel/arm/A6GraphicsLayout.c') or source.startswith(('libkern/crypto/a6plte_aes/','bsd/dev/a6plte/')):
