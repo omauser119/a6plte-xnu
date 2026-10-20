@@ -188,3 +188,16 @@ still unknown; do not infer missing libSystem from dyld's fallback message.
 Native-header probes for A6Input.c and dyld_diag.c pass. Existing core BSD units
 need Apple Clang allocator builtins and macOS SDK (local iOS SDK lacks MAP_32BIT);
 validate those and the full link in Actions. SMP remains cpus=1 in all images.
+
+bc1271e: all Actions 39420499935 passed, including native Apple Clang BSD/IOKit
+and final NOUNDEFS link. Verified kernel SHA256
+5184d5e43cffa55728a87ea8cb32cbf506692fe81f558440b0d322a4b2ca18dc.
+Latest ready CPU0-only image (not booted yet):
+build/verified-bc1271e/images/xnu-8796-userdata-cpu0-boot.img, 17094656 bytes,
+SHA256 d768ef87c2c7f896d01b10fd96ac915d210c1d94cb0a402687248655567a36dc.
+CRC/version/root/CPU limit validated; actual native early-stage disassembly
+still uses three PC-relative ADRP/ADD strings. Linked input status and dyld
+diagnostics symbols/strings present. Fastboot currently empty; readiness
+question pending. Load this verified image when the device returns, without
+requesting pasta again. Read `A6PLTE BOOT DIAGNOSTICS (CPU0)` for the first
+cache failure and S6 command/reg/value. No cache cause asserted yet.

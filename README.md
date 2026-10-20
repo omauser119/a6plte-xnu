@@ -52,10 +52,10 @@ package format or a flash operation for this profile.
 
 ## Verification status
 
-All jobs in [Actions run 39414369814](https://github.com/omauser119/a6plte-xnu/actions/runs/39414369814)
-passed for native source `f260bf3`, including Apple Clang, linking with no undefined
+All jobs in [Actions run 39420499935](https://github.com/omauser119/a6plte-xnu/actions/runs/39420499935)
+passed for native source `bc1271e`, including Apple Clang, linking with no undefined
 symbols, ASan/UBSan host checks and both image profiles. Download just the kernel
-with `python3 scripts/download-ci-kernel.py 39414369814`, then package it locally.
+with `python3 scripts/download-ci-kernel.py 39420499935`, then package it locally.
 The downloader verifies the GitHub archive SHA256 before extraction.
 
 Hardware confirmed native launchd image activation and successful 16-KiB code
@@ -63,14 +63,22 @@ signature verification on the 4-KiB kernel. Dyld then reported that its shared
 cache was not loaded and `libSystem.B.dylib` was unavailable; split-cache and
 mapping diagnostics are included. This is not yet a successful launchd boot.
 
-The new profile exposes eight Cortex-A53 CPUs in two clusters, with PSCI startup,
-per-CPU GICv2/timers, SGI IPIs and a cross-CPU framebuffer lock. The first SMP
+All boot profiles currently use `cpus=1`: SMP is temporarily disabled at the
+user's request. The CPU0-only image reaches dyld. The retained SMP code describes
+eight Cortex-A53 CPUs in two clusters, with PSCI startup, per-CPU GICv2/timers,
+SGI IPIs and a cross-CPU framebuffer lock. The first SMP
 attempt found a pre-MMU string lookup table, fixed with PC-relative code and a
 relocation regression check. The next attempt reached CPU registration and
 reported a missing kernel PRNG. Source `f260bf3` installs native HMAC-SHA256 DRBG
 instances through XNU's kernel PRNG API before registering/starting APs. This
-latest image is built and verified; eight online CPUs still require hardware
-confirmation. See [platform services](docs/PLATFORM-SERVICES.md) for the input
-implementation and remaining compatibility limits.
+code is built and verified; eight online CPUs have not been demonstrated.
+
+Hardware reported `S6SY761 probe failed` and another dyld cache load refusal.
+The latest build explicitly clears I2C error flags, preserves the original
+failure across cleanup and reports the sensor command/register/value. Before
+a PID1 panic it repeats the saved split-cache, signature errno/coverage, mmap
+and shared-region results in a compact framebuffer summary. These are
+diagnostics, not confirmation that the touchscreen or launchd now works.
+See [platform services](docs/PLATFORM-SERVICES.md) for input compatibility limits.
 
 Historical hardware reports elsewhere describe XNU 12377.
