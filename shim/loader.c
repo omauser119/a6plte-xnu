@@ -88,16 +88,19 @@ void xnu_load(struct platform *p,const void *dtb,struct range image) {
     /* The DEVELOPMENT macOS profile otherwise rejects iOS PID1 with
      * OS_REASON_EXEC / EXEC_EXIT_REASON_WRONG_PLATFORM (9 / 14).
      * Use XNU's native compatibility switch; keep signature checks intact. */
-    const char cmd[]="-v debug=0x14 cpus=8 serial=1 startup_debug=1 unentitled_ios_sim_launch=1 rd=a6userdata launchdsuffix=release";
+    const char cmd[]="-v debug=0x14 cpus=1 serial=1 startup_debug=1 unentitled_ios_sim_launch=1 rd=a6userdata launchdsuffix=release";
     _Static_assert(sizeof(cmd)<=sizeof(args->command_line),"BootArgs command line overflow");
     copy(args->command_line,cmd,sizeof(cmd));
     a6_fb_puts(fb,"Root: userdata HFS+; PID1: /sbin/launchd\n");
 #else
-    const char cmd[]="-v debug=0x14 cpus=8 serial=1 startup_debug=1";
-    const char root_cmd[]="-v debug=0x14 cpus=8 serial=1 startup_debug=1 rd=md0";
+    const char cmd[]="-v debug=0x14 cpus=1 serial=1 startup_debug=1";
+    const char root_cmd[]="-v debug=0x14 cpus=1 serial=1 startup_debug=1 rd=md0";
     if(h.ramdisk_bytes) copy(args->command_line,root_cmd,sizeof(root_cmd));
     else copy(args->command_line,cmd,sizeof(cmd));
 #endif
+    /* Native topology parsing filters out every AP with cpus=1, so the
+     * retained SMP implementation cannot issue CPU_ON for CPU1--CPU7. */
+    a6_fb_puts(fb,"CPU: CPU0 only; SMP temporarily disabled\n");
     a6_fb_puts(fb,"Entering experimental XNU. Waiting for XNU marker.\n");
     a6_fb_puts(fb,"ENTRY PA: "); a6_fb_hex(fb,dest+h.entry-h.virt);
     a6_fb_puts(fb,"\nBOOT ARGS PA: "); a6_fb_hex(fb,args_pa); a6_fb_puts(fb,"\n");

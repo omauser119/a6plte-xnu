@@ -26,6 +26,11 @@
 Корень `userdata`, PID1 `/sbin/launchd`, USB выключен, UART запрещён.
 Запись образа в `boot` пользователь пока только обсуждает; прошивка не запрошена.
 
+Последнее указание пользователя: **временно отключить SMP**. Все boot-профили
+теперь передают штатный `cpus=1`; native ml_parse_cpu_topology исключает AP
+до a6_start_other_cpus, поэтому CPU1–CPU7 не получают PSCI CPU_ON. Код SMP
+сохранён, но не включать обратно без запроса пользователя. PRNG сохранять.
+
 Базовое ядро 8796: источник `9caba04`, все три задания Actions 39299095063 успешны.
 Образ `/home/damstik/a6plte-xnu-8796/artifacts/xnu-8796-userdata-boot.img`,
 SHA-256 `71ae2dbf0c4b150eb70b37e22de139e7a53ac24500f1bf6d62468e9767c73ec8`, 16992256 байт.
@@ -158,6 +163,16 @@ build/verified-f260bf3/images/xnu-8796-userdata-boot.img (17094656 bytes), SHA25
 9f5962a1517096493493b0f3db400fb5d0f09026a05bf00155da39f41d1cbbdd.
 Kernel SHA256 b498e8ce26c7d10379672d00eac0227f55783084a60aedd700650144d1d2be6e.
 Verified native early-stage disassembly has three ADRP strings and no pointer
-lookup, SMP/PRNG markers and full kernel/payload CRC/profile. Not booted yet:
-fastboot devices empty; wait for hardware reset, readiness question pending.
+lookup, SMP/PRNG markers and full kernel/payload CRC/profile. Fastboot accepted
+this image after the user returned the device. User then requested SMP off.
 No renewed pasta approval is needed. UART and USB network remain disabled.
+
+Latest boot: same native f260bf3 kernel, bridge locally rebuilt with cpus=1
+for every profile. Immutable image:
+build/verified-f260bf3/cpu0/xnu-8796-userdata-cpu0-boot.img, SHA256
+9066f36735b8b11c24c9859016d7dc8f288a65a624cf9ccf58a73326235a1c06.
+Complete CRC/native version/CPU0 profile validated. Boot accepted in 0.487 s;
+private receipt artifacts/boot-f260bf3-cpu0.private.log. User reports it reached
+dyld, with S6SY761 probe failed and dyld cache '(null)' not loaded '(null)'.
+Need exact input reg/value and A6PLTE dyld preflight/signed/map lines; async
+question pending. This confirms first-CPU path to dyld, not working touch/SMP.
