@@ -216,3 +216,28 @@ and slice code unchanged. This is a demonstrated driver bug, not confirmation
 that it caused this specific signature EINVAL. Signature diagnostics now retain
 the fcntl stage (read/allocate/validate/coverage), plus exact cs_blob rejection
 stage, page shift, limit and coverage. Preserve native signature verification.
+
+665a2d5 pushed; all local tests pass, including the actual BSD strategy test.
+Actions 39445871601 initially queued the macOS job, now building. Background
+download/package watcher exec session 45300 will place the full native image in
+build/verified-665a2d5/images/xnu-8796-userdata-cpu0-boot.img once ALL CI jobs pass.
+Check that receipt first if it is ready by the time the phone returns.
+
+User insists on an actual fix immediately. A ready temporary image applies the
+same source fix to verified native bc1271e: NOP exactly the independent count>
+65536 rejection branch at KVA fffffff00741ff84 (file offset 41bf84), original
+instruction 540007e8 -> d503201f. Strict original SHA256, surrounding negative
+LBA/alignment instructions, slice call and symbol addresses verified; every
+other kernel byte unchanged. The whole-request a6_slice_io bounds, read-only
+attributes, GPT checks and raw physio cap remain. CPU0 only, no rootfs, UART
+and USB network off. CRC/payload/profile checks pass. This hotfix does NOT add
+the new granular signature stage logs from 665a2d5, and its symbol addresses
+still match bc1271e. Do not describe it as a new full-source CI build.
+Ready image: build/hotfix-bc1271e-largeio/xnu-8796-userdata-cpu0-largeio-boot.img,
+SHA256 8724bb1b8b1cd842e1fcccb4e65da14082f9aa414b5baa02f420c7d0d2cf2004.
+Kernel: build/hotfix-bc1271e-largeio/kernel.a6plte, SHA256
+46d2c8ddfa7957a49428aa7f2ed8309704938b3caa71f88919d3304acede8e15.
+Receipt in same directory. Not booted yet: fastboot empty; hardware-reset
+readiness question already pending. Load a verified ready image as soon as the
+phone returns; no new pasta authorization required. The driver bug is fixed,
+but whether it resolves this actual signature failure still needs hardware.
