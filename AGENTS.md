@@ -56,8 +56,14 @@ ASan/UBSan тесты с четырьмя алгоритмами, порчей �
 permissive Sandbox, crash heap strings (SIGABRT/SIGTRAP, SpringBoard),
 HFS rename swap, process sampler 16 кадров/40 снимков, AKS selectors 35/101,
 ограничение частоты показа кадров, CONFIG_EXT_RESOLVER off, work interval.
-Исходники патчей скачаны в reference/ios-sweet-patches, commit
-`11da58bd050672960c0a83b5bef2176047eea479`; требуется адаптация, ещё не включены.
+Поведение 0050–0057 и 0064 адаптировано: compat.c, a6plte_diagnostics.c,
+HFS regular-file exchange fallback, AKS DER 17/35 и consume 101, framebuffer
+shadow/timer, CONFIG_EXT_RESOLVER off. Добавлены Galaxy A6+ identity и
+явный IOPMPowerSource/AppleSmartBattery стаб 100%. Полные host-тесты,
+включая DER/bounds, прошли; compat.c и diagnostics.c native header probes
+прошли. C++ и kpi_vfs.c требуют Apple Clang (Linux не имеет allocator builtins).
+Исходные патчи сохранены только как reference, commit
+`11da58bd050672960c0a83b5bef2176047eea479`; HID 0058 удалён и не применяется.
 Также нужны идентичность Samsung Galaxy A6+, реальные размеры дисплея,
 явный стаб батареи 100%, реальные кнопки громкости/питания и тачскрин S6SY761.
 **HID Sweet запрещён последним указанием пользователя: писать собственный HID.**
@@ -66,3 +72,12 @@ power/resin (volume-down) PM8953 PON. Данные из reference/a6plte-r4.dts.
 Последний запрос: SMP всех восьми Cortex-A53. DT использует PSCI smc;
 MPIDR 0,1,2,3,0x100,0x101,0x102,0x103. Нельзя ограничиться сменой cpus=1:
 нужны per-CPU trampoline/MMU/IRQ/таймер и реальная проверка включения.
+
+664d6e1: все три задания Actions 39399742651 успешны. Проверенный образ
+с 16-КиБ проверкой подписи: build/verified-664d6e1/images/xnu-8796-userdata-boot.img,
+SHA256 a70b9ed5881e18eeaa72aca1cc10f8a36a532aac427c521bc16166f2ef0d1e47.
+Ядро build/verified-664d6e1/kernel/kernel.a6plte, SHA256
+f59d9f5d5072ad27fcda55813956c5e9ca5305c028bc6a6a6b54d930992e7e98.
+На телефон этот образ ещё не отправлен: fastboot не обнаружен, задан вопрос
+о возврате аппаратной перезагрузкой в lk2nd; ждать фактического подключения,
+не спрашивать заново разрешение pasta и не перезагружать в Odin.

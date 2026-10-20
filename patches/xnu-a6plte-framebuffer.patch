@@ -13,6 +13,16 @@ index e3d2f34..81d54f9 100644
  		fprintf(outf, "#define %s %d\n",
  		    fl->f_fn, count ? fl->f_type : 0);
  		free((char *)fl);
+diff --git c/bsd/conf/files w/bsd/conf/files
+index 4427401..db83df7 100644
+--- c/bsd/conf/files
++++ w/bsd/conf/files
+@@ -594,3 +594,5 @@ bsd/skywalk/packet/packet_kern.c		optional skywalk
+ bsd/skywalk/packet/pbufpool.c			optional skywalk
+ bsd/skywalk/packet/pbufpool_kern.c		optional skywalk
+ bsd/dev/cpu_copy_in_cksum_gen.c			optional skywalk
++
++bsd/dev/a6plte/compat.c optional a6plte
 diff --git c/bsd/conf/files.arm64 w/bsd/conf/files.arm64
 index a77bd10..5fc6f17 100644
 --- c/bsd/conf/files.arm64
@@ -30,6 +40,155 @@ index a77bd10..5fc6f17 100644
  bsd/dev/arm/cons.c		standard
  bsd/dev/arm/km.c		standard
  bsd/dev/arm/kern_machdep.c	standard
+diff --git c/bsd/dev/a6plte/compat.c w/bsd/dev/a6plte/compat.c
+new file mode 100644
+index 0000000..f4913d5
+--- /dev/null
++++ w/bsd/dev/a6plte/compat.c
+@@ -0,0 +1,143 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* Board-only bring-up policies and diagnostics, adapted for native XNU 8796. */
++#if A6PLTE
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/proc.h>
++#include <sys/proc_internal.h>
++#include <sys/priv.h>
++#include <sys/signal.h>
++#include <sys/kernel.h>
++#include <security/mac_policy.h>
++#include <kern/kalloc.h>
++#include <kern/locks.h>
++#include <kern/task.h>
++#include <kern/thread.h>
++#include <pexpert/pexpert.h>
++#include <vm/vm_map.h>
++#include <mach/vm_region.h>
++
++static uint64_t sandbox_seen;
++static mac_policy_handle_t sandbox_handle;
++static char sample_names[128], scan_names[128];
++static LCK_GRP_DECLARE(compat_group,"a6plte compat");
++static LCK_MTX_DECLARE(compat_lock,&compat_group);
++static struct { int priv; char name[32]; } denied[64];
++static unsigned denied_count;
++extern void a6_sample_task(const char *, int, task_t);
++extern void thread_terminate_self(void);
++extern kern_return_t vm_map_region_recurse_64(vm_map_t,vm_map_offset_t *,vm_map_size_t *,
++    natural_t *,vm_region_submap_info_64_t,mach_msg_type_number_t *);
++
++static bool wanted(const char *list,const char *name) {
++    size_t length=strlen(name);
++    for (const char *p=list;*p;) {
++        const char *end=strchr(p,',');size_t n=end?(size_t)(end-p):strlen(p);
++        if (length && n==length && !strncmp(p,name,n)) return true;
++        if (!end) break;p=end+1;
++    }
++    return false;
++}
++static int sandbox_syscall(struct proc *p,int call,__unused user_addr_t arg) {
++    if (call>=0 && call<64 && !(__atomic_fetch_or(&sandbox_seen,1ULL<<call,__ATOMIC_RELAXED)&(1ULL<<call)))
++        printf("A6PLTE Sandbox: %s[%d] op %d (permissive)\n",p->p_comm,proc_pid(p),call);
++    switch (call) {
++    case 4: case 5: case 6: case 0x43: return ENOENT; /* no path/token to return */
++    default: return 0;
++    }
++}
++static int sandbox_priv_grant(__unused kauth_cred_t cred,int priv) {
++    if (priv==PRIV_WORK_INTERVAL) return 0;
++    char name[32]={0};bool log=true;proc_selfname(name,sizeof(name));
++    lck_mtx_lock(&compat_lock);
++    for (unsigned i=0;i<denied_count;++i)
++        if (denied[i].priv==priv && !strcmp(denied[i].name,name)) { log=false;break; }
++    if (log && denied_count<64) {
++        denied[denied_count].priv=priv;strlcpy(denied[denied_count++].name,name,sizeof(name));
++    } else log=false;
++    lck_mtx_unlock(&compat_lock);
++    if (log) printf("A6PLTE Sandbox: %s privilege %d not granted\n",name,priv);
++    return EPERM;
++}
++static const struct mac_policy_ops sandbox_ops={
++    .mpo_policy_syscall=sandbox_syscall,.mpo_priv_grant=sandbox_priv_grant,
++};
++static struct mac_policy_conf sandbox_conf={
++    .mpc_name="Sandbox",.mpc_fullname="A6PLTE permissive bring-up Sandbox",.mpc_ops=&sandbox_ops,
++};
++
++void a6_crash_process(proc_t p,int signal) {
++    if (p!=current_proc() || (signal!=SIGABRT && signal!=SIGTRAP)) return;
++    printf("A6PLTE CRASH: %s[%d] signal %d\n",p->p_comm,proc_pid(p),signal);
++    a6_sample_task(p->p_comm,proc_pid(p),proc_task(p));
++    if (!wanted(scan_names,p->p_comm)) return;
++    const size_t chunk=65536;char *buffer=kalloc_data(chunk,Z_WAITOK);
++    if (!buffer) return;
++    vm_map_t map=current_map();vm_map_offset_t address=0;uint64_t attempted=0;
++    unsigned lines=0,regions=0;char previous[160]={0};
++    printf("A6PLTE STR: heap scan of %s\n",p->p_comm);
++    while (lines<700 && attempted<(96ULL<<20) && ++regions<=4096) {
++        vm_map_size_t size=0;natural_t depth=0;vm_region_submap_info_data_64_t info;
++        mach_msg_type_number_t count=VM_REGION_SUBMAP_INFO_V2_COUNT_64;
++        if (vm_map_region_recurse_64(map,&address,&size,&depth,(vm_region_submap_info_64_t)&info,&count)!=KERN_SUCCESS ||
++            !size || address+size<address) break;
++        vm_map_offset_t base=address;address+=size;
++        if (info.is_submap || (info.protection&(VM_PROT_READ|VM_PROT_WRITE))!=(VM_PROT_READ|VM_PROT_WRITE) ||
++            info.user_tag<1 || info.user_tag>11) continue;
++        for (vm_map_size_t off=0;off<size && lines<700 && attempted<(96ULL<<20);off+=chunk) {
++            size_t length=MIN((vm_map_size_t)chunk,size-off);attempted+=length;
++            if (copyin((user_addr_t)(base+off),buffer,length)!=0) continue;
++            size_t start=0,spaces=0;
++            for (size_t i=0;i<=length && lines<700;++i) {
++                if (i<length && (unsigned char)buffer[i]>=32 && (unsigned char)buffer[i]<127) {
++                    spaces+=buffer[i]==' ';continue;
++                }
++                if (i-start>=24 && spaces>=2) {
++                    char line[160];size_t n=MIN(i-start,sizeof(line)-1);
++                    memcpy(line,buffer+start,n);line[n]=0;
++                    if (strcmp(line,previous)) {
++                        printf("STR %s\n",line);strlcpy(previous,line,sizeof(previous));++lines;
++                    }
++                }
++                start=i+1;spaces=0;
++            }
++        }
++    }
++    printf("A6PLTE STR: %llu KiB attempted, %u strings\n",attempted>>10,lines);
++    kfree_data(buffer,chunk);
++}
++static int sample_process(proc_t p,__unused void *arg) {
++    char name[32]={0};proc_name(proc_pid(p),name,sizeof(name));
++    if (wanted(sample_names,name)) {
++        task_t task=proc_task(p);
++        if (task!=TASK_NULL) a6_sample_task(name,proc_pid(p),task);
++    }
++    return PROC_RETURNED;
++}
++static void sample_thread(__unused void *arg,__unused wait_result_t wr) {
++    static int channel;
++    if (sample_names[0]!='-') {
++        (void)tsleep(&channel,PZERO,"a6sample",90*hz);
++        for (unsigned n=0;n<40;++n) {
++            printf("A6PLTE SMP: process sample %u/40\n",n+1);
++            proc_iterate(PROC_ALLPROCLIST,sample_process,NULL,NULL,NULL);
++            if (n+1<40) (void)tsleep(&channel,PZERO,"a6sample",120*hz);
++        }
++    }
++    thread_terminate_self();
++}
++void a6_compat_init(void) {
++    strlcpy(scan_names,"backboardd,SpringBoard",sizeof(scan_names));
++    strlcpy(sample_names,"SpringBoard,backboardd",sizeof(sample_names));
++    if (!PE_parse_boot_argn("a6_scan",scan_names,sizeof(scan_names)))
++        PE_parse_boot_argn("sweetscan",scan_names,sizeof(scan_names));
++    if (!PE_parse_boot_argn("a6_sample",sample_names,sizeof(sample_names)))
++        PE_parse_boot_argn("sweetsample",sample_names,sizeof(sample_names));
++    scan_names[sizeof(scan_names)-1]=0;sample_names[sizeof(sample_names)-1]=0;
++    int error=mac_policy_register(&sandbox_conf,&sandbox_handle,NULL);
++    printf("A6PLTE Sandbox: permissive policy %s (%d); CoreAnimation work intervals allowed\n",
++        error?"unavailable":"registered",error);
++    thread_t thread;
++    if (kernel_thread_start(sample_thread,NULL,&thread)==KERN_SUCCESS) thread_deallocate(thread);
++}
++#endif
 diff --git c/bsd/dev/a6plte/gpt.c w/bsd/dev/a6plte/gpt.c
 new file mode 100644
 index 0000000..c8c1346
@@ -1211,7 +1370,7 @@ index 0000000..90bea63
 +}
 +int a6_userdata_root_selected(void) { return selected_root; }
 diff --git c/bsd/kern/bsd_init.c w/bsd/kern/bsd_init.c
-index 4df41ba..031f80a 100644
+index 4df41ba..2052967 100644
 --- c/bsd/kern/bsd_init.c
 +++ w/bsd/kern/bsd_init.c
 @@ -261,6 +261,9 @@ int darkboot = 0;
@@ -1236,11 +1395,13 @@ index 4df41ba..031f80a 100644
  		if (require_rootauth) {
  			/* enforce sealedness */
  			int autherr = VNOP_IOCTL(rootvnode, FSIOC_KERNEL_ROOTAUTH, NULL, 0, vfs_context_kernel());
-@@ -1085,6 +1093,13 @@ bsd_autoconf(void)
+@@ -1085,6 +1093,15 @@ bsd_autoconf(void)
  	kprintf("bsd_autoconf: calling kminit\n");
  	kminit();
  
 +#if A6PLTE
++	extern void a6_compat_init(void);
++	a6_compat_init();
 +	extern void a6_userdata_init(void);
 +	a6_userdata_init();
 +	extern void a6_usb_init(void);
@@ -1331,6 +1492,21 @@ index 9f521f6..c94f527 100644
  				}
  				if (ktrace_active_mask & KTRACE_KDEBUG) {
  					kdebug_reset();
+diff --git c/bsd/kern/kern_sig.c w/bsd/kern/kern_sig.c
+index ca53f9b..51f7611 100644
+--- c/bsd/kern/kern_sig.c
++++ w/bsd/kern/kern_sig.c
+@@ -3125,6 +3125,10 @@ postsig_locked(int signum)
+ 		KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_FRCEXIT) | DBG_FUNC_NONE,
+ 		    proc_getpid(p), W_EXITCODE(0, signum), 3, 0, 0);
+ 
++#if A6PLTE
++		extern void a6_crash_process(proc_t, int);
++		a6_crash_process(p, signum & ~WCOREFLAG);
++#endif
+ 		exit_with_reason(p, W_EXITCODE(0, signum), (int *)NULL, TRUE, TRUE, 0, ut_exit_reason);
+ 
+ 		proc_lock(p);
 diff --git c/bsd/kern/kern_trustcache.c w/bsd/kern/kern_trustcache.c
 index 4c22764..325e2af 100644
 --- c/bsd/kern/kern_trustcache.c
@@ -1876,6 +2052,27 @@ index 74a2036..a499cd6 100644
  
  #define UIO_IS_USER_SPACE32( a_uio_t )  \
  	( (a_uio_t)->uio_segflg == UIO_USERSPACE32 || (a_uio_t)->uio_segflg == UIO_PHYS_USERSPACE32 || \
+diff --git c/bsd/vfs/kpi_vfs.c w/bsd/vfs/kpi_vfs.c
+index 6bf58c3..b8ca58d 100644
+--- c/bsd/vfs/kpi_vfs.c
++++ w/bsd/vfs/kpi_vfs.c
+@@ -4459,6 +4459,16 @@ vn_rename(struct vnode *fdvp, struct vnode **fvpp, struct componentname *fcnp, s
+ 					_err = VNOP_RENAME(fdvp, *fvpp, fcnp, tdvp, *tvpp, tcnp, ctx);
+ 				}
+ 			}
++#if A6PLTE
++			/* HFS+ exchangedata supplies the regular-file atomic swap used by
++			 * Foundation when the filesystem has no VNOP_RENAMEX support. */
++			if (_err == ENOTSUP && flags == VFS_RENAME_SWAP && *tvpp != NULLVP &&
++			    vnode_isreg(*fvpp) && vnode_isreg(*tvpp) &&
++			    vnode_mount(*fvpp) == vnode_mount(*tvpp) &&
++			    !strcmp(vfs_statfs(vnode_mount(*fvpp))->f_fstypename, "hfs")) {
++				_err = VNOP_EXCHANGE(*fvpp, *tvpp, 0, ctx);
++			}
++#endif
+ 		} else {
+ 			_err = VNOP_RENAME(fdvp, *fvpp, fcnp, tdvp, *tvpp, tcnp, ctx);
+ 		}
 diff --git c/bsd/vfs/vfs_attrlist.c w/bsd/vfs/vfs_attrlist.c
 index cbaa0b2..963acec 100644
 --- c/bsd/vfs/vfs_attrlist.c
@@ -2100,7 +2297,7 @@ index 5b51e9c..3a94ed4 100644
  	context.vc_ucred = cred;
 diff --git c/config/MASTER.arm64.a6plte.MacOSX w/config/MASTER.arm64.a6plte.MacOSX
 new file mode 100644
-index 0000000..d2e9e67
+index 0000000..8dedf5c
 --- /dev/null
 +++ w/config/MASTER.arm64.a6plte.MacOSX
 @@ -0,0 +1,110 @@
@@ -2130,7 +2327,7 @@ index 0000000..d2e9e67
 +#  BSD_RELEASE =    [ BSD_BASE ]
 +#  BSD_DEV =        [ BSD_BASE config_vnguard ]
 +#  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
-+#  FILESYS_BASE =   [ devfs fdesc fifo fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_ext_resolver config_searchfs config_volfs config_appledouble nullfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
++#  FILESYS_BASE =   [ devfs fdesc fifo fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_searchfs config_volfs config_appledouble nullfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
 +#  FILESYS_RELEASE= [ FILESYS_BASE ]
 +#  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
 +#  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
@@ -2335,12 +2532,41 @@ index 0000000..9a8bcfe
 +        d->size < (uint64_t)d->stride*d->height || stride<w*bpp || stride>65536) return 0;
 +    return h<=bytes/stride;
 +}
+diff --git c/iokit/Kernel/arm/A6KeyStoreState.h w/iokit/Kernel/arm/A6KeyStoreState.h
+new file mode 100644
+index 0000000..95fa433
+--- /dev/null
++++ w/iokit/Kernel/arm/A6KeyStoreState.h
+@@ -0,0 +1,23 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef A6_KEYSTORE_STATE_H
++#define A6_KEYSTORE_STATE_H
++#include <stdint.h>
++/* DER SET OF SEQUENCE { UTF8String, INTEGER }, for the no-passcode stub.
++ * Bit 2 means unlocked since boot. No key material is generated or returned.
++ */
++static inline unsigned a6_aks_extended_state(uint8_t *out,unsigned capacity) {
++    static const char keys[][5]={"sb","ss","sas","sfa","sgs","sls","sgpe","srcd"};
++    static const unsigned lengths[]={2,2,3,3,3,3,4,4};
++    unsigned required=2;
++    for (unsigned i=0;i<8;++i) required+=7+lengths[i];
++    if (!out || capacity<required) return 0;
++    unsigned n=0;out[n++]=0x31;out[n++]=(uint8_t)(required-2);
++    for (unsigned i=0;i<8;++i) {
++        out[n++]=0x30;out[n++]=(uint8_t)(5+lengths[i]);
++        out[n++]=0x0c;out[n++]=(uint8_t)lengths[i];
++        for (unsigned j=0;j<lengths[i];++j) out[n++]=(uint8_t)keys[i][j];
++        out[n++]=2;out[n++]=1;out[n++]=(i==1)?4:0;
++    }
++    return n;
++}
++#endif
 diff --git c/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
 new file mode 100644
-index 0000000..75ede36
+index 0000000..f50bf72
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,99 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if A6PLTE
 +
@@ -2367,10 +2593,23 @@ index 0000000..75ede36
 +	void processTopLevel(IORegistryEntry *rootEntry) APPLE_KEXT_OVERRIDE;
 +	const char *deleteList(void) APPLE_KEXT_OVERRIDE;
 +	const char *excludeList(void) APPLE_KEXT_OVERRIDE;
++	bool getModelName(char *,int) APPLE_KEXT_OVERRIDE;
++	bool getMachineName(char *,int) APPLE_KEXT_OVERRIDE;
++	bool getProductName(char *,int) APPLE_KEXT_OVERRIDE;
++	bool getTargetName(char *,int) APPLE_KEXT_OVERRIDE;
 +};
 +
 +#define super IODTPlatformExpert
 +OSDefineMetaClassAndStructors(A6PLTEPlatformExpert, IODTPlatformExpert);
++
++static bool a6_identity(char *name,int size) {
++	if (name==NULL || size<=0) return false;
++	strlcpy(name,"Samsung Galaxy A6+",size);return true;
++}
++bool A6PLTEPlatformExpert::getModelName(char *n,int s) { return a6_identity(n,s); }
++bool A6PLTEPlatformExpert::getMachineName(char *n,int s) { return a6_identity(n,s); }
++bool A6PLTEPlatformExpert::getProductName(char *n,int s) { return a6_identity(n,s); }
++bool A6PLTEPlatformExpert::getTargetName(char *n,int s) { return a6_identity(n,s); }
 +
 +bool
 +A6PLTEPlatformExpert::start(IOService *provider)
@@ -2429,10 +2668,10 @@ index 0000000..75ede36
 +#endif /* A6PLTE */
 diff --git c/iokit/Kernel/arm/A6PlatformServices.cpp w/iokit/Kernel/arm/A6PlatformServices.cpp
 new file mode 100644
-index 0000000..fd880ff
+index 0000000..9b48f60
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PlatformServices.cpp
-@@ -0,0 +1,381 @@
+@@ -0,0 +1,484 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Board services with an explicitly versioned bring-up ABI, not Apple's private ABI. */
 +#if A6PLTE
@@ -2444,10 +2683,13 @@ index 0000000..fd880ff
 +#include <IOKit/IOWorkLoop.h>
 +#include <IOKit/IOTimerEventSource.h>
 +#include <IOKit/system_management/IOWatchDogTimer.h>
++#include <IOKit/pwr_mgt/IOPMPowerSource.h>
 +#include <IOKit/IOLib.h>
 +#include <libkern/c++/OSNumber.h>
 +#include <kern/clock.h>
++#include <pexpert/pexpert.h>
 +#include "A6PlatformServicesABI.h"
++#include "A6KeyStoreState.h"
 +static uint32_t serviceStatus;
 +extern "C" uint32_t a6_platform_service_status(void) {
 +    return __atomic_load_n(&serviceStatus,__ATOMIC_ACQUIRE);
@@ -2545,6 +2787,13 @@ index 0000000..fd880ff
 +    OSDeclareDefaultStructors(IOMobileFramebuffer);
 +    struct a6_display display={};
 +    IOLock *blitLock=nullptr;
++    IOWorkLoop *presentLoop=nullptr;
++    IOTimerEventSource *presentTimer=nullptr;
++    uint8_t *pending=nullptr;
++    uint32_t presentMS=100;
++    bool dirty=false;
++    uint64_t left=0,top=0,right=0,bottom=0;
++    static void present(OSObject *,IOTimerEventSource *);
 +public:
 +    bool start(IOService *) APPLE_KEXT_OVERRIDE;
 +    void free() APPLE_KEXT_OVERRIDE;
@@ -2557,6 +2806,11 @@ index 0000000..fd880ff
 +public:
 +    bool start(IOService *) APPLE_KEXT_OVERRIDE;
 +    IOReturn newUserClient(task_t,void *,UInt32,OSDictionary *,IOUserClient **) APPLE_KEXT_OVERRIDE;
++};
++class AppleSmartBattery : public IOPMPowerSource {
++    OSDeclareDefaultStructors(AppleSmartBattery);
++public:
++    bool start(IOService *) APPLE_KEXT_OVERRIDE;
 +};
 +/* Charge RAM until the final descriptor/mapping reference dies, not just until
 + * the client releases its handle. Otherwise lingering mappings bypass the cap. */
@@ -2575,6 +2829,7 @@ index 0000000..fd880ff
 +    struct a6_surface_info surfaceInfo={};
 +    IOSurfaceRoot *surfaceRoot=nullptr;
 +    IOMobileFramebuffer *framebuffer=nullptr;
++    bool keyStore=false;
 +    IODeviceMemory *aperture=nullptr;
 +    static IOReturn create(OSObject *,void *,IOExternalMethodArguments *);
 +    static IOReturn info(OSObject *,void *,IOExternalMethodArguments *);
@@ -2592,6 +2847,7 @@ index 0000000..fd880ff
 +OSDefineMetaClassAndStructors(IOSurfaceRoot,IOService);
 +OSDefineMetaClassAndStructors(IOMobileFramebuffer,IOService);
 +OSDefineMetaClassAndStructors(AppleKeyStore,IOService);
++OSDefineMetaClassAndStructors(AppleSmartBattery,IOPMPowerSource);
 +OSDefineMetaClassAndStructors(A6SurfaceMemory,IOBufferMemoryDescriptor);
 +OSDefineMetaClassAndStructors(A6PlatformUserClient,IOUserClient);
 +
@@ -2654,23 +2910,65 @@ index 0000000..fd880ff
 +    setProperty("IOFBMemorySize",display.info.size,64);
 +    setProperty("A6PageFlipSupported",false);setProperty("A6VBlankInterruptSupported",false);
 +    setProperty("A6ReadOnlyApertureMapping",true);
++    setProperty("DisplayWidth",display.info.width,32);setProperty("DisplayHeight",display.info.height,32);
++    setProperty("ProductName","Samsung Galaxy A6+");
++    pending=(uint8_t *)IOMallocData(display.info.size);
++    presentLoop=IOWorkLoop::workLoop();
++    presentTimer=IOTimerEventSource::timerEventSource(this,present);
++    if (!pending || !presentLoop || !presentTimer || presentLoop->addEventSource(presentTimer)!=kIOReturnSuccess) return false;
++    const volatile uint8_t *front=(const volatile uint8_t *)(uintptr_t)display.virtual_address;
++    for (uint64_t i=0;i<display.info.size;++i) pending[i]=front[i];
++    uint32_t hz=10;
++    if (!PE_parse_boot_argn("a6_fb_hz",&hz,sizeof(hz))) PE_parse_boot_argn("sweetfb_hz",&hz,sizeof(hz));
++    if (!hz || hz>60) hz=60;
++    presentMS=(1000+hz-1)/hz;setProperty("A6PresentHz",hz,32);
++    presentTimer->setTimeoutMS(presentMS);
 +    registerService();
 +    IOLog("IOMobileFramebuffer: %ux%u, stride %u, %u bpp; A6 ABI v1\n",
 +        display.info.width,display.info.height,display.info.stride,display.info.bits_per_pixel);
 +    ready(A6_READY_DISPLAY);
 +    return true;
 +}
-+void IOMobileFramebuffer::free() { if (blitLock) IOLockFree(blitLock);IOService::free(); }
++void IOMobileFramebuffer::free() {
++    if (presentTimer) {
++        presentTimer->cancelTimeout();if (presentLoop) presentLoop->removeEventSource(presentTimer);
++        presentTimer->release();
++    }
++    if (presentLoop) presentLoop->release();
++    if (pending) IOFreeData(pending,display.info.size);
++    if (blitLock) IOLockFree(blitLock);IOService::free();
++}
++void IOMobileFramebuffer::present(OSObject *owner,IOTimerEventSource *timer) {
++    IOMobileFramebuffer *self=OSDynamicCast(IOMobileFramebuffer,owner);
++    if (!self) return;
++    IOLockLock(self->blitLock);
++    if (self->dirty) {
++        unsigned bpp=self->display.info.bits_per_pixel/8;
++        volatile uint8_t *front=(volatile uint8_t *)(uintptr_t)self->display.virtual_address;
++        for (uint64_t row=self->top;row<self->bottom;++row) {
++            uint64_t begin=row*self->display.info.stride+self->left*bpp;
++            uint64_t end=row*self->display.info.stride+self->right*bpp;
++            for (uint64_t i=begin;i<end;++i) front[i]=self->pending[i];
++        }
++        __asm__ volatile("dsb sy" ::: "memory");self->dirty=false;
++    }
++    IOLockUnlock(self->blitLock);timer->setTimeoutMS(self->presentMS);
++}
 +IOReturn IOMobileFramebuffer::blit(const uint64_t *v,const uint8_t *data,uint32_t bytes) {
 +    if (!a6_display_rectangle(&display.info,v[0],v[1],v[2],v[3],v[4],bytes)) return kIOReturnBadArgument;
 +    unsigned bpp=display.info.bits_per_pixel/8;
 +    IOLockLock(blitLock);
-+    volatile uint8_t *destination=(volatile uint8_t *)(uintptr_t)display.virtual_address;
++    uint8_t *destination=pending;
 +    for (uint64_t row=0;row<v[3];++row) {
 +        uint64_t offset=(v[1]+row)*display.info.stride+v[0]*bpp;
 +        for (uint64_t col=0;col<v[2]*bpp;++col) destination[offset+col]=data[row*v[4]+col];
 +    }
-+    __asm__ volatile("dsb sy" ::: "memory");
++    if (!dirty) { left=v[0];top=v[1];right=v[0]+v[2];bottom=v[1]+v[3]; }
++    else {
++        if (v[0]<left) left=v[0];if (v[1]<top) top=v[1];
++        if (v[0]+v[2]>right) right=v[0]+v[2];if (v[1]+v[3]>bottom) bottom=v[1]+v[3];
++    }
++    dirty=true;
 +    IOLockUnlock(blitLock);return kIOReturnSuccess;
 +}
 +bool AppleKeyStore::start(IOService *provider) {
@@ -2679,9 +2977,49 @@ index 0000000..fd880ff
 +    setProperty("A6Stub",true);setProperty("A6SecureEnclavePresent",false);
 +    setProperty("A6KeybagsSupported",false);setProperty("A6HardwareKeysAvailable",false);
 +    registerService();
-+    IOLog("AppleKeyStore: stub registered; keybag/SEP operations unsupported\n");
++    IOLog("AppleKeyStore: no-passcode state/consume stub; keybag/SEP operations unsupported\n");
 +    ready(A6_READY_KEYSTORE_STUB);
 +    return true;
++}
++bool AppleSmartBattery::start(IOService *provider) {
++    if (!IOPMPowerSource::start(provider)) return false;
++    setName("AppleSmartBattery");setProperty("A6Stub",true);
++    setProperty("A6ActualChargeMeasured",false);
++    setBatteryInstalled(true);setExternalConnected(false);setExternalChargeCapable(false);
++    setIsCharging(false);setCurrentCapacity(100);setMaxCapacity(100);
++    setAtWarnLevel(false);setAtCriticalLevel(false);setAmperage(0);setVoltage(4000);
++    setTimeRemaining(-1);setCycleCount(0);setProperty("FullyCharged",true);
++    setProperty("AppleRawCurrentCapacity",100,32);setProperty("AppleRawMaxCapacity",100,32);
++    setProperty("ProductName","Samsung Galaxy A6+");
++    updateStatus();registerService();IOLog("A6PLTE battery: fixed 100%% bring-up stub\n");return true;
++}
++
++static IOReturn aksMethod(uint32_t selector,IOExternalMethodArguments *args) {
++    if (!args || args->asyncWakePort || args->asyncReferenceCount || args->structureInputDescriptor)
++        return kIOReturnBadArgument;
++    if (selector==17 || selector==35) {
++        uint8_t data[128];unsigned size=a6_aks_extended_state(data,sizeof(data));
++        args->scalarOutputCount=0;
++        if (args->structureOutputDescriptor) {
++            if (args->structureOutputDescriptor->getLength()<size) return kIOReturnNoSpace;
++            if (args->structureOutputDescriptor->writeBytes(0,data,size)!=size) return kIOReturnError;
++            args->structureOutputDescriptorSize=size;
++        } else {
++            if (!args->structureOutput || args->structureOutputSize<size) return kIOReturnNoSpace;
++            bcopy(data,args->structureOutput,size);args->structureOutputSize=size;
++        }
++        return kIOReturnSuccess;
++    }
++    if (selector==7 || selector==14) {
++        if (!args->scalarOutput || args->scalarOutputCount<1) return kIOReturnBadArgument;
++        args->scalarOutput[0]=(selector==7)?4:0;args->scalarOutputCount=1;
++        args->structureOutputSize=0;args->structureOutputDescriptorSize=0;return kIOReturnSuccess;
++    }
++    if (selector==0 || selector==101) {
++        args->scalarOutputCount=0;args->structureOutputSize=0;args->structureOutputDescriptorSize=0;
++        return kIOReturnSuccess;
++    }
++    return kIOReturnUnsupported;
 +}
 +static IOReturn openClient(IOService *service,task_t task,void *security,UInt32 type,
 +    OSDictionary *properties,IOUserClient **handler,bool keyStore=false) {
@@ -2710,6 +3048,7 @@ index 0000000..fd880ff
 +bool A6PlatformUserClient::start(IOService *provider) {
 +    if (!IOUserClient::start(provider) || !(clientLock=IOLockAlloc())) return false;
 +    surfaceRoot=OSDynamicCast(IOSurfaceRoot,provider);
++    keyStore=OSDynamicCast(AppleKeyStore,provider)!=nullptr;
 +    framebuffer=OSDynamicCast(IOMobileFramebuffer,provider);
 +    if (surfaceRoot) surfaceRoot->retain();
 +    if (framebuffer) {
@@ -2727,6 +3066,8 @@ index 0000000..fd880ff
 +IOReturn A6PlatformUserClient::clientClose() { terminate();return kIOReturnSuccess; }
 +IOReturn A6PlatformUserClient::externalMethod(uint32_t selector,IOExternalMethodArguments *a,
 +    __unused IOExternalMethodDispatch *dispatch,__unused OSObject *target,__unused void *reference) {
++    if (isInactive()) return kIOReturnNotReady;
++    if (keyStore) return aksMethod(selector,a);
 +    if (!a || a->asyncWakePort || a->asyncReferenceCount || a->structureInputDescriptor || a->structureOutputDescriptor)
 +        return kIOReturnBadArgument;
 +    if (isInactive()) return kIOReturnNotReady;
@@ -2741,7 +3082,7 @@ index 0000000..fd880ff
 +    const IOExternalMethodDispatch *entry=nullptr;
 +    if (surfaceRoot && selector<sizeof(surfaceMethods)/sizeof(surfaceMethods[0])) entry=&surfaceMethods[selector];
 +    else if (framebuffer && selector<sizeof(displayMethods)/sizeof(displayMethods[0])) entry=&displayMethods[selector];
-+    if (!entry) return kIOReturnUnsupported; /* Includes every AppleKeyStore selector. */
++    if (!entry) return kIOReturnUnsupported;
 +    return IOUserClient::externalMethod(selector,a,const_cast<IOExternalMethodDispatch *>(entry),this,nullptr);
 +}
 +IOReturn A6PlatformUserClient::create(OSObject *object,__unused void *reference,IOExternalMethodArguments *a) {
@@ -2810,6 +3151,7 @@ index 0000000..fd880ff
 +void a6_start_platform_services(IOService *provider) {
 +    startBoardService<A6PLTEWatchdog>(provider,"watchdog");
 +    startBoardService<AppleKeyStore>(provider,"AppleKeyStore");
++    startBoardService<AppleSmartBattery>(provider,"battery");
 +    startBoardService<IOSurfaceRoot>(provider,"IOSurfaceRoot");
 +    startBoardService<IOMobileFramebuffer>(provider,"IOMobileFramebuffer");
 +}
@@ -6707,6 +7049,62 @@ index df672c6..b5dce9e 100644
  bool pmap_pending_preemption(void); // more complicated, so externally defined
  #else /* SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT) */
  #define pmap_pending_preemption _pmap_pending_preemption_real
+diff --git c/osfmk/arm64/a6plte_diagnostics.c w/osfmk/arm64/a6plte_diagnostics.c
+new file mode 100644
+index 0000000..513b4f1
+--- /dev/null
++++ w/osfmk/arm64/a6plte_diagnostics.c
+@@ -0,0 +1,50 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#if A6PLTE
++#include <kern/task.h>
++#include <kern/thread.h>
++#include <kern/queue.h>
++#include <kern/misc_protos.h>
++#include <vm/vm_map.h>
++#include <vm/vm_shared_region.h>
++#include <arm/thread.h>
++#include <arm64/proc_reg.h>
++
++/* References are captured under the task lock. All pageable memory reads and
++ * framebuffer logging happen after releasing it, so a fault cannot sleep
++ * while holding XNU's task spin lock. Samples show the last saved user state.
++ */
++void a6_sample_task(const char *name,int pid,task_t task) {
++    thread_t captured[64],thread;unsigned n=0;
++    vm_map_t map=get_task_map_reference(task);uint64_t slide=0;
++    if (map==VM_MAP_NULL) return;
++    vm_shared_region_t region=vm_shared_region_get(task);
++    if (region) { slide=region->sr_slide;vm_shared_region_deallocate(region); }
++    task_lock(task);
++    queue_iterate(&task->threads,thread,thread_t,task_threads) {
++        if (n==64) break;
++        thread_reference(thread);captured[n++]=thread;
++    }
++    task_unlock(task);
++    printf("A6PLTE SMP: %s[%d] slide 0x%llx mh 0x%llx, %u threads\n",
++        name,pid,slide,task->mach_header_vm_address,n);
++    for (unsigned i=0;i<n;++i) {
++        arm_thread_state64_t state={0};mach_msg_type_number_t count=ARM_THREAD_STATE64_COUNT;
++        if (thread_getstatus(captured[i],ARM_THREAD_STATE64,(thread_state_t)&state,&count)==KERN_SUCCESS) {
++            char line[480];
++            int used=snprintf(line,sizeof(line),"SMP %s[%d] t%u pc 0x%llx lr 0x%llx sp 0x%llx bt",
++                name,pid,i,state.pc,state.lr,state.sp);
++            uint64_t fp=state.fp;
++            for (unsigned depth=0;depth<16 && fp && !(fp&7) && used>0 && used<(int)sizeof(line)-24;++depth) {
++                uint64_t frame[2];
++                if (vm_map_read_user(map,fp,frame,sizeof(frame))!=KERN_SUCCESS) break;
++                used+=snprintf(line+used,sizeof(line)-(size_t)used," 0x%llx",frame[1]);
++                if (frame[0]<=fp || frame[0]-fp>1024*1024) break;
++                fp=frame[0];
++            }
++            printf("%s\n",line);
++        }
++        thread_deallocate(captured[i]);
++    }
++    vm_map_deallocate(map);
++}
++#endif
 diff --git c/osfmk/arm64/a6plte_interrupts.c w/osfmk/arm64/a6plte_interrupts.c
 new file mode 100644
 index 0000000..8570b16
@@ -7269,7 +7667,7 @@ index e5336e5..9ce3051 100644
  	add		x0, x20, x22
  	sub		x0, x0, x23
 diff --git c/osfmk/conf/files.arm64 w/osfmk/conf/files.arm64
-index c40d57b..66c6da3 100644
+index c40d57b..ab2e33d 100644
 --- c/osfmk/conf/files.arm64
 +++ w/osfmk/conf/files.arm64
 @@ -1,3 +1,4 @@
@@ -7286,7 +7684,7 @@ index c40d57b..66c6da3 100644
  osfmk/arm64/bcopy.s standard
  osfmk/arm64/bzero.s standard
  osfmk/arm/caches.c		standard
-@@ -104,3 +105,8 @@ osfmk/arm64/machine_remote_time.c optional config_mach_bridge_recv_time
+@@ -104,3 +105,10 @@ osfmk/arm64/machine_remote_time.c optional config_mach_bridge_recv_time
  osfmk/arm64/corecrypto/sha256_compress_arm64.s	standard
  
  osfmk/arm/counter.c	standard
@@ -7295,6 +7693,8 @@ index c40d57b..66c6da3 100644
 +osfmk/arm/arm_init.c optional a6plte
 +osfmk/arm64/arm_vm_init.c optional a6plte
 +osfmk/arm64/start.s optional a6plte
++
++osfmk/arm64/a6plte_diagnostics.c optional a6plte
 diff --git c/osfmk/console/serial_console.c w/osfmk/console/serial_console.c
 index e5b23f2..99b447b 100644
 --- c/osfmk/console/serial_console.c

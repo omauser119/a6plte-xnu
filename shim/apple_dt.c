@@ -16,7 +16,11 @@ static void node(struct adt *a,unsigned props,unsigned kids,const char *name) { 
 unsigned a6_make_adt(void *buf,unsigned cap,uint64_t dest,uint64_t arena,uint64_t span,uint32_t freq,
                          const uint8_t *seed,unsigned seed_size,uint64_t ramdisk,uint64_t ramdisk_bytes) {
     struct adt a={buf,0,cap,0}; uint32_t one=1,zero32=0; uint64_t r[3]={0,0x01000000,0x10000000};
-    node(&a,2,4,"device-tree"); str(&a,"compatible","samsung,a6plte"); str(&a,"model","SM-A605FN");
+    node(&a,8,4,"device-tree"); str(&a,"compatible","samsung,a6plte"); str(&a,"model","Samsung Galaxy A6+");
+    str(&a,"product-name","Samsung Galaxy A6+");str(&a,"target-type","Samsung Galaxy A6+");
+    str(&a,"model-number","SM-A605FN");str(&a,"manufacturer","Samsung");
+    uint32_t width=1080,height=2220;
+    prop(&a,"display-width",&width,4);prop(&a,"display-height",&height,4);
     node(&a,6,1,"chosen"); prop(&a,"debug-enabled",&one,4); prop(&a,"dram-base",&dest,8); prop(&a,"dram-size",&arena,8); str(&a,"firmware-version","lk2nd-a6plte-xnu-experimental");
     prop(&a,"random-seed",seed,seed_size);
     /* Cortex-A53 has no Apple CTRR: report that fact to native XNU startup. */

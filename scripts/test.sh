@@ -23,6 +23,7 @@ python3 "$ROOT/tests/test_iokit_catalogue.py"
 python3 "$ROOT/tests/test_amfi_queries.py"
 python3 "$ROOT/tests/test_amfi_signature.py"
 python3 "$ROOT/tests/test_codesign_16k.py"
+python3 "$ROOT/tests/test_aks_state.py"
 clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_usb.c" "$ROOT/xnu/bsd/dev/a6plte/usb_ecm.c" "$ROOT/xnu/bsd/dev/a6plte/usb_dwc3.c" -o "$ROOT/artifacts/test-usb"
 "$ROOT/artifacts/test-usb"
 for unit in storage sdhci; do
