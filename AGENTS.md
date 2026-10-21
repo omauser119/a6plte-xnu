@@ -649,3 +649,20 @@ Local C++ header probe hits existing Apple allocator builtins unavailable in Lin
 do not add fake builtins or header stubs, validate the actual TU with Apple CI.
 CI/native link and exact-image hardware verification are next. CPU0, USB-off,
 UART prohibition and kernel-only/fixes-only scope remain.
+
+ae9c607: ALL Actions 39602773339 passed (actual Apple Clang/NOUNDEFS link,
+host regressions and packaging). Verified native kernel SHA256
+e76acb5ae3a37babdc57f1bc658921508ec18f70869695f74cc85a46cac46004.
+Linked UUID/SHA384, prior real identity/platform helpers and SHA1 confirmed;
+standalone hash domain present. Image:
+build/verified-ae9c607/images/xnu-8796-userdata-cpu0-boot.img, 17111040 bytes,
+SHA256 62b5956f605f571ecc90162b5f1f106328de462523aef972dce3f898fd9acc64.
+Successful source/archive/kernel/image hashes, nonzero unique LC_UUID, full CRC/
+CPU0/userdata/USB-off profile and expected phone/hfs-map-v2 verified. User already
+returned phone, fastboot boot accepted this exact image: send 0.381 s, boot
+0.078 s, total 0.479 s. Private log artifacts/boot-ae9c607-cpu0.private.log;
+image/boot receipts in build/verified-ae9c607 (including expected standalone
+boot_identity_sha384). Latest PHONE BOOTED image, not a flash. Actual passing
+boot-hash query/launchd result pending; async screen question asked. No new
+hardware progress inferred from fastboot ACK. No userspace inspection/edits,
+new diagnostics, UART, USB networking or SMP.
