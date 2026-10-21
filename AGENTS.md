@@ -717,3 +717,27 @@ boot receipts in build/verified-ada2366. Latest PHONE BOOTED image, not a flash.
 Actual mount-phase-1 and journal-flush result pending; screen question asked.
 Do not infer passing the old mount failure from fastboot ACK. No user OS files
 were inspected or edited, no new logs/diagnostic images, UART, USB network or SMP.
+
+IMG_3498.HEIC (2026-10-21 16:23:18) confirms ada2366 passed mount-phase-1:
+the actual /usr/standalone/firmware bind mount appears in normal unmount output.
+Next original failure is MobileKeyBag validation: systembag.kb missing WipeID,
+validation -1, load -8, FATAL KEYBAG ERROR kb_load. Missing /options is also
+reported. Final IOPlatformExpert Halt/Restart Timed Out panic follows MKB's
+explicit recovery reboot request, not the initial failure. Do not suppress the
+reboot/panic or manufacture a keybag/WipeID. Only kernel fixes remain authorized;
+do not inspect or modify prepared userspace files.
+
+Board expert now publishes empty OSData /defaults/no-effaceable-storage before
+BSD/services: hardware capability is genuinely absent on this Qualcomm board.
+MobileKeyBag's presence-only branch is documented by wh1te4ever/usbliter8-fun,
+commit 84c0a31806c53bfe36eee6c669c671c0b2ced5be work-27.0b2/dt_patch3.py;
+iOS16 qemu-t8030 hw/arm/xnu.c also sets it. Analysis is from another OS release,
+so do not claim actual prepared userspace has passed MKB until phone evidence.
+Do not add diagnostics mode or content-protect, fake /options/NVRAM, keybag
+cryptography or keys. Existing flag preserved; missing node/publication failure
+fails platform startup. ASan/UBSan regression executes actual board helper and
+native IORegistryEntry OSData setter, covers missing versus empty property,
+zero-length data, repeat boot/firmware preservation, unrelated metadata and
+allocation/publication/refcount errors. Full host suite/native CI next. Phone
+hardware-reset readiness question pending; boot verified image if fastboot sees
+the expected phone without asking again. CPU0, USB-off, no UART, no flashing.

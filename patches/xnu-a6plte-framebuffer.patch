@@ -4516,10 +4516,10 @@ index 0000000..95fa433
 +#endif
 diff --git c/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
 new file mode 100644
-index 0000000..0e52c67
+index 0000000..2b864c5
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,151 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if A6PLTE
 +
@@ -4602,6 +4602,21 @@ index 0000000..0e52c67
 +	return published;
 +}
 +
++static bool a6_publish_storage_capabilities(void)
++{
++	IORegistryEntry *defaults = IORegistryEntry::fromPath("/defaults", gIODTPlane);
++	if (defaults == NULL) return false;
++	/* This board has no Apple effaceable key storage. MobileKeyBag tests
++	 * presence of this flag, including an empty OSData, to select its
++	 * non-effaceable path instead of loading a hardware-bound systembag.
++	 * This declares hardware capability; it supplies no keybag or SEP keys. */
++	char flag = 0;
++	bool published = defaults->getProperty("no-effaceable-storage") != NULL ||
++	    defaults->setProperty("no-effaceable-storage", &flag, 0);
++	defaults->release();
++	return published;
++}
++
 +bool
 +A6PLTEPlatformExpert::start(IOService *provider)
 +{
@@ -4609,6 +4624,7 @@ index 0000000..0e52c67
 +		return false;
 +	}
 +	if (!a6_publish_boot_hash()) return false;
++	if (!a6_publish_storage_capabilities()) return false;
 +
 +	/* Discovery runs with IRQs masked, before EARLY_BOOT installs kernel PRNG.
 +	 * Publish the possible count now; register/start APs after spllo(). */

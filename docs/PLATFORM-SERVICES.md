@@ -56,6 +56,24 @@ The independent IOKit PM sleep/wake panic watchdog is disabled using
 This does not claim that unrelated faults, explicit reboot requests or external
 firmware can never restart the device.
 
+## Key-storage capability
+
+Before BSD/userspace starts, the platform expert publishes the presence-only
+`IODeviceTree:/defaults/no-effaceable-storage` property as empty OSData. The
+A6+ has no Apple EffaceableStorage or SEP. This lets MobileKeyBag choose its
+non-effaceable storage path; it does not supply keys or make the AppleKeyStore
+stub support encrypted keybags. `/defaults/content-protect` remains absent.
+Existing firmware flags are preserved, and failed publication fails platform
+startup. No `/options` NVRAM service or keybag files are synthesized.
+
+The same declaration is used by the
+[iOS 16 qemu-t8030 board](https://github.com/TrungNguyen1909/qemu-t8030/blob/iOS16/hw/arm/xnu.c#L360).
+The presence-only lookup and branch away from loading `systembag.kb` are
+documented in the author's
+[MobileKeyBag analysis](https://github.com/wh1te4ever/usbliter8-fun/blob/84c0a31806c53bfe36eee6c669c671c0b2ced5be/work-27.0b2/dt_patch3.py).
+That branch analysis is from a different OS release; passing MKB on the user's
+prepared system still requires hardware verification.
+
 ## A6 graphics ABI v1
 
 The source of truth is `iokit/Kernel/arm/A6PlatformServicesABI.h` in the patched
