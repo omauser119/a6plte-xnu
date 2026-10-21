@@ -798,3 +798,25 @@ not a flash. Actual launchd_cache_loader result pending; screen text requested.
 No prepared userspace files inspected/edited, no fake AMFI service/trust verdict,
 new diagnostics, UART, SMP or USB networking. S6SY761 command60 fault still
 unresolved without complete register/value; do not claim physical touch works.
+
+IMG_3456.HEIC (EXIF 2026-10-21 17:05:16) is the user's next hardware result
+for booted 88a09dd profile. It shows successful iOS spawn messages for passd,
+remindd, bluetoothuserd, WirelessRadioManagerd, navd, tccd, mediaremoted, biomed,
+softwareupdated, runningboardd, aggregated, axassetsd, nanoprefsyncd and
+contextstored. Existing process sampler 2/40 sees backboardd[56] (1 thread)
+and SpringBoard[25] (3 threads). No panic, AMFI-cache-loader abort or fatal
+keybag error is visible on this photo. This establishes progress beyond the
+previous AMFI stop, not functional GUI, healthy daemon initialization or
+system stability. Do not symbolize arbitrary shared-cache PCs from this image
+without actual matching symbols, or inspect the user's OS files.
+
+`Allowing spawn of iOS binary` is the existing native compatibility-path success
+message in kern_exec.c, not an error. `A6PLTE SMP` is the old sampler log label;
+cpus=1 still prevents AP starts. No kernel/boot-profile change needed merely
+for those lines, and do not reboot this further-progressed session without a
+concrete next fix. Own graphics services currently accept only A6 connection
+ABI, not native private iOS IOSurface/IOMobileFramebuffer clients; native GUI
+compatibility remains outstanding. Exact S6SY761 register/value and real touch
+also remain unconfirmed. All 88a09dd Actions 39612534222 now independently
+passed; the phone still uses the byte-identical 1909819 kernel in its locally
+built 88a09dd bridge profile. No new diagnostics or userspace changes.
