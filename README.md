@@ -103,9 +103,7 @@ Hardware `2a53d3c` reached all reported signature/header checks successfully,
 including `.42.dyldlinkedit` (318 MiB signed coverage), but map2 returned `EPERM`
 for 44 files / 52 mappings. A board-limited root-cache policy handles the absence
 of macOS SIP file flags on the user-prepared HFS volume; ownership, known cache
-directory, same-root mount and code-signature checks remain. A rejected VM
-mapping now keeps its exact fd, address, size, offset, protections and Mach code
-in the final framebuffer report. Hardware confirmation is pending.
+directory, same-root mount and code-signature checks remain. Hardware confirmation of map2 success is pending.
 
 ## Persistent code-signature conversion
 

@@ -400,3 +400,11 @@ PMIC power/reset writes, UART or Sweet HID. Real-driver ASan/UBSan test now
 covers stale SERVICE with queued output, bounded completion, old delayed STOP
 and lagging DONE, startup order and existing contact/button/HID tests. Physical
 touch and actual map2 success remain unconfirmed. CPU0/USB-off unchanged.
+
+Latest user constraint: ONLY FIXES are authorized, no new diagnostic-only changes
+or test boots. Removed the newly added setup-stage/VM-mapping diagnostic calls,
+state buffers and final-screen messages before loading any new image. Preserve
+existing framebuffer logs. The 125e29e run was started before this constraint;
+do not cancel it, but do not load its diagnostic additions. The follow-up image
+contains only the bounded userdata cache policy and own input corrections,
+with regression tests. No new map2-success claim until actual hardware passes.
