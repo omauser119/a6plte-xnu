@@ -856,3 +856,24 @@ rectangles, channel/alpha/scaling vectors, DT/catalogue discovery and console
 handoff/panic recovery. Local native C++ probes reach only the known unsupported
 Apple allocator builtins, with no other API errors; Apple CI/NOUNDEFS link still
 required before boot. Do not claim working iOS GUI until actual phone evidence.
+
+f72b97a: ALL Actions 39621460260 passed (native Apple Clang/NOUNDEFS, complete
+host suite and packaging). Actual IOSurfaceRootUserClient, IOCoreSurfaceRoot,
+AppleCLCD/IOMobileFramebufferUserClient, RGB scanout, policy and panic-console
+symbols linked and checked. Additional local ASan/UBSan actual-code tests passed
+for 0xa68 reply/all 20 plane records, geometry, 64-bit narrowing, overflow and
+opaque allocation. Promoted that test to test_iosurface_abi.py after CI; no native
+code changed by that test promotion. Native kernel SHA256
+e1c69bd3f2f2db4edbffe5f7f88981d8fd493aed3a7632fdd5d66975fe097d91.
+Image build/verified-f72b97a/images/xnu-8796-userdata-cpu0-boot.img,
+17209344 bytes, SHA256
+9f2612aa91c2c38892c1eed6f9b2eb77b6e542ef9f23ab6ecd684affb62defd8.
+Successful CI source/archive/kernel/image hashes, native symbols, complete CRC/
+CPU0/USB-off/userdata profile and actual display-subsystem/canvas strings checked.
+User had already returned phone; expected phone/hfs-map-v2 verified and exact
+image fastboot boot ACKed at 2026-10-21T15:03:20Z in 0.470 s. No flash. Private
+log artifacts/boot-f72b97a-cpu0.private.log, image/boot receipts in verified-f72b97a.
+Latest PHONE BOOTED kernel/profile is f72b97a. Actual GUI result pending; asked
+whether interface appeared, logs continue or panic occurred. Do not claim GUI
+works from boot ACK or passing host mocks. Keep user's kernel-only/fixes-only,
+no UART, cpus=1/USB-off, no further userspace inspection/edit and own-HID rule.

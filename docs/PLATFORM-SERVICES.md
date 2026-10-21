@@ -7,25 +7,35 @@ closed platform kexts. The kernel build and actual phone execution are separate
 checks. On SM-A605FN the user confirmed `IO services 31 / watchdog timeout: no reset`
 with a continuing sleep/wakeup counter from source `0cf5061`. All four startup
 paths, the native surface allocation smoke check, and diagnostic timer expiry
-therefore completed on the phone. User-client mappings/blits and private iOS
-framework compatibility have not been hardware-tested.
+therefore completed on the phone. The f72b97a kernel adds an iOS 16 graphics protocol subset and has been sent
+to the phone. Actual GUI output and private-framework operation still require
+phone evidence; a successful fastboot transfer does not establish either.
 
 | Service | Implemented behavior | Limit |
 | --- | --- | --- |
 | `IOWatchDogTimer` (`A6PLTEWatchdog`) | Native IOKit diagnostic timer; records requests and expiry count, prints an expiry message | No hardware watchdog, reset register, panic or reboot on expiry |
 | `AppleKeyStore` | Stub state queries 17/35 return bounded DER; selector 7 reports unlocked state, 14 returns system handle, 101 consumes an assertion | No SEP, hardware keys, keybag encryption or cryptographic operations |
 | `AppleSmartBattery` | Explicit IOPMPowerSource stub reporting 100%, installed, not charging | No fuel-gauge measurement; marked `A6Stub` and `A6ActualChargeMeasured=false` |
-| `IOSurfaceRoot` | Zeroed, page-aligned CPU buffers, shared through native IOKit memory mappings | A6 ABI, one surface per connection, 8 MiB per surface and 32 MiB total; no GPU or global IOSurface-ID lookup |
-| `IOMobileFramebuffer` | Actual inherited screen geometry, read-only scanout mapping and bounded CPU rectangle writes | A6 ABI, RGB888/XRGB8888, no mode switching, GPU, page flip or VBL callback |
+| `IOCoreSurfaceRoot` / `IOSurfaceRootUserClient` | iOS 16 creation/limits, ID and Mach-port lookup, shared pixel/state mappings, cached-client result, lock/seed traps and lifetime management | 64 MiB per allocation/pool, 256 mappings per client; accelerator, shared-event and optional attachment operations unsupported |
+| `AppleCLCD` / `IOMobileFramebufferUserClient` | Native type-zero client, display geometry, default BGRA surface, four-layer CPU composition/scaling, retained swaps, completion wait and software vsync notifications | Software subset, default 10 Hz present / 60 Hz notifications; no GPU, mode switching or hardware VBL interrupt |
 
-The graphics services are an initial CPU implementation. Their presence does
-not establish compatibility with the private user-client protocol used by
-Apple's IOSurface.framework or IOMobileFramebuffer.framework. They advertise
-`A6PrivateAppleABICompatible = false`. Those clients must not be treated as
-working until their exact ABI and dependencies have been implemented and tested.
+The graphics protocol is adapted from the author's
+[0046 implementation](https://github.com/dipa-studio/ios-sweet/blob/425b25102b6a9ee4b68fb2b9ca5d6a086b8a4116/xnu/patches/0046-sweet-iosurface-iomfb.patch),
+with the cached-client convention from
+[0068](https://github.com/dipa-studio/ios-sweet/blob/425b25102b6a9ee4b68fb2b9ca5d6a086b8a4116/xnu/patches/0068-sweet-surface-lookup-cached.patch).
+The board publishes a real `disp0` device-tree nub, `display-subsystem` type,
+and 1080x2220 canvas. `AppleCLCD` matches that nub. It never exposes the RGB888
+panel memory as a falsely advertised 32-bit surface: clients share a real BGRA
+software default surface, and the presenter converts it to the inherited panel's
+actual pixel format. Pending swaps retain their surface objects until replaced;
+port-held objects reserve their IDs, and client mappings/task references have
+bounded lifetimes. Parent buffers retain their storage owner and quota.
 
-The framebuffer console remains active. Kernel log output can overwrite rendered
-pixels. The driver does not replace lk2nd's MDP/DSI setup or reinitialize the panel.
+After a non-black full-canvas frame from backboardd/SpringBoard has actually
+been presented, ordinary console stores stop touching the screen. Logging
+continues into memory. Panic or an early EL1 exception restores the console and
+stops further graphics presentation. No path redirects the console to UART.
+The display keeps lk2nd's MDP/DSI configuration. Touch remains unconfirmed.
 
 The reported S6SY761 probe `command 21 / reg 02000018 / value 00000040`
 identifies a QUP operational timeout with the output FIFO full. The transport
@@ -74,10 +84,12 @@ documented in the author's
 That branch analysis is from a different OS release; passing MKB on the user's
 prepared system still requires hardware verification.
 
-## A6 graphics ABI v1
+## Legacy A6 graphics ABI v1 (not published)
 
-The source of truth is `iokit/Kernel/arm/A6PlatformServicesABI.h` in the patched
-XNU tree. `IOServiceOpen` uses connection type `0x41365031` (`A6P1`) and requires
+The former experimental A6-only graphics clients remain as unpublished legacy
+classes; their old layout helpers still have regression coverage. The following
+is their ABI documentation, not the interface now offered to iOS. The legacy
+source of truth is `iokit/Kernel/arm/A6PlatformServicesABI.h`. `IOServiceOpen` uses connection type `0x41365031` (`A6P1`) and requires
 administrator privilege. Standard private Apple graphics connection types are
 rejected. The stub keystore also accepts type zero, with unsupported operations.
 
