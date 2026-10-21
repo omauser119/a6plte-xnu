@@ -408,3 +408,18 @@ existing framebuffer logs. The 125e29e run was started before this constraint;
 do not cancel it, but do not load its diagnostic additions. The follow-up image
 contains only the bounded userdata cache policy and own input corrections,
 with regression tests. No new map2-success claim until actual hardware passes.
+
+80a9d97: ALL Actions 39564909222 passed, native Apple Clang/NOUNDEFS and full
+host regressions/packaging. Verified kernel SHA256
+87f0e7214b9043a8f0761083212e7d65da389901232378593551053498cf2708.
+Image build/verified-80a9d97/images/xnu-8796-userdata-cpu0-boot.img,
+17094656 bytes, SHA256
+fb79ecffaff5054645d7cbe00c6588c9c483101b9feb9780adf2ea46c37761f8.
+Native symbols confirm a6_dyld_root_cache is linked and new diagnostic functions
+and messages are ABSENT. Kernel/image SHA256 rechecked, expected device and
+hfs-map-v2 verified. User returned phone; fastboot boot accepted this exact
+fixes-only image. Private receipt artifacts/boot-80a9d97-cpu0.private.log;
+image/boot receipts in build/verified-80a9d97. This is latest PHONE BOOTED image,
+not a flash. Actual touch/map2 result pending, not inferred from OKAY.
+The user only allows fixes: do not add new diagnostic-only code or images.
+Keep CPU0, userdata/launchd, UART forbidden and USB networking disabled.

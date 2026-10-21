@@ -52,19 +52,20 @@ package format or a flash operation for this profile.
 
 ## Verification status
 
-All jobs in [Actions run 39487558036](https://github.com/omauser119/a6plte-xnu/actions/runs/39487558036)
-passed for source `2a53d3c`, including Apple Clang, linking with no undefined
+All jobs in [Actions run 39564909222](https://github.com/omauser119/a6plte-xnu/actions/runs/39564909222)
+passed for source `80a9d97`, including Apple Clang, linking with no undefined
 symbols, ASan/UBSan host checks and both image profiles. This includes the HFS
-catalog bounds fix, persistent hash conversion and QUP STOP/FIFO completion fix.
+catalog bounds fix, persistent hash conversion, bounded userdata cache policy
+and polled QUP FIFO/application startup fixes.
 Download just the kernel with
-`python3 scripts/download-ci-kernel.py 39487558036`, then package it locally.
+`python3 scripts/download-ci-kernel.py 39564909222`, then package it locally.
 The downloader verifies the GitHub archive SHA256 before extraction.
 
 Hardware confirmed native launchd image activation and successful 16-KiB code
 signature verification on the 4-KiB kernel. Dyld then reported that its shared
 cache was not loaded and `libSystem.B.dylib` was unavailable; split-cache and
 mapping diagnostics are included. This is not yet a successful launchd boot.
-The CPU0-only `2a53d3c` image has been accepted by fastboot. Screen confirmation
+The CPU0-only `80a9d97` image has been accepted by fastboot. Screen confirmation
 of checkpoint creation/reuse and physical touch is still pending.
 
 The `333bb5d` hardware run stopped in `__memmove_chk` (`16 < 32`) after HFS
