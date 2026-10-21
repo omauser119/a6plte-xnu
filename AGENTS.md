@@ -781,3 +781,20 @@ source provenance. New CI remains useful but no Apple kernel compilation is
 needed for a boot-argument-only fix. Do not claim new Actions passed prematurely.
 User also reports S6SY761 command 60 and an incomplete reg `20000...`; exact
 register/value still unknown. Do not guess the bus fault or claim touch works.
+
+88a09dd hardware boot: user explicitly reported PHONE_IN_FASTBOOT. Expected
+phone/hfs-map-v2 checked; exact locally cross-compiled/checked bridge profile
+with launchd_unsecure_cache=1 and unchanged successful 1909819 CI kernel
+booted via fastboot boot at 2026-10-21T14:00:22Z, ACKed in 0.474 s. Image
+build/verified-88a09dd/images/xnu-8796-userdata-cpu0-boot.img, 17111040 bytes,
+SHA256 91c5dbea29a4bea364492dc342daf57c0ba6ca1f0fb9a72c38f62538d7c75b7c.
+Kernel SHA256 8c0779c65ed8fe2ff1fb97bcae95863a03a9c1e2881ad425f3f9985f1fbf162a,
+source 19098191f05403401f6b57e93e2cd6c3d60d0a1d, successful Actions 39609959887.
+Local bridge AArch64 Clang -Werror and complete CRC/profile/Mach-O checker
+passed. This does not claim new 88a09dd Actions passed. Separate kernel/image
+provenance and boot receipts in build/verified-88a09dd; private fastboot log
+artifacts/boot-88a09dd-cpu0.private.log. Latest PHONE BOOTED profile is 88a09dd,
+not a flash. Actual launchd_cache_loader result pending; screen text requested.
+No prepared userspace files inspected/edited, no fake AMFI service/trust verdict,
+new diagnostics, UART, SMP or USB networking. S6SY761 command60 fault still
+unresolved without complete register/value; do not claim physical touch works.
