@@ -574,3 +574,20 @@ control reproduces ENOENT; new native-case ASan/UBSan regressions cover no-blob,
 refs. Full host suite passed. kern_cs.c/compat.c native probes pass; large BSD
 units require actual Apple allocator builtins and must pass Actions. User already
 returned phone for this new kernel; boot once the verified image is ready.
+
+7538fd7: ALL Actions 39598057211 passed (native Apple Clang/NOUNDEFS link,
+full host regressions and packaging). Verified native kernel SHA256
+58b7f01445fe5c2760c9e2cae4cf2c1d1dc7858aa03c4d285583880ae654a249;
+linked a6_platform_file, a6_platform_signature and real ccsha1_ltc_di confirmed.
+Image build/verified-7538fd7/images/xnu-8796-userdata-cpu0-boot.img,
+17111040 bytes, SHA256
+0e06d2f4751f49e3415e6a5ec59b68dbf66eea710b10a147ea7755a1f199ae7d.
+Source/archive/kernel/image hashes and full CRC/CPU0/userdata/USB-off profile
+checked; expected phone and hfs-map-v2 verified immediately before boot.
+User had already returned the phone for this bypass. fastboot boot accepted
+this exact image: send 0.374 s, boot 0.078 s, total 0.471 s. Private log
+artifacts/boot-7538fd7-cpu0.private.log; image and boot receipts beside kernel.
+This is latest PHONE BOOTED image, not a flash. Actual launchd/mount-phase-1
+hardware result pending; async screen question asked. Do not claim the panic
+has passed based on fastboot ACK. No userspace changes or inspection, new
+diagnostics, UART, USB networking or SMP. Preserve kernel-only/fixes-only scope.
