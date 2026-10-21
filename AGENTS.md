@@ -537,3 +537,17 @@ identity, MAC/provider failures, traversal, bounds and balanced vnode references
 The actual previous callback negative control rejects a valid re-signed system
 task, reproducing that source defect. Hardware cause/result still require next
 fixes-only image. CPU0, UART prohibition and USB networking off unchanged.
+
+c0e8470: ALL Actions 39595600048 passed (actual Apple Clang/NOUNDEFS link,
+full host regressions and packaging). Kernel SHA256
+224b4b8d0bb950d256bb8506ffb2b588af7411e213f432fdd8cbb369cbd1c24d;
+new a6_platform_signature and prior real SHA1 descriptor linked. Image:
+build/verified-c0e8470/images/xnu-8796-userdata-cpu0-boot.img, 17111040 bytes,
+SHA256 9fc361dd188e37598dea90840fdb335df95c50b35fa803509e47e04c93fad74c.
+Source/archive/kernel/image hashes, complete CRC/CPU0/userdata/USB-off profile
+and expected phone/hfs-map-v2 verified. User had already returned the phone;
+fastboot boot accepted this exact image: send 0.379 s, boot 0.079 s, total
+0.476 s. Private log artifacts/boot-c0e8470-cpu0.private.log; image and boot
+receipts in build/verified-c0e8470. This is latest PHONE BOOTED image, not a
+flash. Actual mount/launchd result pending. Prepared userspace was not modified.
+Keep the user's kernel-only scope; no further userspace inspection/changes.
