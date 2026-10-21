@@ -700,3 +700,20 @@ invalid/overflow ranges, options, refs/lock, timeout/offline and legacy dispatch
 Full host suite passed; native compat.c header probe passed. Apple CI/native
 link and hardware verification are next. Phone reset-readiness question pending.
 Keep kernel-only/fixes-only, CPU0, no UART and USB networking disabled.
+
+ada2366: ALL Actions 39606173594 passed (native Apple Clang/NOUNDEFS link,
+host regressions, packaging). All three native bindfs units compiled and linked;
+native bindfs vfsops/vnodeops, board gate/fallback, identity/hash and SHA1 symbols
+verified. Kernel SHA256
+80949a6fb44386266ca970f639bd2d97fc7720fb333e558ec0dfc64068a5d3a6.
+Image build/verified-ada2366/images/xnu-8796-userdata-cpu0-boot.img,
+17111040 bytes, SHA256
+4d57c506aeccf3e41aee8b7da3df2098dd7e30ad1c9487e4425cf96097839240.
+Exact successful source/archive/kernel/image hashes, complete CRC/UUID/CPU0/
+userdata/USB-off profile and expected phone/hfs-map-v2 verified. User returned
+phone; fastboot boot accepted this exact image: send 0.379 s, boot 0.078 s,
+total 0.479 s. Private log artifacts/boot-ada2366-cpu0.private.log; image and
+boot receipts in build/verified-ada2366. Latest PHONE BOOTED image, not a flash.
+Actual mount-phase-1 and journal-flush result pending; screen question asked.
+Do not infer passing the old mount failure from fastboot ACK. No user OS files
+were inspected or edited, no new logs/diagnostic images, UART, USB network or SMP.
