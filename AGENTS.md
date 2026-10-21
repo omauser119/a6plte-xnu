@@ -950,3 +950,19 @@ output sizes/guards, bounded descriptor writes/short failures, nonzero default
 layers, no-fence SwapWait and token-independent retained SwapEnd. Full host
 suite and new large/overflow geometry cases passed; native build/link next.
 Expected phone already visible in fastboot; no repeated permission needed.
+
+02ec710: ALL three Actions jobs 39630068802 passed (Apple Clang/NOUNDEFS,
+full Linux host suite and packaging). Aggregate patch also checked against a
+separate pristine pinned-base index. Real native zero-reply, token-independent
+submit, both external-method clients and direct scanout symbols verified.
+Kernel SHA256 6b3d024c4524a4e07cd7e0b33874a9795221eb2358623c0d3ec1fc1042ecb6f7.
+Image build/verified-02ec710/images/xnu-8796-userdata-cpu0-boot.img,
+17258496 bytes, SHA256
+9e0dc73bdbaafdbaa267e625d0e4b7d8df00f83804db78bd789e11cc0ca1f29d.
+Successful source/archive/kernel hashes, complete CRC/native UUID/profile and
+expected phone/hfs-map-v2 checked. Exact fastboot boot ACK at 2026-10-21T16:05:48.756013+00:00 in 0.469 s. No flash. Receipts in verified-02ec710;
+private log artifacts/boot-02ec710-cpu0.private.log. Latest PHONE BOOTED image
+is 02ec710. Actual GUI result pending; fresh screen-result question asked.
+No claim that restoring the Sweet contracts alone proves working SpringBoard
+or physical touch. Keep kernel-only/fixes-only, own HID, UART forbidden, CPU0,
+USB off, no inspection or edits of prepared user OS files, transient boots only.
