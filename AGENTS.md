@@ -551,3 +551,26 @@ fastboot boot accepted this exact image: send 0.379 s, boot 0.079 s, total
 receipts in build/verified-c0e8470. This is latest PHONE BOOTED image, not a
 flash. Actual mount/launchd result pending. Prepared userspace was not modified.
 Keep the user's kernel-only scope; no further userspace inspection/changes.
+
+Latest c0e8470 hardware result: SAME `userspace panic: boot task is not a
+platform binary`. User explicitly requests **bypass/remove that check**.
+Keep this kernel-only: do not patch launchd or suppress panic syscalls. The
+prepared OS root now supplies platform compatibility status without uid/path/
+CodeDirectory marker restrictions. Regular vnode + explicitly selected userdata
+root mount + no AMFI are the only board bounds; all code on that OS root may
+receive platform status, including unsigned/re-signed files. This is the user's
+requested development bypass, not Apple authentication or a CS_VALID grant.
+
+Native F_GETSIGSINFO checks the file BEFORE exec may have attached a cs_blob;
+old native code returns ENOENT there. Cover both zero and native wildcard -1
+offsets before the blob lookup. Keep copyin/out, fd-type, vnode lifecycle and
+other request errors. Also cover blob/proc/file platform getters and loaded-task
+status, so csops and exec agree even without signature metadata. Native Mach-O
+failure, code-page hashes, signature validity bits and other MAC failures stay
+active; other mounts and an actual AMFI provider retain native behavior. No logs,
+new diagnostic image or userspace edits. Actual upstream F_GETSIGSINFO negative
+control reproduces ENOENT; new native-case ASan/UBSan regressions cover no-blob,
+-1, process/fd/task views, flags, providers, other mounts, copy errors and balanced
+refs. Full host suite passed. kern_cs.c/compat.c native probes pass; large BSD
+units require actual Apple allocator builtins and must pass Actions. User already
+returned phone for this new kernel; boot once the verified image is ready.

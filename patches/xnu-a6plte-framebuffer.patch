@@ -46,10 +46,10 @@ index a77bd10..5fc6f17 100644
  bsd/dev/arm/kern_machdep.c	standard
 diff --git c/bsd/dev/a6plte/compat.c w/bsd/dev/a6plte/compat.c
 new file mode 100644
-index 0000000..4db331a
+index 0000000..b8145de
 --- /dev/null
 +++ w/bsd/dev/a6plte/compat.c
-@@ -0,0 +1,204 @@
+@@ -0,0 +1,160 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Board-only bring-up policies and diagnostics, adapted for native XNU 8796. */
 +#if A6PLTE
@@ -116,61 +116,17 @@ index 0000000..4db331a
 +    if (log) printf("A6PLTE Sandbox: %s privilege %d not granted\n",name,priv);
 +    return EPERM;
 +}
-+static bool system_code_path(const char *path) {
-+    if (!path || path[0]!='/') return false;
-+    /* The saved exec name is copied by the kernel but can contain traversal. */
-+    for (const char *p=path;*p;++p) {
-+        if (*p=='/' && p[1]=='.' &&
-+            (!p[2] || p[2]=='/' || (p[2]=='.' && (!p[3] || p[3]=='/')))) return false;
-+    }
-+    static const char *directories[]={
-+        "/sbin/","/bin/","/usr/bin/","/usr/sbin/","/usr/libexec/",
-+        "/usr/lib/","/System/Library/","/System/Cryptexes/OS/System/Library/"
-+    };
-+    for (unsigned i=0;i<sizeof(directories)/sizeof(directories[0]);++i) {
-+        size_t n=strlen(directories[i]);
-+        if (!strncmp(path,directories[i],n) && path[n]) {
-+            return true;
-+        }
-+    }
-+    return false;
-+}
-+/* Board policy trusts signed system files on the user-selected OS root, not
-+ * Apple CMS or the optional CodeDirectory platform byte. Ad-hoc signatures
-+ * retain real page-hash verification. HFS hardlinks can have an inode-store
-+ * cached path, so also verify the kernel's saved exec name against this vnode. */
-+void a6_platform_signature(struct vnode *vp,struct cs_blob *blob,
-+    unsigned int *cs_flags,struct image_params *imgp) {
++/* User-requested platform-check bypass for the selected standalone OS root.
++ * This is compatibility status, not Apple CMS authentication. Do not invent
++ * CS_VALID or change code-page hashes, native MAC failures or other mounts. */
++int a6_platform_file(struct vnode *vp) {
 +    extern int a6_userdata_root_selected(void);
-+    if (amfi || !vp || !blob || !cs_flags || !blob->csb_cd ||
-+        !(*cs_flags&CS_VALID) || (*cs_flags&CS_PLATFORM_BINARY) ||
-+        !rootvnode || !a6_userdata_root_selected() || !vnode_isreg(vp) ||
-+        vnode_mount(vp)!=vnode_mount(rootvnode)) return;
-+    struct vnode_attr a; VATTR_INIT(&a); VATTR_WANTED(&a,va_uid);
-+    if (vnode_getattr(vp,&a,vfs_context_current()) ||
-+        !VATTR_IS_SUPPORTED(&a,va_uid) || a.va_uid!=0) return;
-+    static const char exec_key[]="executable_path="; /* native exec_save_path */
-+    const size_t prefix=sizeof(exec_key)-1;
-+    if (imgp && imgp->ip_vp==vp && imgp->ip_ndp &&
-+        imgp->ip_ndp->ni_vp==vp && imgp->ip_ndp->ni_rootdir==rootvnode &&
-+        imgp->ip_strings && imgp->ip_strendp && imgp->ip_strendp>imgp->ip_strings &&
-+        (size_t)(imgp->ip_strendp-imgp->ip_strings)>prefix &&
-+        !memcmp(imgp->ip_strings,exec_key,prefix)) {
-+        const char *path=imgp->ip_strings+prefix;
-+        size_t available=MIN((size_t)(imgp->ip_strendp-path),(size_t)MAXPATHLEN);
-+        if (memchr(path,0,available) && system_code_path(path)) {
-+            vnode_t resolved=NULL;
-+            int error=vnode_lookup(path,VNODE_LOOKUP_NOCROSSMOUNT,&resolved,vfs_context_current());
-+            if (!error) {
-+                bool match=resolved==vp;vnode_put(resolved);
-+                if (match) { *cs_flags|=CS_PLATFORM_BINARY;return; }
-+            }
-+        }
-+    }
-+    char path[MAXPATHLEN];int length=sizeof(path);
-+    if (!vn_getpath(vp,path,&length) && length>1 && length<=(int)sizeof(path) &&
-+        memchr(path,0,(size_t)length) && system_code_path(path))
-+        *cs_flags|=CS_PLATFORM_BINARY;
++    return !amfi && vp && rootvnode && a6_userdata_root_selected() &&
++        vnode_isreg(vp) && vnode_mount(vp)==vnode_mount(rootvnode);
++}
++void a6_platform_signature(struct vnode *vp,__unused struct cs_blob *blob,
++    unsigned int *cs_flags,__unused struct image_params *imgp) {
++    if (cs_flags && a6_platform_file(vp)) *cs_flags|=CS_PLATFORM_BINARY;
 +}
 +static const struct mac_policy_ops sandbox_ops={
 +    .mpo_policy_syscall=sandbox_syscall,.mpo_priv_grant=sandbox_priv_grant,
@@ -2018,8 +1974,48 @@ index 95192dd..ff8c5e3 100644
  	decmpfs_header *hdr = NULL;
  
  	/*
+diff --git c/bsd/kern/kern_cs.c w/bsd/kern/kern_cs.c
+index 43b1ea6..b6318b7 100644
+--- c/bsd/kern/kern_cs.c
++++ w/bsd/kern/kern_cs.c
+@@ -485,6 +485,11 @@ csblob_get_addr(struct cs_blob *blob)
+ int
+ csblob_get_platform_binary(struct cs_blob *blob)
+ {
++#if A6PLTE
++	if (blob && a6_platform_file(blob->csb_vnode)) {
++		return 1;
++	}
++#endif
+ 	if (blob && blob->csb_platform_binary) {
+ 		return 1;
+ 	}
+@@ -871,6 +876,11 @@ csproc_get_platform_binary(struct proc *p)
+ {
+ 	struct cs_blob *csblob;
+ 
++#if A6PLTE
++	if (p && a6_platform_file(p->p_textvp)) {
++		return 1;
++	}
++#endif
+ 	csblob = csproc_get_blob(p);
+ 
+ 	/* If there is no csblob this returns 0 because
+@@ -1033,6 +1043,11 @@ csfg_get_platform_binary(struct fileglob *fg)
+ 		return 0;
+ 	}
+ 
++#if A6PLTE
++	if (a6_platform_file(vp)) {
++		return 1;
++	}
++#endif
+ 	vnode_lock(vp);
+ 	if (!UBCINFOEXISTS(vp)) {
+ 		goto out;
 diff --git c/bsd/kern/kern_descrip.c w/bsd/kern/kern_descrip.c
-index 13b08b5..4755afb 100644
+index 13b08b5..617f992 100644
 --- c/bsd/kern/kern_descrip.c
 +++ w/bsd/kern/kern_descrip.c
 @@ -2733,6 +2733,12 @@ outdrop:
@@ -2100,7 +2096,35 @@ index 13b08b5..4755afb 100644
  
  			if (error) {
  				vnode_put(vp);
-@@ -5223,6 +5251,12 @@ dropboth:
+@@ -4206,6 +4234,18 @@ dropboth:
+ 			goto outdrop;
+ 		}
+ 
++#if A6PLTE
++		/* launchd queries boot helpers before exec attaches a cs_blob. */
++		if (sigsinfo.fg_info_request == GETSIGSINFO_PLATFORM_BINARY &&
++		    sigsinfo.fg_file_start >= -1 && a6_platform_file(vp)) {
++			sigsinfo.fg_sig_is_platform = 1;
++			error = copyout(&sigsinfo.fg_sig_is_platform,
++			    (vm_address_t)argp + offsetof(struct fgetsigsinfo, fg_sig_is_platform),
++			    sizeof(sigsinfo.fg_sig_is_platform));
++			vnode_put(vp);
++			goto outdrop;
++		}
++#endif
+ 		blob = ubc_cs_blob_get(vp, CPU_TYPE_ANY, CPU_SUBTYPE_ANY, sigsinfo.fg_file_start);
+ 		if (blob == NULL) {
+ 			error = ENOENT;
+@@ -4214,7 +4254,7 @@ dropboth:
+ 		}
+ 		switch (sigsinfo.fg_info_request) {
+ 		case GETSIGSINFO_PLATFORM_BINARY:
+-			sigsinfo.fg_sig_is_platform = blob->csb_platform_binary;
++			sigsinfo.fg_sig_is_platform = csblob_get_platform_binary(blob);
+ 			error = copyout(&sigsinfo.fg_sig_is_platform,
+ 			    (vm_address_t)argp + offsetof(struct fgetsigsinfo, fg_sig_is_platform),
+ 			    sizeof(sigsinfo.fg_sig_is_platform));
+@@ -5223,6 +5263,12 @@ dropboth:
  	}
  
  outdrop:
@@ -2114,10 +2138,23 @@ index 13b08b5..4755afb 100644
  
  out:
 diff --git c/bsd/kern/kern_exec.c w/bsd/kern/kern_exec.c
-index f41b75b..0f8ccb7 100644
+index f41b75b..a70d0f4 100644
 --- c/bsd/kern/kern_exec.c
 +++ w/bsd/kern/kern_exec.c
-@@ -6832,6 +6832,9 @@ load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path)
+@@ -1347,6 +1347,12 @@ grade:
+ 	 * the new "map" (with swap_task_map()) should deallocate "map".
+ 	 */
+ 
++#if A6PLTE
++	if (a6_platform_file(imgp->ip_vp)) {
++		load_result.platform_binary = TRUE;
++		load_result.csflags |= CS_PLATFORM_BINARY;
++	}
++#endif
+ #ifndef KASAN
+ 	/*
+ 	 * Security: zone sanity checks on fresh boot or initproc re-exec.
+@@ -6832,6 +6838,9 @@ load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path)
  }
  
  static const char * init_programs[] = {
@@ -2127,7 +2164,7 @@ index f41b75b..0f8ccb7 100644
  #if DEBUG
  	"/usr/appleinternal/sbin/launchd.debug",
  #endif
-@@ -6873,6 +6876,10 @@ static const char * init_programs[] = {
+@@ -6873,6 +6882,10 @@ static const char * init_programs[] = {
  void
  load_init_program(proc_t p)
  {
@@ -2371,6 +2408,19 @@ index 003cfb0..735eaf3 100644
  
  	if (sock == NULL) {
  		return EINVAL;
+diff --git c/bsd/kern/mach_loader.c w/bsd/kern/mach_loader.c
+index 1756185..03e1167 100644
+--- c/bsd/kern/mach_loader.c
++++ w/bsd/kern/mach_loader.c
+@@ -3537,7 +3537,7 @@ out:
+ 		}
+ 
+ 		result->csflags |= blob->csb_flags;
+-		result->platform_binary = blob->csb_platform_binary;
++		result->platform_binary = csblob_get_platform_binary(blob);
+ 		result->cs_end_offset = blob->csb_end_offset;
+ 	}
+ 	if (addr != 0) {
 diff --git c/bsd/kern/sys_generic.c w/bsd/kern/sys_generic.c
 index 9de68e1..66a3528 100644
 --- c/bsd/kern/sys_generic.c
@@ -2888,6 +2938,20 @@ index 84e350b..66e3717 100644
  /*
   * pthread_kext_register is called by pthread.kext upon load, it has to provide
   * us with a function pointer table of pthread internal calls. In return, this
+diff --git c/bsd/sys/codesign.h w/bsd/sys/codesign.h
+index b42243a..f5e7ca4 100644
+--- c/bsd/sys/codesign.h
++++ w/bsd/sys/codesign.h
+@@ -85,6 +85,9 @@ struct cs_blob;
+ struct fileglob;
+ 
+ __BEGIN_DECLS
++#if A6PLTE
++int     a6_platform_file(struct vnode *);
++#endif
+ int     cs_valid(struct proc *);
+ int     cs_process_enforcement(struct proc *);
+ int cs_process_global_enforcement(void);
 diff --git c/bsd/sys/pthread_internal.h w/bsd/sys/pthread_internal.h
 index 42e23d8..c355403 100644
 --- c/bsd/sys/pthread_internal.h
