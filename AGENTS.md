@@ -423,3 +423,14 @@ image/boot receipts in build/verified-80a9d97. This is latest PHONE BOOTED image
 not a flash. Actual touch/map2 result pending, not inferred from OKAY.
 The user only allows fixes: do not add new diagnostic-only code or images.
 Keep CPU0, userdata/launchd, UART forbidden and USB networking disabled.
+
+User supplied IMG_3488.HEIC after the 80a9d97 boot. This is historical evidence,
+NOT a result for that image: EXIF DateTimeOriginal is 2026-10-20 16:35:00 and
+visible caller 0xfffffff007a770fc matches exactly bc1271e's
+_proc_prepareexit.cold.2+0x7c (return from panic_with_options). The same call in
+80a9d97 is 0xfffffff007a78bfc. Photo shows .01 signature errno22 coverage -1 /
+114409472, no signature-stage suffix, 1 signed, map2 not reached, S6 cmd21
+reg02000018 val40. Do not revert current code or diagnose the latest build from
+this older photograph. Latest actual image remains 80a9d97 boot ACK; current
+physical touch/map2 result still pending. Photo converted locally for reading
+only; never add the image to Git or use UART.
