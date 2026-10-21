@@ -765,3 +765,19 @@ This supersedes the prior waiting status: latest PHONE BOOTED image is 1909819,
 not a flash. Actual MKB result remains pending; screen text question asked.
 Do not infer passing keybag validation from fastboot ACK. No userspace files
 inspected/modified, no UART, SMP, USB networking or diagnostic-only changes.
+
+1909819 hardware next stop: user reports `abort: unable to find amfi`, with
+`Code: /System/Library/xpc/launchd.plist Sig: /System/Library/xpc/launchd.plist.sig`.
+This identifies launchd_cache_loader's IOServiceMatching("AppleMobileFileIntegrity")
+path, not a missing native AMFI function table. The board has no such closed
+service/trust-cache authority. The helper has its own native
+`launchd_unsecure_cache=1` boot switch: it opens/maps the launchd data cache
+without the AMFI trust-cache query/detached-signature attachment. Enable only in
+userdata boot profile. No userspace changes, fake AMFI service/trust verdict,
+new logs, or native Mach-O/code-page hash changes. Complete image checker must
+verify the switch in the actual compiled bridge. Reuse byte-identical successful
+1909819 CI kernel for immediate bridge repack; record separate kernel and image
+source provenance. New CI remains useful but no Apple kernel compilation is
+needed for a boot-argument-only fix. Do not claim new Actions passed prematurely.
+User also reports S6SY761 command 60 and an incomplete reg `20000...`; exact
+register/value still unknown. Do not guess the bus fault or claim touch works.
