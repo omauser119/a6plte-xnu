@@ -117,7 +117,16 @@ this is not Apple CMS authentication. Other mounts and a real AMFI provider keep
 their native behavior. CodeDirectory/page verification, validity flags, other
 MAC failures and Mach-O load errors are not replaced with success. Prepared
 userspace files remain unchanged. The earlier exec-only policies still failed
-on hardware c0e8470; confirmation of this requested bypass is pending.
+on hardware c0e8470. Hardware 7538fd7 passed the platform check and next reported
+failure to retrieve a boot task's codesigning identity (`ENOENT`). Without AMFI,
+the native CodeDirectory path never set the process-only `CS_SIGNED` flag, so
+`cs_identity_get()` hid even an existing identifier. The board signature callback
+now sets that bit only for a real, natively validated CodeDirectory on the selected
+OS root. The native loader/exec path then preserves the original identity for
+`CS_OPS_IDENTITY`; no identifier, team ID, entitlement or validity bit is invented.
+Native-body regressions reproduce the old `ENOENT`, verify the original identifier
+and syscall buffer/error behavior, and reject unsigned/invalid or foreign files.
+Hardware confirmation of this identity fix is pending.
 
 ## Persistent code-signature conversion
 

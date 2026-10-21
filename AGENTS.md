@@ -591,3 +591,22 @@ This is latest PHONE BOOTED image, not a flash. Actual launchd/mount-phase-1
 hardware result pending; async screen question asked. Do not claim the panic
 has passed based on fastboot ACK. No userspace changes or inspection, new
 diagnostics, UART, USB networking or SMP. Preserve kernel-only/fixes-only scope.
+
+7538fd7 hardware: user reports `failed to get a codesigning identity for a boot
+task errno 2`, after the prior platform-binary refusal. User has already returned
+the phone to lk2nd for this fix. Do not ask for readiness again if fastboot sees it.
+Concrete source defect: cs_blob_init_validated and revalidation initialize flags
+with CS_ALLOWED_MACHO | CS_VALID, which excludes process-only CS_SIGNED. No AMFI
+provider sets it, and the board callback previously added only PLATFORM_BINARY.
+Native load_code_signature/exec preserve the missing bit; cs_identity_get then
+returns NULL before looking at the actual stored identifier, and native
+CS_OPS_IDENTITY returns ENOENT. Correct the existing board signature callback
+to set CS_SIGNED only when a real cs_blob/csb_cd exists and native cs_flags is
+VALID, after native MAC success and within the same selected-root/no-AMFI bounds.
+No synthetic identifiers, CS_VALID grants, TeamIDs, entitlements, panic suppression,
+new logs or userspace changes. Initial attachment and native RO revalidation both
+propagate the bit. Actual native exec/identity/blob-lookup/csops-body ASan/UBSan
+regression reproduces ENOENT with a real com.apple.mount CodeDirectory and fixes
+it while preserving all signature bytes, native buffer ABI/errors, flags and
+provider/root/unsigned/invalid rejection. Native compat.c header probe passed.
+Full host suite passed. Native CI and exact-image hardware verification are next.

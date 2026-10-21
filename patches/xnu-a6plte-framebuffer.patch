@@ -46,10 +46,10 @@ index a77bd10..5fc6f17 100644
  bsd/dev/arm/kern_machdep.c	standard
 diff --git c/bsd/dev/a6plte/compat.c w/bsd/dev/a6plte/compat.c
 new file mode 100644
-index 0000000..b8145de
+index 0000000..2aa4e4d
 --- /dev/null
 +++ w/bsd/dev/a6plte/compat.c
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,166 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Board-only bring-up policies and diagnostics, adapted for native XNU 8796. */
 +#if A6PLTE
@@ -124,9 +124,15 @@ index 0000000..b8145de
 +    return !amfi && vp && rootvnode && a6_userdata_root_selected() &&
 +        vnode_isreg(vp) && vnode_mount(vp)==vnode_mount(rootvnode);
 +}
-+void a6_platform_signature(struct vnode *vp,__unused struct cs_blob *blob,
++void a6_platform_signature(struct vnode *vp,struct cs_blob *blob,
 +    unsigned int *cs_flags,__unused struct image_params *imgp) {
-+    if (cs_flags && a6_platform_file(vp)) *cs_flags|=CS_PLATFORM_BINARY;
++    if (cs_flags && a6_platform_file(vp)) {
++        *cs_flags|=CS_PLATFORM_BINARY;
++        /* The native loader has parsed a real CodeDirectory, but no AMFI
++         * provider sets the process-only "has a signature" bit on this board.
++         * Without it cs_identity_get() hides the original identifier. */
++        if (blob && blob->csb_cd && (*cs_flags&CS_VALID)) *cs_flags|=CS_SIGNED;
++    }
 +}
 +static const struct mac_policy_ops sandbox_ops={
 +    .mpo_policy_syscall=sandbox_syscall,.mpo_priv_grant=sandbox_priv_grant,

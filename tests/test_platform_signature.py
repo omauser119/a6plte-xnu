@@ -43,7 +43,7 @@ fixture=r'''
 #define CPU_SUBTYPE_ANY -1
 #define DTYPE_VNODE 1
 struct vnode;
-struct cs_blob { struct vnode *csb_vnode;unsigned csb_flags;int csb_platform_binary; };
+struct cs_blob { struct vnode *csb_vnode;unsigned csb_flags;int csb_platform_binary;const CS_CodeDirectory *csb_cd; };
 struct ubc_info { struct cs_blob *cs_blobs; };
 struct vnode { void *mount;int regular;struct ubc_info *v_ubcinfo;struct cs_blob *blob; };
 typedef struct vnode *vnode_t;
