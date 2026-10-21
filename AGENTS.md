@@ -906,3 +906,19 @@ without NOT_EMPTY, plus prior delayed-STOP/pending-output cases. No controller
 firmware/PMIC power writes or simulated events. Physical touch still unverified.
 No prepared userspace inspected/edited, no new diagnostics, UART, USB network,
 SMP enable or flashing. Continue to the concrete checked image and hardware boot.
+
+4aeb3e6: ALL Actions 39626707494 passed (native Apple Clang, full host suite,
+NOUNDEFS link and packaging). Actual native presentDefault/enableDefault/tick,
+nonblack scan and input symbols verified in the downloaded CI kernel.
+Kernel SHA256 52064071062afe9876b0019bf598a2b2df52f9d457708f547e0a19c974cc802a.
+Verified image build/verified-4aeb3e6/images/xnu-8796-userdata-cpu0-boot.img,
+17209344 bytes, SHA256
+92e1349df362d133f9c7fdc4a1b9cf43acd7e4d3454246a95031aa7b1dfa5400.
+Successful CI archive/source/kernel hashes, complete CRC/native UUID/root/CPU0/
+USB-off profile checked. Phone was already in fastboot; expected phone and
+hfs-map-v2 verified. Exact image fastboot boot ACK at 2026-10-21T15:39:39.057694+00:00 in 0.464 s. No flash. Private boot log
+artifacts/boot-4aeb3e6-cpu0.private.log; image/boot receipts in verified-4aeb3e6.
+Latest PHONE BOOTED image is now 4aeb3e6. GUI and sensor hardware result pending,
+not established by host tests or boot ACK. Screen result question asked.
+The earlier eMMC offline/SIGBUS is not diagnosed/fixed by these graphics/input
+changes. Preserve all kernel-only/fixes-only, CPU0, USB-off, no-UART constraints.
