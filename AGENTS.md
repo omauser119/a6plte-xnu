@@ -498,3 +498,16 @@ negative control reproduces non-platform status with the old absent callback.
 Full host suite and native compat.c header probe pass. Full CI/link and hardware
 pending. User has already returned phone for this fix; check fastboot and load
 verified image as soon as ready, without new permission. CPU0 and USB-off remain.
+
+9eabb12: ALL Actions 39590206698 passed (native Apple Clang/NOUNDEFS, host
+regressions, packaging). Verified native kernel SHA256
+5602b3d1805c34e5001da9e42dfb31402fb6a87821887d56f21ebd7ecda084a3;
+linked platform_signature and ccsha1_ltc_di confirmed. Latest image:
+build/verified-9eabb12/images/xnu-8796-userdata-cpu0-boot.img, 17111040 bytes,
+SHA256 bb292af945185361c6260a5e04499f84bc0c8a5ecfac96c4bd22df7da23620a9.
+Full CRC/profile and receipt hashes verified; expected phone/hfs-map-v2 checked.
+User already returned phone, fastboot boot accepted exact image automatically
+after all CI passed: send 0.378 s, boot 0.078 s, total 0.476 s. Private log:
+artifacts/boot-9eabb12-cpu0.private.log; image and boot receipts beside kernel.
+This is latest PHONE BOOTED image, not a flash. Actual mount-phase-1/launchd
+screen result pending. Keep CPU0, USB disabled, no UART or new diagnostics.
