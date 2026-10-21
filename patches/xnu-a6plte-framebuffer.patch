@@ -46,10 +46,10 @@ index a77bd10..5fc6f17 100644
  bsd/dev/arm/kern_machdep.c	standard
 diff --git c/bsd/dev/a6plte/compat.c w/bsd/dev/a6plte/compat.c
 new file mode 100644
-index 0000000..2aa4e4d
+index 0000000..02083da
 --- /dev/null
 +++ w/bsd/dev/a6plte/compat.c
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,198 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Board-only bring-up policies and diagnostics, adapted for native XNU 8796. */
 +#if A6PLTE
@@ -61,6 +61,7 @@ index 0000000..2aa4e4d
 +#include <sys/signal.h>
 +#include <sys/kernel.h>
 +#include <sys/vnode_internal.h>
++#include <sys/mount_internal.h>
 +#include <sys/ubc_internal.h>
 +#include <sys/imgact.h>
 +#include <sys/namei.h>
@@ -133,6 +134,37 @@ index 0000000..2aa4e4d
 +         * Without it cs_identity_get() hides the original identifier. */
 +        if (blob && blob->csb_cd && (*cs_flags&CS_VALID)) *cs_flags|=CS_SIGNED;
 +    }
++}
++int a6_bindfs_boot_allowed(vfs_context_t context) {
++    proc_t process=context?vfs_context_proc(context):NULL;
++    return process && vfs_context_issuser(context) && a6_platform_file(process->p_textvp);
++}
++int a6_bindfs_firmware_source(struct mount *mp,const char *source,
++    vfs_context_t context,vnode_t *lower) {
++    static const char prefix[]="/private/preboot/",suffix[]="/usr/standalone/firmware";
++    if (!mp || !source || !lower || !a6_bindfs_boot_allowed(context) ||
++        !mp->mnt_vnodecovered || !vnode_isdir(mp->mnt_vnodecovered) ||
++        vnode_mount(mp->mnt_vnodecovered)!=vnode_mount(rootvnode) ||
++        strcmp(mp->mnt_vfsstat.f_mntonname,suffix)) return ENOENT;
++    extern bool IOGetBootManifestHash(char *,size_t *);
++    unsigned char hash[48];size_t size=sizeof(hash);
++    if (!IOGetBootManifestHash((char *)hash,&size) || size!=sizeof(hash)) return ENOENT;
++    char expected[sizeof(prefix)-1+sizeof(hash)*2+sizeof(suffix)];
++    static const char hex[]="0123456789ABCDEF";
++    memcpy(expected,prefix,sizeof(prefix)-1);
++    for (unsigned i=0;i<sizeof(hash);++i) {
++        expected[sizeof(prefix)-1+2*i]=hex[hash[i]>>4];
++        expected[sizeof(prefix)+2*i]=hex[hash[i]&15];
++    }
++    memcpy(expected+sizeof(prefix)-1+sizeof(hash)*2,suffix,sizeof(suffix));
++    if (strcmp(source,expected)) return ENOENT;
++    /* Bare HFS+ has no Apple Preboot volume. Mirror the actual firmware
++     * directory through native read-only bindfs; never create backing files
++     * or report a successful mount without a real lower vnode. */
++    /* Do not resolve the mountpoint again while its mount is in progress. */
++    int error=vnode_getwithref(mp->mnt_vnodecovered);
++    if (!error) *lower=mp->mnt_vnodecovered;
++    return error;
 +}
 +static const struct mac_policy_ops sandbox_ops={
 +    .mpo_policy_syscall=sandbox_syscall,.mpo_priv_grant=sandbox_priv_grant,
@@ -1748,10 +1780,10 @@ index 0000000..d9a45df
 +#endif
 diff --git c/bsd/dev/a6plte/userdata.c w/bsd/dev/a6plte/userdata.c
 new file mode 100644
-index 0000000..a3d3f65
+index 0000000..6db0aa1
 --- /dev/null
 +++ w/bsd/dev/a6plte/userdata.c
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,184 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Native BSD block/raw devices exposing only the GPT userdata slice. */
 +#include <sys/param.h>
@@ -1856,6 +1888,17 @@ index 0000000..a3d3f65
 +    case DKIOCGETMAXSEGMENTBYTECOUNTREAD:case DKIOCGETMAXSEGMENTBYTECOUNTWRITE:*(uint64_t *)data=65536;return 0;
 +    case DKIOCGETMINSEGMENTALIGNMENTBYTECOUNT:*(uint64_t *)data=1;return 0;
 +    case DKIOCGETMAXSEGMENTADDRESSABLEBITCOUNT:*(uint64_t *)data=64;return 0;
++    case DKIOCSYNCHRONIZE: {
++        const dk_synchronize_t *request=(const void *)data;
++        if (!request || (request->options&~DK_SYNCHRONIZE_OPTION_BARRIER) ||
++            request->reserved0160[0] || request->reserved0160[1] ||
++            request->reserved0160[2] || request->reserved0160[3] ||
++            userdata.count>UINT64_MAX/512 || request->offset>userdata.count*512 ||
++            request->length>userdata.count*512-request->offset) return EINVAL;
++        /* This PIO driver can provide a full flush, stronger than a barrier.
++         * Serialize it with sector transfers and propagate card errors. */
++        lck_mtx_lock(&a6_emmc_lock);int err=to_errno(a6_emmc_flush(&host));lck_mtx_unlock(&a6_emmc_lock);return err;
++    }
 +    case DKIOCSYNCHRONIZECACHE: {
 +        lck_mtx_lock(&a6_emmc_lock);int err=to_errno(a6_emmc_flush(&host));lck_mtx_unlock(&a6_emmc_lock);return err;
 +    }
@@ -2841,6 +2884,47 @@ index f2bd38e..50625c0 100644
  		size_t  uiolen;
  		user_ssize_t    rlen;
  		off_t   pgoff;
+diff --git c/bsd/miscfs/bindfs/bind_vfsops.c w/bsd/miscfs/bindfs/bind_vfsops.c
+index 412f9ec..f32f4db 100644
+--- c/bsd/miscfs/bindfs/bind_vfsops.c
++++ w/bsd/miscfs/bindfs/bind_vfsops.c
+@@ -78,6 +78,11 @@
+ 
+ #include "bindfs.h"
+ 
++#if A6PLTE
++extern int a6_bindfs_boot_allowed(vfs_context_t);
++extern int a6_bindfs_firmware_source(struct mount *, const char *, vfs_context_t, vnode_t *);
++#endif
++
+ #define BINDFS_ENTITLEMENT "com.apple.private.bindfs-allow"
+ 
+ #define SIZEOF_MEMBER(type, member) (sizeof(((type *)0)->member))
+@@ -140,7 +145,11 @@ bindfs_mount(struct mount * mp, __unused vnode_t devvp, user_addr_t user_data, v
+ 	}
+ 
+ 	/* check entitlement */
+-	if (!IOCurrentTaskHasEntitlement(BINDFS_ENTITLEMENT)) {
++	if (!IOCurrentTaskHasEntitlement(BINDFS_ENTITLEMENT)
++#if A6PLTE
++	    && !a6_bindfs_boot_allowed(ctx)
++#endif
++	    ) {
+ 		return EPERM;
+ 	}
+ 
+@@ -162,6 +171,11 @@ bindfs_mount(struct mount * mp, __unused vnode_t devvp, user_addr_t user_data, v
+ 	}
+ 
+ 	error = vnode_lookup(data, 0, &lowerrootvp, ctx);
++#if A6PLTE
++	if (error == ENOENT) {
++		error = a6_bindfs_firmware_source(mp, data, ctx, &lowerrootvp);
++	}
++#endif
+ 	if (error) {
+ 		BINDFSERROR("lookup of %s failed error: %d\n", data, error);
+ 		goto error;
 diff --git c/bsd/nfs/gss/ccrypto.c w/bsd/nfs/gss/ccrypto.c
 index 64239e2..91b28fa 100644
 --- c/bsd/nfs/gss/ccrypto.c
@@ -3381,7 +3465,7 @@ index 336c84d..189718a 100644
  
 diff --git c/config/MASTER.arm64.a6plte.MacOSX w/config/MASTER.arm64.a6plte.MacOSX
 new file mode 100644
-index 0000000..8dedf5c
+index 0000000..1583224
 --- /dev/null
 +++ w/config/MASTER.arm64.a6plte.MacOSX
 @@ -0,0 +1,110 @@
@@ -3411,7 +3495,7 @@ index 0000000..8dedf5c
 +#  BSD_RELEASE =    [ BSD_BASE ]
 +#  BSD_DEV =        [ BSD_BASE config_vnguard ]
 +#  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
-+#  FILESYS_BASE =   [ devfs fdesc fifo fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_searchfs config_volfs config_appledouble nullfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
++#  FILESYS_BASE =   [ devfs fdesc fifo fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_searchfs config_volfs config_appledouble nullfs bindfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
 +#  FILESYS_RELEASE= [ FILESYS_BASE ]
 +#  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
 +#  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]

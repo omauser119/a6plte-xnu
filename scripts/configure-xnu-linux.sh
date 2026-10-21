@@ -16,7 +16,7 @@ for component in pexpert osfmk bsd libkern iokit libsa security san; do
     test -s "$OBJROOT/$component/Makefile"
 done
 
-python3 - "$OBJROOT/osfmk/Makefile" <<'PY_CHECK'
+python3 - "$OBJROOT/osfmk/Makefile" "$OBJROOT/bsd/Makefile" <<'PY_CHECK'
 from pathlib import Path
 import sys
 text=Path(sys.argv[1]).read_text()
@@ -28,4 +28,10 @@ for source in ('osfmk/arm/arm_init.c', 'osfmk/arm64/arm_vm_init.c',
 for source in ('amcc_rorgn_common.c', 'amcc_rorgn_pv_ctrr.c'):
     if source in text:
         raise SystemExit('Unexpected Apple-only source: '+source)
+bsd=Path(sys.argv[2]).read_text()
+if '-DBINDFS' not in bsd:
+    raise SystemExit('Missing native BINDFS configuration')
+for source in ('bind_subr.c', 'bind_vfsops.c', 'bind_vnops.c'):
+    if '$(SOURCE_DIR)/bsd/miscfs/bindfs/'+source not in bsd:
+        raise SystemExit('Missing native bindfs source: '+source)
 PY_CHECK

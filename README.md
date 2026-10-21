@@ -139,6 +139,22 @@ it authenticates neither an Apple manifest nor any userspace/preboot files.
 Existing valid firmware hashes are preserved. No files or directories are
 created in the prepared OS root. Hardware confirmation is pending.
 
+IMG_3493 confirms the boot hash was read and `/sbin/mount` ran. The next failure
+was `mount-phase-1`, exit 74: firmware directory mounting returned `ENODEV` (19).
+The board profile now includes Apple's native read-only `bindfs`. Without AMFI,
+root boot helpers on the selected userdata OS root can mount it without a private
+Apple entitlement. If the exact current-boot Preboot firmware path is absent,
+mounting it onto `/usr/standalone/firmware` uses the real covered firmware directory
+as backing. This supplies a read-only view without creating or changing files;
+other paths, mounts and original lookup errors keep their behavior. The directory
+must already exist. Native vnode references and mount operations are preserved.
+
+The same photo shows journal flush returning `ENOTTY` (0x19). The userdata driver
+now handles `DKIOCSYNCHRONIZE` as well as the legacy flush: validated byte ranges,
+options and reserved fields, serialized full eMMC flush even for a barrier request,
+and real card-error propagation. Partition and write restrictions remain intact.
+These corrections pass host regressions; hardware confirmation is pending.
+
 ## Persistent code-signature conversion
 
 The 16-KiB-to-4-KiB hash conversion now checkpoints to hidden

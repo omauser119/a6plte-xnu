@@ -666,3 +666,37 @@ boot_identity_sha384). Latest PHONE BOOTED image, not a flash. Actual passing
 boot-hash query/launchd result pending; async screen question asked. No new
 hardware progress inferred from fastboot ACK. No userspace inspection/edits,
 new diagnostics, UART, USB networking or SMP.
+
+IMG_3493.HEIC (2026-10-21 15:57:04) is ae9c607 hardware: printed Preboot hash
+3C35AD9D...4432CB7E exactly matches its image receipt, proving hash retrieval.
+/sbin/mount and mount_hfs run, root is /dev/a6userdata on / (hfs, journaled).
+Fatal next: firmware source /private/preboot/<hash>/usr/standalone/firmware ->
+/usr/standalone/firmware returns ENODEV 19; mount-phase-1 exits 74 and launchd
+requests panic. vfs_conf has BINDFS disabled in the board's macOS-derived profile
+although Apple ships its native implementation. Enable bindfs in that profile
+and verify its three native sources/option in configuration and symbols in the
+complete-image checker. No fake mount success or panic/exit suppression.
+
+Board-only bindfs entitlement compatibility allows root processes whose text
+vnode is on the explicitly selected userdata root, only without AMFI. Actual
+native bindfs mount/lookup/refcounts/read-only/nosuid flags stay in use. On ENOENT
+only, recognize the EXACT 48-byte current boot hash's uppercase Preboot firmware
+path and the exact target /usr/standalone/firmware on a directory covered vnode
+belonging to the root mount. Use that already-existing covered directory as the
+real lower vnode for read-only bindfs. Take its iocount directly; never re-lookup
+the target while its mount is in progress (avoids waiting on this same mount).
+No directories/files/firmware are created, read from the host or modified.
+Prepared real Preboot sources and non-ENOENT errors retain native behavior.
+
+Photo also reports `jnl: flushing fs disk buffer returned 0x19` = ENOTTY 25:
+userdata implemented only DKIOCSYNCHRONIZECACHE, while HFS uses DKIOCSYNCHRONIZE.
+Add the native request handler with full-range/overflow/options/reserved-field
+bounds, serialization and actual a6_emmc_flush, including stronger full flush
+for a barrier request. Preserve actual card errors and all partition/write caps.
+Native-helper/permission/lookup integration ASan/UBSan tests cover real lower
+vnode, wrong paths/hashes/roots/providers, reference and error behavior. Actual
+device_ioctl negative control reproduces ENOTTY; tests cover full/barrier flush,
+invalid/overflow ranges, options, refs/lock, timeout/offline and legacy dispatch.
+Full host suite passed; native compat.c header probe passed. Apple CI/native
+link and hardware verification are next. Phone reset-readiness question pending.
+Keep kernel-only/fixes-only, CPU0, no UART and USB networking disabled.
