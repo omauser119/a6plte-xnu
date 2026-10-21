@@ -35,7 +35,10 @@ unsigned a6_make_adt(void *buf,unsigned cap,uint64_t dest,uint64_t arena,uint64_
         prop(&a,"reg",&mpidr,4);prop(&a,"cpu-id",&cpu,4);prop(&a,"timebase-frequency",&freq,4);
         str(&a,"compatible","arm,cortex-a53");prop(&a,"l2-cache-id",&l2,4);
     }
-    node(&a,2,0,"arm-io"); str(&a,"device_type","msm8953"); prop(&a,"ranges",r,sizeof(r));
+    node(&a,2,1,"arm-io"); str(&a,"device_type","msm8953"); prop(&a,"ranges",r,sizeof(r));
+    node(&a,4,0,"disp0"); str(&a,"device_type","display-subsystem");
+    str(&a,"compatible","samsung,a6plte-display");
+    prop(&a,"canvas-width",&width,4);prop(&a,"canvas-height",&height,4);
     /* pmap_compute_max_asids() requires this node; absent properties select XNU defaults. */
     node(&a,0,0,"defaults");
     return a.failed?0:a.used;

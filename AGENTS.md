@@ -820,3 +820,39 @@ compatibility remains outstanding. Exact S6SY761 register/value and real touch
 also remain unconfirmed. All 88a09dd Actions 39612534222 now independently
 passed; the phone still uses the byte-identical 1909819 kernel in its locally
 built 88a09dd bridge profile. No new diagnostics or userspace changes.
+
+User now explicitly requests native iOS graphics compatibility, names ios-sweet
+0046-sweet-iosurface-iomfb.patch as implementation reference, and wants ordinary
+framebuffer logs hidden only after SpringBoard actually presents UI. Hardware
+already returned to lk2nd: no extra readiness/permission question. UART remains
+forbidden, cpus=1/USB-off/userdata launchd unchanged, no userspace inspection or
+edits, no flash. User additionally identifies S6SY761 cmd60 reg02000018 timeout,
+value unknown; do not guess or claim touch fixed.
+
+Graphics implementation now adapts primary 0046 (commit
+425b25102b6a9ee4b68fb2b9ca5d6a086b8a4116), cached-client sentinel contract from
+0068, and 0056-style deferred presentation. Native IOCoreSurfaceRoot and
+IOSurfaceRootUserClient: real shared buffers/state mappings, binary/XML property
+creation, geometry/plane bounds, 0xa68 reply, ID lookup and Mach ports, lock/seed
+traps, close/unmap, retained tasks, 64 MiB pool cap, parent descriptor retention,
+reserved IDs while a send right retains its object, cached lookup replies -1
+without duplicate mappings. Unsupported accelerators/shared events remain
+unsupported. No new per-selector or creation diagnostics. Legacy A6 graphics
+classes renamed and no longer published, preserving existing non-graphics
+services. Native catalogue/ADT now publish /arm-io/disp0 display-subsystem with
+1080x2220 canvas and Samsung compatible; AppleCLCD matches its actual platform
+nub and exposes IOMobileFramebufferUserClient type0.
+
+Framebuffer uses BGRA default IOSurface (not a wrongly advertised 32-bit mapping
+of the 24-bit panel), real CPU composition/scaling/premultiplied alpha, actual
+RGB888/XRGB scanout conversion, retained pending layer objects, 60 Hz software
+notifications and default 10 Hz latest-frame presentation. Swap completion waits
+for presentation; software power blanking and redraw retain panel setup. Only a
+successful non-black full-canvas present by backboardd/SpringBoard hides ordinary
+on-screen logs; memory log/ring still records them. Panic/early EL1 exception
+forces console back and permanently stops graphics for that panic, never switches
+to UART. Host ASan/UBSan suite passed, including 10000 extreme/clipped scanout
+rectangles, channel/alpha/scaling vectors, DT/catalogue discovery and console
+handoff/panic recovery. Local native C++ probes reach only the known unsupported
+Apple allocator builtins, with no other API errors; Apple CI/NOUNDEFS link still
+required before boot. Do not claim working iOS GUI until actual phone evidence.

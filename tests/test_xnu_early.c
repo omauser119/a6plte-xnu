@@ -43,6 +43,12 @@ int main(void) {
     for(unsigned n=0;n<8;++n) assert(!pthread_create(&writers[n],NULL,writer,NULL));
     for(unsigned n=0;n<8;++n) assert(!pthread_join(writers[n],NULL));
     assert(!memcmp(expected,b,3240*2220));free(expected);
+    unsigned char *frame=malloc(3240*2220);assert(frame);memcpy(frame,b,3240*2220);
+    a6_xnu_graphics_presented();a6_xnu_puts("hidden ordinary log\n");
+    assert(!memcmp(frame,b,3240*2220) && !a6_xnu_graphics_stopped());
+    a6_xnu_panic_console();assert(a6_xnu_graphics_stopped());
+    a6_xnu_puts("visible panic after GUI takeover\n");
+    assert(memcmp(frame,b,3240*2220));free(frame);
     /* Real XNU assert metadata has unaligned 64-bit pointers at +4 and +12. */
     unsigned char descriptor[20];
     uint32_t info=2129u<<8;
