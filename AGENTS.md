@@ -373,3 +373,30 @@ in build/verified-2a53d3c. This is now the latest PHONE BOOTED image, not a flas
 CPU0, userdata HFS root/launchd, UART forbidden, USB network disabled unchanged.
 Screen-result question pending: did HFS pass, did checkpoint save/reuse start,
 and exact panic reason/caller if it fails again. Do not infer success from ACK.
+
+Hardware 2a53d3c passed the HFS fortify failure and all reported signatures:
+`.42.dyldlinkedit errno 0 coverage 333447168/333447168 (return coverage)` and
+its 16-KiB header mmap errno 0. Actual failure is map2: 44 files, 52 mappings,
+errno 1 (EPERM), NOT a failed signature. User also recalls a
+vm_shared_region_map_file message but not its exact text/kr. Do not assert a
+single EPERM cause yet. The macOS CONFIG_CSR profile requires SF_RESTRICTED;
+a board-limited iOS-style cache rule now accepts only regular root-owned arm64
+cache files in known cache directories on the validated userdata root, same
+root vnode/mount. Native MAC, descriptor, ownership, signature coverage and
+VM protection checks remain; no global CSR setting or file flags are changed.
+Actual native owner/CSR/directory policy host test reproduces baseline EPERM
+without SF_RESTRICTED and passes the fix/rejections/balanced vnode refs. Native
+dyld_diag.c header probe and full host suite passed. If the fault is in VM,
+retain the actual VM kr and failing fd/index/VA/size/offset/protections and
+repeat them at the final PID1 framebuffer report. No fake map2 success.
+
+S6SY761 still physically failed cmd21/reg02000018/val40 with 2a53d3c. New own
+input fix leaves FIFO SERVICE unmasked (0x300 masking is BAM/DMA setup), and
+does not accept stale SERVICE/DONE while OUT_NOT_EMPTY or OUT_FULL is set.
+Sensor startup follows application's boot event -> boot status -> touch
+function -> ID -> panel info -> firmware integrity -> clear/sense-on order;
+a warm boot may already have consumed the boot event. No firmware flashing,
+PMIC power/reset writes, UART or Sweet HID. Real-driver ASan/UBSan test now
+covers stale SERVICE with queued output, bounded completion, old delayed STOP
+and lagging DONE, startup order and existing contact/button/HID tests. Physical
+touch and actual map2 success remain unconfirmed. CPU0/USB-off unchanged.

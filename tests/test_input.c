@@ -7,7 +7,9 @@ struct hardware {
     uint32_t *regs[5];uint64_t now;
     uint8_t tx[16],rx[16],cmd,events[32][8],pon;
     unsigned tx_count,rx_count,rx_at,event_count,event_at;
-    int reset_timeout,nack,cleanup_timeout,bad_boot,service_only;
+    int reset_timeout,nack,cleanup_timeout,bad_boot,service_only,stale_service;
+    uint64_t drain_until;
+    unsigned pending_pauses,touch_enabled;
     uint64_t stop_until;
     unsigned early_resets;
     uint32_t core_error;
@@ -19,6 +21,7 @@ static uint32_t read_reg(void *ctx,unsigned region,unsigned offset) {
         /* Aborting two STOPs leaves this model's sensor/bus stalled on the
          * third command, exactly exposing the reported cmd21/reg18/val40. */
         if(h->early_resets>=2)return 0x40;
+        if(h->stale_service && h->now<h->drain_until)return (1u<<8)|(1u<<4);
         return (h->service_only?1u<<8:1u<<10)|(h->rx_at<h->rx_count?1u<<5:0);
     }
     if(region==A6_INPUT_QUP && offset==0x218) {
@@ -39,7 +42,7 @@ static void execute(struct hardware *h) {
         h->cmd=h->tx[4];
         if(h->tx[2]==0x83)h->stop_until=h->now+50;
         assert(h->cmd==0x52 || h->cmd==0x55 || h->cmd==0x21 || h->cmd==0x23 || h->cmd==0x30 || h->cmd==0x62 || h->cmd==0x10 || h->cmd==0x60);
-        if(h->cmd==0x30)assert(n==7 && h->tx[5]==1 && !h->tx[6]);
+        if(h->cmd==0x30) {assert(n==7 && h->tx[5]==1 && !h->tx[6]);h->touch_enabled=1;}
     } else {
         assert(n==4 && h->tx[1]==0x91 && h->tx[2]==0x87);
         unsigned bytes=h->tx[3];assert(bytes<=11 && h->regs[A6_INPUT_QUP][0x208/4]==((1u<<31)| (bytes+2)));
@@ -48,7 +51,7 @@ static void execute(struct hardware *h) {
         switch(h->cmd) {
         case 0x52:assert(bytes==3);h->rx[2]=0x76;h->rx[3]=1;h->rx[4]=1;break;
         case 0x55:assert(bytes==1);h->rx[2]=h->bad_boot?0x10:0x20;break;
-        case 0x21:assert(bytes==1);h->rx[2]=0x80;break;
+        case 0x21:assert(bytes==1 && h->touch_enabled);h->rx[2]=0x80;break;
         case 0x23:assert(bytes==11);h->rx[2]=4;h->rx[3]=0x38;h->rx[4]=8;h->rx[5]=0xac;break;
         case 0x60:
             assert(bytes==8);
@@ -76,12 +79,18 @@ static void write_reg(void *ctx,unsigned region,unsigned offset,uint32_t value) 
     }
     h->regs[region][offset/4]=value;
     if(region==A6_INPUT_QUP) {
+        if(offset==0x28)assert(!value); /* FIFO, not BAM service masking. */
         if(offset==0xc) { h->tx_count=h->rx_count=h->rx_at=0;h->regs[region][1]=h->reset_timeout?0:4; }
         if(offset==0x408 && value==1)h->regs[region][1]|=0x10;
         if(offset==4) {
+            if(value==3 && h->now<h->drain_until)++h->pending_pauses;
             if(value==0 && h->now<h->stop_until)++h->early_resets;
             h->regs[region][1]=h->cleanup_timeout && value==0?0:value|4|0x10;
-            if(value==1)execute(h);
+            if(value==1) {
+                int output=h->tx_count && h->tx[1]==0x90;
+                execute(h);
+                if(h->stale_service && output)h->drain_until=h->now+40;
+            }
         }
         if(offset==0x110)for(unsigned j=0;j<4;++j) {assert(h->tx_count<16);h->tx[h->tx_count++]=(uint8_t)(value>>(8*j));}
     }
@@ -104,6 +113,8 @@ int main(void) {
     assert(!initial && s.touch_ready && s.pon_ready && s.pon_channel==3 && !h.early_resets);
     h.service_only=1; /* No MAX_OUTPUT_DONE: FIFO completion uses SERVICE. */
     assert(!a6_input_init(&s,&bus) && s.touch_ready && !h.early_resets);
+    h.stale_service=1;
+    assert(!a6_input_init(&s,&bus) && s.touch_ready && !h.pending_pauses);
     assert(s.max_x==4095 && s.max_y==4095);
     contact(h.events[0],1,1,900,1500,1);contact(h.events[1],10,1,300,1000,0);h.event_count=2;
     assert(a6_input_poll(&s)==1 && s.changed==0x201 && s.fingers[0].active && s.fingers[9].active);
@@ -137,7 +148,7 @@ int main(void) {
     h.core_error=4;h.cleanup_timeout=1;
     assert(a6_input_init(&s,&bus)==-1 && !s.touch_ready);
     a6_input_probe_status(&reg,&value,&cmd);
-    assert(reg==0x0200001c && value==4 && cmd==0x52); /* Cleanup must not hide the FIFO error. */
+    assert(reg==0x0200001c && value==4 && cmd==0x60); /* Cleanup must not hide the FIFO error. */
     h.core_error=0;h.cleanup_timeout=0;h.bad_boot=1;
     assert(a6_input_init(&s,&bus)==-1 && !s.touch_ready);
     a6_input_probe_status(&reg,&value,&cmd);
@@ -146,5 +157,5 @@ int main(void) {
     h.reset_timeout=1;h.event_count=h.event_at=0;uint64_t before=h.now;
     assert(a6_input_init(&s,&bus)==-1 && !s.touch_ready && h.now-before<160000);
     for(unsigned i=0;i<5;++i)free(h.regs[i]);
-    puts("PASS: QUP delayed STOP/idle-before-reset, lagging DONE/SERVICE, repeated START/tagged FIFO, touch decode/slots/release, bounded timeout, read-only PON, button debounce and Apple HID wire bounds");
+    puts("PASS: QUP FIFO service unmasked, stale SERVICE while output pending, delayed STOP, lagging DONE, sensor application startup order, repeated START/tagged FIFO, touch decode/slots/release, bounded timeout, read-only PON, button debounce and Apple HID wire bounds");
 }

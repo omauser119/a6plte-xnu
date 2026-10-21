@@ -520,10 +520,10 @@ index 0000000..1722103
 +#endif
 diff --git c/bsd/dev/a6plte/dyld_diag.c w/bsd/dev/a6plte/dyld_diag.c
 new file mode 100644
-index 0000000..7cbc1cd
+index 0000000..69d9f17
 --- /dev/null
 +++ w/bsd/dev/a6plte/dyld_diag.c
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,190 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Read-only diagnostics for user-provided split dyld caches. No file changes. */
 +#if A6PLTE
@@ -531,6 +531,7 @@ index 0000000..7cbc1cd
 +#include <sys/systm.h>
 +#include <sys/vnode.h>
 +#include <sys/vnode_internal.h>
++#include <sys/mount.h>
 +#include <sys/uio.h>
 +#include <sys/kauth.h>
 +#include <sys/proc.h>
@@ -539,6 +540,8 @@ index 0000000..7cbc1cd
 +static unsigned present,missing_files,bad_files,signatures;
 +static char first_issue[384],last_signature[192],last_mmap[192],last_map[128],blob_failure[192];
 +static unsigned region_checks;
++static char map_failure[256];
++static char vm_failure[256];
 +static int region_check_result;
 +static uint64_t region_address;
 +void a6_dyld_note_check(int result,uint64_t address) {
@@ -571,6 +574,49 @@ index 0000000..7cbc1cd
 +    if (error && !first_issue[0]) snprintf(first_issue,sizeof(first_issue),"map2: %s",last_map);
 +    printf("A6PLTE dyld: shared region %s\n",last_map);
 +}
++void a6_dyld_note_map_failure(const char *stage,const char *name,int fd,int error) {
++    snprintf(map_failure,sizeof(map_failure),"%s: %s fd %d code %d",
++        stage,name?name:"(none)",fd,error);
++    printf("A6PLTE dyld: map failure %s\n",map_failure);
++}
++void a6_dyld_note_vm_mapping(int fd,int index,uint64_t address,uint64_t size,
++    uint64_t offset,int prot,int maxprot,int kr) {
++    snprintf(vm_failure,sizeof(vm_failure),
++        "fd %d mapping %d VA %llx size %llx off %llx prot %x/%x kr %d",
++        fd,index,(unsigned long long)address,(unsigned long long)size,
++        (unsigned long long)offset,prot,maxprot,kr);
++    printf("A6PLTE dyld: VM mapping failed: %s\n",vm_failure);
++}
++int a6_dyld_root_cache(struct vnode *vp,struct vnode *rdir) {
++    extern int a6_userdata_root_selected(void);
++    if (!vp || !rootvnode || rdir!=rootvnode || !a6_userdata_root_selected() ||
++        !vnode_isreg(vp) || vnode_mount(vp)!=vnode_mount(rootvnode) || !vp->v_name)
++        return 0;
++    const char *name=vp->v_name;
++    const size_t prefix=sizeof("dyld_shared_cache_arm64")-1;
++    if (strncmp(name,"dyld_shared_cache_arm64",prefix) ||
++        (name[prefix] && name[prefix]!='.')) return 0;
++    struct vnode_attr a; VATTR_INIT(&a); VATTR_WANTED(&a,va_uid);
++    if (vnode_getattr(vp,&a,vfs_context_current()) ||
++        !VATTR_IS_SUPPORTED(&a,va_uid) || a.va_uid!=0) return 0;
++    static const char *directories[]={
++        "/System/Library/Caches/com.apple.dyld",
++        "/System/Library/dyld",
++        "/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld",
++        "/System/Cryptexes/OS/System/Library/dyld"
++    };
++    for (unsigned i=0;i<sizeof(directories)/sizeof(directories[0]);++i) {
++        vnode_t parent=NULL;
++        int error=vnode_lookup(directories[i],VNODE_LOOKUP_NOCROSSMOUNT,
++            &parent,vfs_context_current());
++        if (error) continue;
++        int match=parent==vnode_parent(vp) &&
++            vnode_mount(parent)==vnode_mount(rootvnode);
++        vnode_put(parent);
++        if (match) return 1;
++    }
++    return 0;
++}
 +void a6_dyld_report(void) {
 +    extern void a6_input_probe_status(uint32_t *,uint32_t *,uint32_t *);
 +    uint32_t reg,value,command;a6_input_probe_status(&reg,&value,&command);
@@ -585,6 +631,8 @@ index 0000000..7cbc1cd
 +    if (last_mmap[0]) printf("dyld last mmap: %s\n",last_mmap);
 +    if (last_map[0]) printf("dyld last map2: %s\n",last_map);
 +    else printf("dyld: map2 syscall not reached\n");
++    if (map_failure[0]) printf("dyld map failure: %s\n",map_failure);
++    if (vm_failure[0]) printf("dyld VM failure: %s\n",vm_failure);
 +    if (region_checks) printf("dyld region check: kr %d address 0x%llx (%u checks)\n",
 +        region_check_result,(unsigned long long)region_address,region_checks);
 +}
@@ -668,10 +716,10 @@ index 0000000..7cbc1cd
 +#endif
 diff --git c/bsd/dev/a6plte/dyld_diag.h w/bsd/dev/a6plte/dyld_diag.h
 new file mode 100644
-index 0000000..018a984
+index 0000000..a761a40
 --- /dev/null
 +++ w/bsd/dev/a6plte/dyld_diag.h
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,16 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#ifndef A6PLTE_DYLD_DIAG_H
 +#define A6PLTE_DYLD_DIAG_H
@@ -681,6 +729,10 @@ index 0000000..018a984
 +void a6_dyld_note_blob(const char *,int,int,unsigned,int64_t,int64_t);
 +void a6_dyld_note_mmap(const char *,int,uint64_t,uint64_t);
 +void a6_dyld_note_map(unsigned,unsigned,int);
++struct vnode;
++int a6_dyld_root_cache(struct vnode *,struct vnode *);
++void a6_dyld_note_map_failure(const char *,const char *,int,int);
++void a6_dyld_note_vm_mapping(int,int,uint64_t,uint64_t,uint64_t,int,int,int);
 +void a6_dyld_note_check(int,uint64_t);
 +void a6_dyld_report(void);
 +#endif
@@ -3081,10 +3133,31 @@ index 5b51e9c..3a94ed4 100644
  	context.vc_thread = current_thread();
  	context.vc_ucred = cred;
 diff --git c/bsd/vm/vm_unix.c w/bsd/vm/vm_unix.c
-index 336c84d..aec372c 100644
+index 336c84d..3115f70 100644
 --- c/bsd/vm/vm_unix.c
 +++ w/bsd/vm/vm_unix.c
-@@ -2118,6 +2118,18 @@ shared_region_check_np(
+@@ -121,6 +121,9 @@
+ #if CONFIG_CSR
+ #include <sys/csr.h>
+ #endif /* CONFIG_CSR */
++#if A6PLTE
++#include <dev/a6plte/dyld_diag.h>
++#endif
+ #include <sys/trust_caches.h>
+ #include <libkern/amfi/amfi.h>
+ #include <IOKit/IOBSD.h>
+@@ -406,6 +409,10 @@ static int scdir_enforce = 0;   /* AOT caches live elsewhere */
+ #endif /* defined (__x86_64__) */
+ 
+ static char *scdir_path[] = {
++#if A6PLTE
++	"/System/Library/Caches/com.apple.dyld",
++	"/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld",
++#endif
+ 	"/System/Library/dyld/",
+ 	"/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld",
+ 	"/System/Cryptexes/OS/System/Library/dyld",
+@@ -2118,6 +2125,18 @@ shared_region_check_np(
  		} else {
  			/* retrieve address of its first mapping... */
  			kr = vm_shared_region_start_address(shared_region, &start_address, task);
@@ -3103,7 +3176,149 @@ index 336c84d..aec372c 100644
  			if (kr != KERN_SUCCESS) {
  				SHARED_REGION_TRACE_ERROR(("shared_region: %p [%d(%s)] "
  				    "check_np(0x%llx) "
-@@ -2994,6 +3006,12 @@ shared_region_map_and_slide_2_np(
+@@ -2231,7 +2250,7 @@ shared_region_map_and_slide_setup(
+ 	struct vnode                        *rdir_vp)
+ {
+ 	int                             error = 0;
+-	struct _sr_file_mappings        *srfmp;
++	struct _sr_file_mappings        *srfmp = NULL;
+ 	uint32_t                        mappings_next;
+ 	struct vnode_attr               va;
+ 	off_t                           fs;
+@@ -2241,6 +2260,12 @@ shared_region_map_and_slide_setup(
+ 	uint32_t                        i;
+ 	struct vm_shared_region         *shared_region = NULL;
+ 	boolean_t                       is_driverkit = task_is_driver(current_task());
++#if A6PLTE
++	const char *a6_stage = "request";
++#define A6_SR_STAGE(value) (a6_stage = (value))
++#else
++#define A6_SR_STAGE(value) ((void)0)
++#endif
+ 
+ 	SHARED_REGION_TRACE_DEBUG(
+ 		("shared_region: %p [%d(%s)] -> map\n",
+@@ -2294,6 +2319,7 @@ shared_region_map_and_slide_setup(
+ 	 * avoid tainting the shared region with something that
+ 	 * doesn't quite belong into it.
+ 	 */
++	A6_SR_STAGE("root directory");
+ 	struct vnode *sr_vnode = vm_shared_region_root_dir(shared_region);
+ 	if (sr_vnode != NULL ?  rdir_vp != sr_vnode : rdir_vp != rootvnode) {
+ 		SHARED_REGION_TRACE_ERROR(
+@@ -2354,6 +2380,7 @@ shared_region_map_and_slide_setup(
+ 		}
+ 
+ 		/* get file structure from file descriptor */
++		A6_SR_STAGE("descriptor");
+ 		error = fp_get_ftype(p, srfmp->fd, DTYPE_VNODE, EINVAL, &srfmp->fp);
+ 		if (error) {
+ 			SHARED_REGION_TRACE_ERROR(
+@@ -2365,6 +2392,7 @@ shared_region_map_and_slide_setup(
+ 		}
+ 
+ 		/* we need at least read permission on the file */
++		A6_SR_STAGE("descriptor read access");
+ 		if (!(srfmp->fp->fp_glob->fg_flag & FREAD)) {
+ 			SHARED_REGION_TRACE_ERROR(
+ 				("shared_region: %p [%d(%s)] map: "
+@@ -2376,6 +2404,7 @@ shared_region_map_and_slide_setup(
+ 		}
+ 
+ 		/* get vnode from file structure */
++		A6_SR_STAGE("vnode reference");
+ 		error = vnode_getwithref((vnode_t)fp_get_data(srfmp->fp));
+ 		if (error) {
+ 			SHARED_REGION_TRACE_ERROR(
+@@ -2403,6 +2432,7 @@ shared_region_map_and_slide_setup(
+ #if CONFIG_MACF
+ 		/* pass in 0 for the offset argument because AMFI does not need the offset
+ 		 *       of the shared cache */
++		A6_SR_STAGE("MAC mmap policy");
+ 		error = mac_file_check_mmap(vfs_context_ucred(vfs_context_current()),
+ 		    srfmp->fp->fp_glob, VM_PROT_ALL, MAP_FILE | MAP_PRIVATE | MAP_FIXED, 0, &maxprot);
+ 		if (error) {
+@@ -2471,6 +2501,7 @@ shared_region_map_and_slide_setup(
+ root_check:
+ #endif /* XNU_TARGET_OS_OSX && defined(__arm64__) */
+ 
++		A6_SR_STAGE("root ownership");
+ 		/* The shared cache file must be owned by root */
+ 		VATTR_INIT(&va);
+ 		VATTR_WANTED(&va, va_uid);
+@@ -2504,7 +2535,15 @@ after_root_check:
+ #endif /* XNU_TARGET_OS_OSX && defined(__arm64__) */
+ 
+ #if CONFIG_CSR
+-		if (csr_check(CSR_ALLOW_UNRESTRICTED_FS) != 0) {
++		A6_SR_STAGE("SIP file policy");
++		/* The A6PLTE root is a user-prepared HFS volume, not a macOS SIP
++		 * volume. Accept only known cache directories on that validated root;
++		 * keep ownership, MAC and signed mapping checks around this branch. */
++		if (csr_check(CSR_ALLOW_UNRESTRICTED_FS) != 0
++#if A6PLTE
++		    && !a6_dyld_root_cache(srfmp->vp, rdir_vp)
++#endif
++		    ) {
+ 			VATTR_INIT(&va);
+ 			VATTR_WANTED(&va, va_flags);
+ 			error = vnode_getattr(srfmp->vp, &va, vfs_context_current());
+@@ -2572,6 +2611,7 @@ after_root_check:
+ 		}
+ #endif /* CONFIG_CSR */
+ 
++		A6_SR_STAGE("cache directory");
+ 		if (scdir_enforce) {
+ 			char **expected_scdir_path = is_driverkit ? driverkit_scdir_path : scdir_path;
+ 			struct vnode *scdir_vp = NULL;
+@@ -2614,6 +2654,7 @@ after_root_check:
+ scdir_ok:
+ 
+ 		/* get vnode size */
++		A6_SR_STAGE("file size");
+ 		error = vnode_size(srfmp->vp, &fs, vfs_context_current());
+ 		if (error) {
+ 			SHARED_REGION_TRACE_ERROR(
+@@ -2629,6 +2670,7 @@ scdir_ok:
+ 		srfmp->file_size = fs;
+ 
+ 		/* get the file's memory object handle */
++		A6_SR_STAGE("memory object");
+ 		srfmp->file_control = ubc_getobject(srfmp->vp, UBC_HOLDOBJECT);
+ 		if (srfmp->file_control == MEMORY_OBJECT_CONTROL_NULL) {
+ 			SHARED_REGION_TRACE_ERROR(
+@@ -2642,6 +2684,7 @@ scdir_ok:
+ 			goto done;
+ 		}
+ 
++		A6_SR_STAGE("signed mapping coverage");
+ 		/* check that the mappings are properly covered by code signatures */
+ 		if (!cs_system_enforcement()) {
+ 			/* code signing is not enforced: no need to check */
+@@ -2677,6 +2720,12 @@ scdir_ok:
+ 		}
+ 	}
+ done:
++#if A6PLTE
++	if (error != 0) a6_dyld_note_map_failure(a6_stage,
++	    srfmp && srfmp->vp ? srfmp->vp->v_name : NULL,
++	    srfmp ? srfmp->fd : -1, error);
++#endif
++#undef A6_SR_STAGE
+ 	if (error != 0) {
+ 		shared_region_map_and_slide_cleanup(p, files_count, *sr_file_mappings, shared_region);
+ 		*sr_file_mappings = NULL;
+@@ -2736,6 +2785,9 @@ _shared_region_map_and_slide(
+ 	/* map the file(s) into that shared region's submap */
+ 	kr = vm_shared_region_map_file(shared_region, files_count, sr_file_mappings);
+ 	if (kr != KERN_SUCCESS) {
++#if A6PLTE
++		a6_dyld_note_map_failure("VM mapping", NULL, -1, kr);
++#endif
+ 		SHARED_REGION_TRACE_ERROR(("shared_region: %p [%d(%s)] map(): "
+ 		    "vm_shared_region_map_file() failed kr=0x%x\n",
+ 		    (void *)VM_KERNEL_ADDRPERM(current_thread()),
+@@ -2994,6 +3046,12 @@ shared_region_map_and_slide_2_np(
  done:
  	kfree_data(shared_files, files_count * sizeof(shared_files[0]));
  	kfree_data(mappings, mappings_count * sizeof(mappings[0]));
@@ -3894,10 +4109,10 @@ index 0000000..2bd96f3
 +#endif
 diff --git c/iokit/Kernel/arm/A6Input.c w/iokit/Kernel/arm/A6Input.c
 new file mode 100644
-index 0000000..74d37a4
+index 0000000..8b94ce1
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Input.c
-@@ -0,0 +1,192 @@
+@@ -0,0 +1,197 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Original polled QUPv2/S6SY761 + TLMM/PM8953 PON driver. Register/protocol
 + * definitions verified against upstream hardware drivers; no firmware writes,
@@ -3935,7 +4150,8 @@ index 0000000..74d37a4
 +    wr(s,A6_INPUT_QUP,0x100,0);wr(s,A6_INPUT_QUP,0x200,0);
 +    wr(s,A6_INPUT_QUP,0x1c,0x7c);wr(s,A6_INPUT_QUP,0x404,0x38000fc);
 +    wr(s,A6_INPUT_QUP,0x20,0);
-+    wr(s,A6_INPUT_QUP,0x28,0x300);wr(s,A6_INPUT_QUP,0x408,1);
++    /* SERVICE masking belongs to BAM/DMA, not this polled FIFO path. */
++    wr(s,A6_INPUT_QUP,0x28,0);wr(s,A6_INPUT_QUP,0x408,1);
 +    /* Mini-core selection is asynchronous even after RESET is valid. */
 +    return wait_bits(s,A6_INPUT_QUP,4,0x14,0x14,1000);
 +}
@@ -3969,7 +4185,8 @@ index 0000000..74d37a4
 +        /* In FIFO mode OUTPUT_SERVICE can precede MAX_OUTPUT_DONE. Waiting
 +         * only for DONE after acknowledging SERVICE can hang short writes.
 +         * A read is complete once its entire tagged response is drained. */
-+        int complete=bytes?received==bytes+2:(op&((1u<<8)|(1u<<10)))!=0;
++        int complete=bytes?received==bytes+2:
++            (op&((1u<<8)|(1u<<10))) && !(op&((1u<<4)|(1u<<6)));
 +        if (op&0x300) wr(s,A6_INPUT_QUP,0x18,op&0x300);
 +        if (complete) break;
 +        if (s->bus.us(s->bus.context)-start>=20000) {
@@ -4038,19 +4255,22 @@ index 0000000..74d37a4
 +    /* Both fixed touch supplies share GPIO139. Enable without power cycling. */
 +    wr(s,A6_INPUT_TLMM,139*0x1000+4,rd(s,A6_INPUT_TLMM,139*0x1000+4)|2);
 +    pin(s,139,0,0,1);bus->delay(bus->context,150000);
-+    uint8_t id[3],boot=0,integrity=0,panel[11],enable[2]={1,0};
-+    if (command(s,0x52,0,0,id,3) || command(s,0x55,0,0,&boot,1)) goto failed;
++    uint8_t id[3],boot=0,integrity=0,panel[11],event[8],enable[2]={1,0};
++    /* Match the sensor's application startup order. Consume the boot event
++     * if present; a warm boot can inherit an already-consumed event queue. */
++    if (command(s,0x60,0,0,event,8) || command(s,0x55,0,0,&boot,1)) goto failed;
 +    if (boot!=0x20) { s->error_register=0x05000055;s->error_value=boot;goto failed; }
-+    if (command(s,0x21,0,0,&integrity,1)) goto failed;
-+    if (integrity!=0x80) { s->error_register=0x05000021;s->error_value=integrity;goto failed; }
++    if (command(s,0x30,enable,2,0,0) || command(s,0x52,0,0,id,3)) goto failed;
 +    if (command(s,0x23,0,0,panel,11)) goto failed;
 +    if (!((unsigned)panel[0]<<8|panel[1]) || !((unsigned)panel[2]<<8|panel[3])) {
 +        s->error_register=0x05000023;s->error_value=(uint32_t)panel[0]<<24|(uint32_t)panel[1]<<16|(uint32_t)panel[2]<<8|panel[3];goto failed;
 +    }
++    if (command(s,0x21,0,0,&integrity,1)) goto failed;
++    if (integrity!=0x80) { s->error_register=0x05000021;s->error_value=integrity;goto failed; }
 +    /* Board DT overrides panel defaults: touchscreen-size-x/y = 4096.
 +     * These are sensor units, independent of the 1080x2220 display pixels. */
 +    s->max_x=4095;s->max_y=4095;
-+    if (command(s,0x30,enable,2,0,0) || command(s,0x62,0,0,0,0) || command(s,0x10,0,0,0,0)) goto failed;
++    if (command(s,0x62,0,0,0,0) || command(s,0x10,0,0,0,0)) goto failed;
 +    s->touch_ready=1;probe_register=probe_value=probe_command=0;return 0;
 +failed:
 +    probe_register=s->error_register;probe_value=s->error_value;probe_command=s->command;
@@ -10068,6 +10288,23 @@ index f04b72f..12364c4 100644
  
  /*
   * XNU_MONITOR and PMAP_CS are both defined for the same targets in board_config.h.
+diff --git c/osfmk/vm/vm_shared_region.c w/osfmk/vm/vm_shared_region.c
+index db1d613..4ed76cf 100644
+--- c/osfmk/vm/vm_shared_region.c
++++ w/osfmk/vm/vm_shared_region.c
+@@ -1880,6 +1880,12 @@ vm_shared_region_map_file_setup(
+ 	if (kr != KERN_SUCCESS) {
+ 		/* the last mapping we tried (mappings[i]) failed ! */
+ 		assert(i < mappings_count);
++#if A6PLTE
++		extern void a6_dyld_note_vm_mapping(int,int,uint64_t,uint64_t,uint64_t,int,int,int);
++		a6_dyld_note_vm_mapping(srfmp->fd, i, mappings[i].sms_address,
++		    mappings[i].sms_size, mappings[i].sms_file_offset,
++		    mappings[i].sms_init_prot, mappings[i].sms_max_prot, kr);
++#endif
+ 		SHARED_REGION_TRACE_ERROR(
+ 			("shared_region: mapping[%d]: "
+ 			"address:0x%016llx size:0x%016llx "
 diff --git c/pexpert/arm/a6plte/boot_abi.h w/pexpert/arm/a6plte/boot_abi.h
 new file mode 100644
 index 0000000..731e33d
