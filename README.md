@@ -104,7 +104,20 @@ Hardware `2a53d3c` reached all reported signature/header checks successfully,
 including `.42.dyldlinkedit` (318 MiB signed coverage), but map2 returned `EPERM`
 for 44 files / 52 mappings. A board-limited root-cache policy handles the absence
 of macOS SIP file flags on the user-prepared HFS volume; ownership, known cache
-directory, same-root mount and code-signature checks remain. Hardware confirmation of map2 success is pending.
+directory, same-root mount and code-signature checks remain. Hardware aa5824e
+now confirms successful map2 for all 44 files / 52 mappings and real launchd
+execution through the first `/sbin/mount` boot task.
+
+Without an Apple AMFI provider, a board-only MAC signature callback preserves
+the CodeDirectory platform marker for valid, non-ad-hoc, root-owned system
+files on the selected userdata root mount. It is confined to system binary,
+library and System/Library paths; ordinary user files and other mounts are not
+classified as platform code. Native cs_blob and Mach-O loading propagate that
+status to tasks, fixing launchd's refusal of a non-platform boot helper. This
+is a policy that trusts the user-prepared OS root, not Apple CMS authentication.
+Native CodeDirectory/page validation, other MAC policy failures and execution
+protections remain active. No entitlement objects or Apple trust provider are
+fabricated. Physical confirmation of this boot-helper fix is pending.
 
 ## Persistent code-signature conversion
 
@@ -130,7 +143,7 @@ An empty `shared_region_check_np` probe still returns its native `ENOMEM`, which
 dyld uses to proceed with mapping. On this board it is no longer printed as an
 unexpected `vm_shared_region_start_address() failed`; no address or successful
 mapping is fabricated. Actual signature and map2 failures remain in the PID1
-panic summary. The reported stop around cache part “44” still needs its exact
-failure/errno to establish whether it is a signature failure or a map failure.
+panic summary. Hardware aa5824e has now passed the complete split-cache mapping;
+the current boot-helper failure and its platform-status fix are described above.
 
 Historical hardware reports elsewhere describe XNU 12377.

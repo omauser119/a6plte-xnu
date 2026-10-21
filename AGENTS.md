@@ -474,3 +474,27 @@ fastboot boot accepted this exact image: send 0.382 s, boot 0.078 s, total
 build/verified-aa5824e/boot-receipt.json. aa5824e is now latest PHONE BOOTED
 image, not a flash. Actual framebuffer/launchd result pending; no new hardware
 success or physical touch claim from fastboot ACK. Keep fixes-only constraint.
+
+IMG_3491.HEIC (2026-10-21 13:56:17) is the aa5824e hardware result. It confirms
+shared region 44 files / 52 mappings errno 0, cache mapped at 0x1b8900000,
+native launchd journal and the first mount-phase-1 task. SHA1 abort is passed.
+New panic: `userspace panic: boot task is not a platform binary (mount-phase-1,
+/sbin/mount)`, caller 0xfffffff007a7d1c8 = aa5824e panic_kernel+0xe0. The board
+has no AMFI provider or MAC signature hook to set CS_PLATFORM_BINARY: native
+CodeDirectory initialization masks that kernel-only flag and leaves platform
+status zero, which propagates through cs_blob and Mach-O loading to csops/tasks.
+
+Fix: the already-registered board compatibility MAC policy adds the native
+vnode_check_signature callback. Only without AMFI, on the explicitly selected
+userdata root mount, for regular root-owned system-path files with a valid,
+non-ad-hoc CodeDirectory and nonzero native platform marker, it sets the
+platform flag. This trusts the user-prepared OS root; it does NOT authenticate
+an Apple CMS chain. Native page hashes/validation and other MAC failures stay
+active, no entitlement/provider objects or new diagnostics added. User files,
+foreign mounts/roots, missing marker/valid flag, ad-hoc signatures, missing
+attributes/path failures are not promoted. Native provider status is untouched.
+Actual callback plus native cs_blob/load-result propagation pass ASan/UBSan;
+negative control reproduces non-platform status with the old absent callback.
+Full host suite and native compat.c header probe pass. Full CI/link and hardware
+pending. User has already returned phone for this fix; check fastboot and load
+verified image as soon as ready, without new permission. CPU0 and USB-off remain.

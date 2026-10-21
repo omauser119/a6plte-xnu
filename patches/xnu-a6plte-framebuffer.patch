@@ -46,10 +46,10 @@ index a77bd10..5fc6f17 100644
  bsd/dev/arm/kern_machdep.c	standard
 diff --git c/bsd/dev/a6plte/compat.c w/bsd/dev/a6plte/compat.c
 new file mode 100644
-index 0000000..f4913d5
+index 0000000..4819009
 --- /dev/null
 +++ w/bsd/dev/a6plte/compat.c
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,180 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Board-only bring-up policies and diagnostics, adapted for native XNU 8796. */
 +#if A6PLTE
@@ -60,6 +60,9 @@ index 0000000..f4913d5
 +#include <sys/priv.h>
 +#include <sys/signal.h>
 +#include <sys/kernel.h>
++#include <sys/vnode_internal.h>
++#include <sys/ubc_internal.h>
++#include <libkern/amfi/amfi.h>
 +#include <security/mac_policy.h>
 +#include <kern/kalloc.h>
 +#include <kern/locks.h>
@@ -111,8 +114,42 @@ index 0000000..f4913d5
 +    if (log) printf("A6PLTE Sandbox: %s privilege %d not granted\n",name,priv);
 +    return EPERM;
 +}
++/* This standalone board trusts the selected, user-provided OS root. It has no
++ * Apple AMFI/CMS trust provider. Preserve validated CodeDirectory platform
++ * identity for signed system files there; do not grant arbitrary entitlements
++ * or classify ad-hoc/user files as platform code. Native page hashes, MAC
++ * failures and exec protections are still enforced by the caller. */
++static int platform_signature(struct vnode *vp,__unused struct label *label,
++    __unused cpu_type_t cpu_type,struct cs_blob *blob,unsigned int *cs_flags,
++    __unused unsigned int *signer_type,__unused int flags,__unused unsigned int platform,
++    __unused char **fatal_failure_desc,__unused size_t *fatal_failure_desc_len) {
++    extern int a6_userdata_root_selected(void);
++    if (amfi || !vp || !blob || !cs_flags || !blob->csb_cd ||
++        !blob->csb_cd->platform || !(*cs_flags&CS_VALID) || (*cs_flags&CS_ADHOC) ||
++        !rootvnode || !a6_userdata_root_selected() || !vnode_isreg(vp) ||
++        vnode_mount(vp)!=vnode_mount(rootvnode)) return 0;
++    struct vnode_attr a; VATTR_INIT(&a); VATTR_WANTED(&a,va_uid);
++    if (vnode_getattr(vp,&a,vfs_context_current()) ||
++        !VATTR_IS_SUPPORTED(&a,va_uid) || a.va_uid!=0) return 0;
++    char path[MAXPATHLEN];int length=sizeof(path);
++    if (vn_getpath(vp,path,&length) || length<=1 || length>(int)sizeof(path) ||
++        !memchr(path,0,(size_t)length)) return 0;
++    static const char *directories[]={
++        "/sbin/","/bin/","/usr/bin/","/usr/sbin/","/usr/libexec/",
++        "/usr/lib/","/System/Library/","/System/Cryptexes/OS/System/Library/"
++    };
++    for (unsigned i=0;i<sizeof(directories)/sizeof(directories[0]);++i) {
++        size_t n=strlen(directories[i]);
++        if (!strncmp(path,directories[i],n) && path[n]) {
++            *cs_flags|=CS_PLATFORM_BINARY;
++            break;
++        }
++    }
++    return 0;
++}
 +static const struct mac_policy_ops sandbox_ops={
 +    .mpo_policy_syscall=sandbox_syscall,.mpo_priv_grant=sandbox_priv_grant,
++    .mpo_vnode_check_signature=platform_signature,
 +};
 +static struct mac_policy_conf sandbox_conf={
 +    .mpc_name="Sandbox",.mpc_fullname="A6PLTE permissive bring-up Sandbox",.mpc_ops=&sandbox_ops,
