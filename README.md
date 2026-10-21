@@ -108,16 +108,22 @@ directory, same-root mount and code-signature checks remain. Hardware aa5824e
 now confirms successful map2 for all 44 files / 52 mappings and real launchd
 execution through the first `/sbin/mount` boot task.
 
-Without an Apple AMFI provider, a board-only MAC signature callback preserves
-the CodeDirectory platform marker for valid, non-ad-hoc, root-owned system
-files on the selected userdata root mount. It is confined to system binary,
+Without an Apple AMFI provider, a board-only kernel policy assigns platform
+status to validly code-signed, root-owned system files on the selected userdata
+root mount. Re-signed files need not retain Apple's optional platform marker;
+ad-hoc signatures still undergo the native page-hash checks. The policy runs
+only after other MAC checks succeed. It is confined to system binary,
 library and System/Library paths; ordinary user files and other mounts are not
-classified as platform code. Native cs_blob and Mach-O loading propagate that
+classified as platform code. For HFS hardlinks with private inode-store cached
+names, the kernel's saved executable path must resolve to that same vnode and
+the original namei root must be the selected OS root. Native cs_blob and Mach-O loading propagate that
 status to tasks, fixing launchd's refusal of a non-platform boot helper. This
 is a policy that trusts the user-prepared OS root, not Apple CMS authentication.
 Native CodeDirectory/page validation, other MAC policy failures and execution
 protections remain active. No entitlement objects or Apple trust provider are
-fabricated. Physical confirmation of this boot-helper fix is pending.
+fabricated. Signature revalidation updates RO platform fields as well as signer
+flags, covering signatures attached before exec. The earlier marker-dependent
+policy still failed on hardware 9eabb12; confirmation of this correction is pending.
 
 ## Persistent code-signature conversion
 

@@ -511,3 +511,29 @@ after all CI passed: send 0.378 s, boot 0.078 s, total 0.476 s. Private log:
 artifacts/boot-9eabb12-cpu0.private.log; image and boot receipts beside kernel.
 This is latest PHONE BOOTED image, not a flash. Actual mount-phase-1/launchd
 screen result pending. Keep CPU0, USB disabled, no UART or new diagnostics.
+
+IMG_3492.HEIC (2026-10-21 14:19:06) shows 9eabb12 still stopping at the SAME
+non-platform `/sbin/mount` boot task, despite successful cache map2 and launchd.
+Do NOT claim that the first platform-policy fix passed on hardware. The actual
+failing predicate is not printed, and the photo cannot distinguish marker,
+ad-hoc or vnode-path checks. The user returned the phone to lk2nd, then explicitly
+steered: **only work on the kernel**. Stop userspace/raw-HFS inspection and broad
+file searches; do not change prepared files. Continue with XNU source, its tests,
+CI and userdata-root kernel packaging. No further permission needed to boot.
+
+Kernel correction removes the unsupported requirement for an Apple platform
+marker/non-ad-hoc signature on the already trusted selected OS root. Valid
+CodeDirectory/page checks, root uid, regular-file/same-root mount, known system
+paths and native MAC denials stay in force. HFS hardlink cached inode paths are
+handled by native exec_save_path data, with matching imgp/ni_vp, original namei
+root, bounded strings/no traversal and fresh same-vnode lookup. Policy is called
+after successful native mac_vnode_check_signature, not through a pretend AMFI.
+Revalidation also updates immutable cs_blob platform fields using native RO
+updates, since signatures may be attached before the exec identity is available.
+No new logs, diagnostics or userspace changes. Native header probes and regression
+tests cover actual helper, post-MAC gate, cs_blob/load-result and revalidation,
+including re-signed zero-marker code, HFS alias/path cache failure, vnode/root
+identity, MAC/provider failures, traversal, bounds and balanced vnode references.
+The actual previous callback negative control rejects a valid re-signed system
+task, reproducing that source defect. Hardware cause/result still require next
+fixes-only image. CPU0, UART prohibition and USB networking off unchanged.

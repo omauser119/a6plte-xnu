@@ -46,10 +46,10 @@ index a77bd10..5fc6f17 100644
  bsd/dev/arm/kern_machdep.c	standard
 diff --git c/bsd/dev/a6plte/compat.c w/bsd/dev/a6plte/compat.c
 new file mode 100644
-index 0000000..4819009
+index 0000000..4db331a
 --- /dev/null
 +++ w/bsd/dev/a6plte/compat.c
-@@ -0,0 +1,180 @@
+@@ -0,0 +1,204 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Board-only bring-up policies and diagnostics, adapted for native XNU 8796. */
 +#if A6PLTE
@@ -62,6 +62,8 @@ index 0000000..4819009
 +#include <sys/kernel.h>
 +#include <sys/vnode_internal.h>
 +#include <sys/ubc_internal.h>
++#include <sys/imgact.h>
++#include <sys/namei.h>
 +#include <libkern/amfi/amfi.h>
 +#include <security/mac_policy.h>
 +#include <kern/kalloc.h>
@@ -114,26 +116,13 @@ index 0000000..4819009
 +    if (log) printf("A6PLTE Sandbox: %s privilege %d not granted\n",name,priv);
 +    return EPERM;
 +}
-+/* This standalone board trusts the selected, user-provided OS root. It has no
-+ * Apple AMFI/CMS trust provider. Preserve validated CodeDirectory platform
-+ * identity for signed system files there; do not grant arbitrary entitlements
-+ * or classify ad-hoc/user files as platform code. Native page hashes, MAC
-+ * failures and exec protections are still enforced by the caller. */
-+static int platform_signature(struct vnode *vp,__unused struct label *label,
-+    __unused cpu_type_t cpu_type,struct cs_blob *blob,unsigned int *cs_flags,
-+    __unused unsigned int *signer_type,__unused int flags,__unused unsigned int platform,
-+    __unused char **fatal_failure_desc,__unused size_t *fatal_failure_desc_len) {
-+    extern int a6_userdata_root_selected(void);
-+    if (amfi || !vp || !blob || !cs_flags || !blob->csb_cd ||
-+        !blob->csb_cd->platform || !(*cs_flags&CS_VALID) || (*cs_flags&CS_ADHOC) ||
-+        !rootvnode || !a6_userdata_root_selected() || !vnode_isreg(vp) ||
-+        vnode_mount(vp)!=vnode_mount(rootvnode)) return 0;
-+    struct vnode_attr a; VATTR_INIT(&a); VATTR_WANTED(&a,va_uid);
-+    if (vnode_getattr(vp,&a,vfs_context_current()) ||
-+        !VATTR_IS_SUPPORTED(&a,va_uid) || a.va_uid!=0) return 0;
-+    char path[MAXPATHLEN];int length=sizeof(path);
-+    if (vn_getpath(vp,path,&length) || length<=1 || length>(int)sizeof(path) ||
-+        !memchr(path,0,(size_t)length)) return 0;
++static bool system_code_path(const char *path) {
++    if (!path || path[0]!='/') return false;
++    /* The saved exec name is copied by the kernel but can contain traversal. */
++    for (const char *p=path;*p;++p) {
++        if (*p=='/' && p[1]=='.' &&
++            (!p[2] || p[2]=='/' || (p[2]=='.' && (!p[3] || p[3]=='/')))) return false;
++    }
 +    static const char *directories[]={
 +        "/sbin/","/bin/","/usr/bin/","/usr/sbin/","/usr/libexec/",
 +        "/usr/lib/","/System/Library/","/System/Cryptexes/OS/System/Library/"
@@ -141,15 +130,50 @@ index 0000000..4819009
 +    for (unsigned i=0;i<sizeof(directories)/sizeof(directories[0]);++i) {
 +        size_t n=strlen(directories[i]);
 +        if (!strncmp(path,directories[i],n) && path[n]) {
-+            *cs_flags|=CS_PLATFORM_BINARY;
-+            break;
++            return true;
 +        }
 +    }
-+    return 0;
++    return false;
++}
++/* Board policy trusts signed system files on the user-selected OS root, not
++ * Apple CMS or the optional CodeDirectory platform byte. Ad-hoc signatures
++ * retain real page-hash verification. HFS hardlinks can have an inode-store
++ * cached path, so also verify the kernel's saved exec name against this vnode. */
++void a6_platform_signature(struct vnode *vp,struct cs_blob *blob,
++    unsigned int *cs_flags,struct image_params *imgp) {
++    extern int a6_userdata_root_selected(void);
++    if (amfi || !vp || !blob || !cs_flags || !blob->csb_cd ||
++        !(*cs_flags&CS_VALID) || (*cs_flags&CS_PLATFORM_BINARY) ||
++        !rootvnode || !a6_userdata_root_selected() || !vnode_isreg(vp) ||
++        vnode_mount(vp)!=vnode_mount(rootvnode)) return;
++    struct vnode_attr a; VATTR_INIT(&a); VATTR_WANTED(&a,va_uid);
++    if (vnode_getattr(vp,&a,vfs_context_current()) ||
++        !VATTR_IS_SUPPORTED(&a,va_uid) || a.va_uid!=0) return;
++    static const char exec_key[]="executable_path="; /* native exec_save_path */
++    const size_t prefix=sizeof(exec_key)-1;
++    if (imgp && imgp->ip_vp==vp && imgp->ip_ndp &&
++        imgp->ip_ndp->ni_vp==vp && imgp->ip_ndp->ni_rootdir==rootvnode &&
++        imgp->ip_strings && imgp->ip_strendp && imgp->ip_strendp>imgp->ip_strings &&
++        (size_t)(imgp->ip_strendp-imgp->ip_strings)>prefix &&
++        !memcmp(imgp->ip_strings,exec_key,prefix)) {
++        const char *path=imgp->ip_strings+prefix;
++        size_t available=MIN((size_t)(imgp->ip_strendp-path),(size_t)MAXPATHLEN);
++        if (memchr(path,0,available) && system_code_path(path)) {
++            vnode_t resolved=NULL;
++            int error=vnode_lookup(path,VNODE_LOOKUP_NOCROSSMOUNT,&resolved,vfs_context_current());
++            if (!error) {
++                bool match=resolved==vp;vnode_put(resolved);
++                if (match) { *cs_flags|=CS_PLATFORM_BINARY;return; }
++            }
++        }
++    }
++    char path[MAXPATHLEN];int length=sizeof(path);
++    if (!vn_getpath(vp,path,&length) && length>1 && length<=(int)sizeof(path) &&
++        memchr(path,0,(size_t)length) && system_code_path(path))
++        *cs_flags|=CS_PLATFORM_BINARY;
 +}
 +static const struct mac_policy_ops sandbox_ops={
 +    .mpo_policy_syscall=sandbox_syscall,.mpo_priv_grant=sandbox_priv_grant,
-+    .mpo_vnode_check_signature=platform_signature,
 +};
 +static struct mac_policy_conf sandbox_conf={
 +    .mpc_name="Sandbox",.mpc_fullname="A6PLTE permissive bring-up Sandbox",.mpc_ops=&sandbox_ops,
@@ -2388,7 +2412,7 @@ index 9de68e1..66a3528 100644
  	int spacetype = IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32;
  
 diff --git c/bsd/kern/ubc_subr.c w/bsd/kern/ubc_subr.c
-index 9b553be..50d2771 100644
+index 9b553be..36569f2 100644
 --- c/bsd/kern/ubc_subr.c
 +++ w/bsd/kern/ubc_subr.c
 @@ -78,6 +78,9 @@
@@ -2671,7 +2695,29 @@ index 9b553be..50d2771 100644
  	blob_ro = zalloc_ro(ZONE_ID_CS_BLOB, Z_WAITOK | Z_NOFAIL);
  	tmp_blob.csb_ro_addr = blob_ro;
  	tmp_blob.csb_vnode = vp;
-@@ -5689,6 +5857,7 @@ cs_validate_hash(
+@@ -5550,6 +5718,21 @@ ubc_cs_blob_revalidate(
+ 		.csb_signer_type = signer_type
+ 	};
+ 	zalloc_ro_update_field(ZONE_ID_CS_BLOB, blob, csb_signer_info, &signer_info);
++#if A6PLTE
++	/* A signature may have been attached before exec supplied its resolved
++	 * identity. Keep the RO platform fields in sync after revalidation too. */
++	if (error == 0 && !amfi) {
++		struct cs_blob_platform_flags platform_flags = {
++			.csb_platform_binary = !!(cs_flags & CS_PLATFORM_BINARY),
++			.csb_platform_path = !!(cs_flags & CS_PLATFORM_PATH)
++		};
++		zalloc_ro_update_field(ZONE_ID_CS_BLOB, blob, csb_platform_flags, &platform_flags);
++		if (cs_flags & CS_PLATFORM_BINARY) {
++			const char *teamid = NULL;
++			zalloc_ro_update_field(ZONE_ID_CS_BLOB, blob, csb_teamid, &teamid);
++		}
++	}
++#endif
+ 	if (UBCINFOEXISTS(vp)) {
+ 		if (error == 0) {
+ 			vp->v_ubcinfo->cs_add_gen = cs_blob_generation_count;
+@@ -5689,6 +5872,7 @@ cs_validate_hash(
  	off_t                   offset; /* page offset in the file */
  	size_t                  size;
  	off_t                   codeLimit = 0;
@@ -2679,7 +2725,7 @@ index 9b553be..50d2771 100644
  	const char              *lower_bound, *upper_bound;
  	vm_offset_t             kaddr, blob_addr;
  
-@@ -5726,12 +5895,27 @@ cs_validate_hash(
+@@ -5726,12 +5910,27 @@ cs_validate_hash(
  			if (hashtype->cs_digest_size > sizeof(actual_hash)) {
  				panic("hash size too large");
  			}
@@ -2708,7 +2754,7 @@ index 9b553be..50d2771 100644
  			hash = hashes(cd, (uint32_t)(offset >> blob->csb_hash_pageshift),
  			    hashtype->cs_size,
  			    lower_bound, upper_bound);
-@@ -5764,8 +5948,16 @@ cs_validate_hash(
+@@ -5764,8 +5963,16 @@ cs_validate_hash(
  	} else {
  		*tainted = 0;
  
@@ -11206,6 +11252,24 @@ index 9454534..6498041 100644
 +
  #ifdef ARM64_BOARD_CONFIG_T6000
  #include <pexpert/arm64/H13.h>
+ 
+diff --git c/security/mac_vfs.c w/security/mac_vfs.c
+index 91376bf..33affaf 100644
+--- c/security/mac_vfs.c
++++ w/security/mac_vfs.c
+@@ -1431,6 +1431,13 @@ out:
+ 		kfree_data(fatal_failure_desc, fatal_failure_desc_len);
+ 	}
+ 
++#if A6PLTE
++	if (error == 0) {
++		extern void a6_platform_signature(struct vnode *, struct cs_blob *,
++		    unsigned int *, struct image_params *);
++		a6_platform_signature(vp, cs_blob, cs_flags, imgp);
++	}
++#endif
+ 	return error;
+ }
  
 diff --git c/security/mac_vfs_subr.c w/security/mac_vfs_subr.c
 index 97028c0..ae73f62 100644
