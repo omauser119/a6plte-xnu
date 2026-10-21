@@ -37,12 +37,28 @@ continues into memory. Panic or an early EL1 exception restores the console and
 stops further graphics presentation. No path redirects the console to UART.
 The display keeps lk2nd's MDP/DSI configuration. Touch remains unconfirmed.
 
+The default IOSurface also has to act as scanout memory when a client draws
+directly without submitting `SwapEnd`. The A6 BGRA shadow is now refreshed at
+the presentation rate after an eligible backboardd/SpringBoard client obtains
+it. Untouched/black initial storage preserves the boot console. The first real
+colored full frame takes over, subsequent black frames remain valid, and layer
+swaps take over from direct refresh. Waiting for a swap before one was queued
+is a successful empty wait. These fixes do not establish that the frameworks
+have reached this path on the phone.
+
 The reported S6SY761 probe `command 21 / reg 02000018 / value 00000040`
 identifies a QUP operational timeout with the output FIFO full. The transport
 now waits for physical I2C STOP/bus idle before resetting QUP, accepts the FIFO
 OUTPUT_SERVICE completion when MAX_OUTPUT_DONE lags, and waits for mini-core
 selection readiness. Delayed-STOP regression reproduces that exact timeout with
 the old driver and passes with the fix; physical touch remains unconfirmed.
+The next photo, IMG_3460, supplies `command 60 / reg 02000018 / value 000004c0`:
+MAX_OUTPUT_DONE is already set. Counted output completion now honors DONE
+without waiting for a stale fullness bit to clear; tagged receive also drains
+on INPUT_SERVICE/INPUT_DONE. Actual-code tests reproduce both flag sequences,
+alongside the existing delayed-STOP and pending-output cases. This follows the
+completion and FIFO servicing in the upstream QUP driver, but real sensor
+operation is still unverified.
 Register/handshake references are the pinned
 [Linux QUP driver](https://github.com/msm8953-mainline/linux/blob/d9eabbae3edea6adb08e74c30059aa0933afaae7/drivers/i2c/busses/i2c-qup.c).
 

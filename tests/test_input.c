@@ -7,7 +7,7 @@ struct hardware {
     uint32_t *regs[5];uint64_t now;
     uint8_t tx[16],rx[16],cmd,events[32][8],pon;
     unsigned tx_count,rx_count,rx_at,event_count,event_at;
-    int reset_timeout,nack,cleanup_timeout,bad_boot,service_only,stale_service;
+    int reset_timeout,nack,cleanup_timeout,bad_boot,service_only,stale_service,done_full,rx_service_only;
     uint64_t drain_until;
     unsigned pending_pauses,touch_enabled;
     uint64_t stop_until;
@@ -22,7 +22,8 @@ static uint32_t read_reg(void *ctx,unsigned region,unsigned offset) {
          * third command, exactly exposing the reported cmd21/reg18/val40. */
         if(h->early_resets>=2)return 0x40;
         if(h->stale_service && h->now<h->drain_until)return (1u<<8)|(1u<<4);
-        return (h->service_only?1u<<8:1u<<10)|(h->rx_at<h->rx_count?1u<<5:0);
+        if(h->done_full && !h->rx_count)return 0x4c0; /* Actual cmd60 timeout: DONE is set. */
+        return (h->service_only?1u<<8:1u<<10)|(h->rx_at<h->rx_count?(h->rx_service_only?1u<<9:1u<<5):0);
     }
     if(region==A6_INPUT_QUP && offset==0x218) {
         uint32_t value=0;for(unsigned j=0;j<4 && h->rx_at<h->rx_count;++j)value|=(uint32_t)h->rx[h->rx_at++]<<(8*j);return value;
@@ -115,6 +116,9 @@ int main(void) {
     assert(!a6_input_init(&s,&bus) && s.touch_ready && !h.early_resets);
     h.stale_service=1;
     assert(!a6_input_init(&s,&bus) && s.touch_ready && !h.pending_pauses);
+    h.stale_service=0;h.done_full=1;h.rx_service_only=1;
+    assert(!a6_input_init(&s,&bus) && s.touch_ready && !h.early_resets);
+    h.done_full=h.rx_service_only=0;
     assert(s.max_x==4095 && s.max_y==4095);
     contact(h.events[0],1,1,900,1500,1);contact(h.events[1],10,1,300,1000,0);h.event_count=2;
     assert(a6_input_poll(&s)==1 && s.changed==0x201 && s.fingers[0].active && s.fingers[9].active);

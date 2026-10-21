@@ -3820,10 +3820,10 @@ index 2613ab5..a5adf3f 100644
  		entitlement,
 diff --git c/iokit/Kernel/arm/A6Framebuffer.cpp w/iokit/Kernel/arm/A6Framebuffer.cpp
 new file mode 100644
-index 0000000..4a5e43f
+index 0000000..38179e2
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Framebuffer.cpp
-@@ -0,0 +1,291 @@
+@@ -0,0 +1,322 @@
 +/* Software iOS 16 IOMobileFramebuffer; protocol from ios-sweet patch 0046.
 + * A6+ uses inherited RGB888 scanout, BGRA IOSurfaces and bounded CPU composition.
 + * No Apple GPU/DSI/PMIC implementation or UART is claimed or used. */
@@ -3870,8 +3870,10 @@ index 0000000..4a5e43f
 +    uint64_t fTicks=0;
 +    uint32_t fFlushTicks=6,fNext=0,fSubmitted=0,fCompleted=0;
 +    bool fDirty=false,fEligible=false,fPowerOn=true,fRunning=false;
++    bool fDefaultActive=false,fDirectPresented=false;
 +    static void tick(OSObject *,IOTimerEventSource *);
 +    void present(const uint8_t *,A6Surface **,bool);
++    void presentDefault();
 +public:
 +    IOLock *fLock=nullptr;
 +    IOLock *fPresentLock=nullptr;
@@ -3884,6 +3886,7 @@ index 0000000..4a5e43f
 +    uint32_t begin();
 +    IOReturn submit(const uint8_t *,uint32_t,bool);
 +    IOReturn wait(uint32_t);
++    void enableDefault();
 +    void power(bool);
 +    uint32_t width() const { return fDisplay.info.width; }
 +    uint32_t height() const { return fDisplay.info.height; }
@@ -4002,25 +4005,52 @@ index 0000000..4a5e43f
 +    if(!first && fullFrame && nonblack && eligible)a6_xnu_graphics_presented();
 +    IOLockUnlock(fPresentLock);
 +}
++void AppleCLCD::enableDefault() {
++    IOLockLock(fLock);fDefaultActive=true;IOLockUnlock(fLock);
++}
++void AppleCLCD::presentDefault() {
++    if(a6_xnu_graphics_stopped())return;
++    IOLockLock(fPresentLock);
++    IOLockLock(fLock);bool on=fPowerOn && fDefaultActive && !fSubmitted;IOLockUnlock(fLock);
++    if(on) {
++        /* Native default surfaces are scanout storage: writing them does not
++         * require SwapEnd. Ours is BGRA RAM rather than the RGB888 panel, so
++         * continue scanning it out until the client submits layer swaps.
++         * Keep the boot console while it is still untouched/black. */
++        struct a6_scanout canvas={(uint8_t *)fSurface->kernelAddress(),fSurface->allocSize,
++            fSurface->width,fSurface->height,fSurface->bytesPerRow,A6_BGRA,0};
++        if(fDirectPresented || a6_scanout_nonblack(&canvas)) {
++            struct a6_rect screen={0,0,(int32_t)width(),(int32_t)height()};
++            if(a6_scanout_blit(&canvas,screen,&fScanout,screen,0,nullptr)) {
++#if defined(__arm64__)
++                __asm__ volatile("dsb sy" ::: "memory");
++#endif
++                fDirectPresented=true;a6_xnu_graphics_presented();
++            }
++        }
++    }
++    IOLockUnlock(fPresentLock);
++}
 +void AppleCLCD::tick(OSObject *owner,IOTimerEventSource *timer) {
 +    auto fb=OSDynamicCast(AppleCLCD,owner);
 +    if(!fb || !fb->fRunning || a6_xnu_graphics_stopped())return;
-+    uint8_t rec[A6_SWAP_BYTES];A6Surface *surfaces[A6_LAYERS]={};bool flush=false,eligible=false;
++    uint8_t rec[A6_SWAP_BYTES];A6Surface *surfaces[A6_LAYERS]={};bool flush=false,direct=false,eligible=false;
 +    IOLockLock(fb->fLock);uint64_t count=++fb->fTicks,now=mach_absolute_time();
 +    uint64_t values[6]={(uint32_t)count,(uint32_t)(count>>32),(uint32_t)now,(uint32_t)(now>>32),0,0};
 +    for(unsigned i=0;i<fb->fClients->getCount();++i)
 +        ((IOMobileFramebufferUserClient *)fb->fClients->getObject(i))->notify(values);
 +    uint32_t completed=fb->fSubmitted;
-+    if(fb->fDirty && fb->fPowerOn && count%fb->fFlushTicks==0) {
++    if(fb->fDirty && fb->fSubmitted && fb->fPowerOn && count%fb->fFlushTicks==0) {
 +        flush=true;eligible=fb->fEligible;fb->fDirty=false;memcpy(rec,fb->fRecord,sizeof(rec));
 +        for(unsigned i=0;i<A6_LAYERS;++i)if((surfaces[i]=fb->fPending[i]))surfaces[i]->retain();
 +    }
++    if(!flush && !fb->fSubmitted && fb->fDefaultActive && fb->fPowerOn && count%fb->fFlushTicks==0)direct=true;
 +    IOLockUnlock(fb->fLock);
 +    if(flush) {
 +        fb->present(rec,surfaces,eligible);
 +        for(unsigned i=0;i<A6_LAYERS;++i)OSSafeReleaseNULL(surfaces[i]);
 +        IOLockLock(fb->fLock);fb->fCompleted=completed;IOLockWakeup(fb->fLock,&fb->fCompleted,false);IOLockUnlock(fb->fLock);
-+    }
++    } else if(direct)fb->presentDefault();
 +    timer->setTimeoutUS(A6_VSYNC_US);
 +}
 +IOReturn AppleCLCD::wait(uint32_t token) {
@@ -4088,7 +4118,8 @@ index 0000000..4a5e43f
 +    case 3:
 +        if(a->scalarInputCount<1 || a->scalarInput[0]!=0)return kIOReturnBadArgument;
 +        if(a->scalarOutputCount<1)return kIOReturnNoSpace;
-+        {mach_port_name_t port=0;result=IOUserClient::copyPortNameForObjectInTask(fTask,fFB->fSurface,&port);out[0]=port;n=1;}break;
++        {mach_port_name_t port=0;result=IOUserClient::copyPortNameForObjectInTask(fTask,fFB->fSurface,&port);out[0]=port;n=1;
++         if(result==kIOReturnSuccess && fEligible)fFB->enableDefault();}break;
 +    case 4:
 +        if(a->scalarOutputCount<1)return kIOReturnNoSpace;
 +        out[0]=fOpenSwap=fFB->begin();n=1;break;
@@ -4096,7 +4127,7 @@ index 0000000..4a5e43f
 +        if(!a->structureInput || a->structureInputSize<A6_SWAP_BYTES || !fOpenSwap)return kIOReturnBadArgument;
 +        result=fFB->submit((const uint8_t *)a->structureInput,fOpenSwap,fEligible);
 +        if(result==kIOReturnSuccess) {fLastSwap=fOpenSwap;fOpenSwap=0;}break;
-+    case 6:return fFB->wait(fLastSwap);
++    case 6:if(fLastSwap)result=fFB->wait(fLastSwap);break; /* No queued swap is already complete. */
 +    case 7:out[0]=0;n=1;break;
 +    case 8:out[0]=fFB->width();out[1]=fFB->height();n=2;break;
 +    case 12:
@@ -4542,10 +4573,10 @@ index 0000000..2bd96f3
 +#endif
 diff --git c/iokit/Kernel/arm/A6Input.c w/iokit/Kernel/arm/A6Input.c
 new file mode 100644
-index 0000000..8b94ce1
+index 0000000..2fffd64
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Input.c
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,200 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Original polled QUPv2/S6SY761 + TLMM/PM8953 PON driver. Register/protocol
 + * definitions verified against upstream hardware drivers; no firmware writes,
@@ -4611,15 +4642,18 @@ index 0000000..8b94ce1
 +            s->error_register=(status&0x38000fcu)?0x02000404:0x0200001c;
 +            s->error_value=(status&0x38000fcu)?status:error;return -1;
 +        }
-+        if (bytes && received<bytes+2 && (op&(1u<<5))) {
++        if (bytes && received<bytes+2 && (op&((1u<<5)|(1u<<9)|(1u<<11)))) {
 +            uint32_t word=rd(s,A6_INPUT_QUP,0x218);
 +            for (unsigned j=0;j<4 && received<bytes+2;++j) raw[received++]=(uint8_t)(word>>(j*8));
 +        }
 +        /* In FIFO mode OUTPUT_SERVICE can precede MAX_OUTPUT_DONE. Waiting
 +         * only for DONE after acknowledging SERVICE can hang short writes.
++         * DONE completes the counted output even if a FIFO fullness flag is
++         * still set (hardware cmd60 reported 0x4c0). For input, SERVICE/DONE
++         * can indicate bytes before IN_NOT_EMPTY becomes visible.
 +         * A read is complete once its entire tagged response is drained. */
 +        int complete=bytes?received==bytes+2:
-+            (op&((1u<<8)|(1u<<10))) && !(op&((1u<<4)|(1u<<6)));
++            (op&(1u<<10)) || ((op&(1u<<8)) && !(op&(1u<<4)));
 +        if (op&0x300) wr(s,A6_INPUT_QUP,0x18,op&0x300);
 +        if (complete) break;
 +        if (s->bus.us(s->bus.context)-start>=20000) {
@@ -5518,10 +5552,10 @@ index 0000000..53fd528
 +#endif
 diff --git c/iokit/Kernel/arm/A6Scanout.c w/iokit/Kernel/arm/A6Scanout.c
 new file mode 100644
-index 0000000..3ec5bbd
+index 0000000..132edf9
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Scanout.c
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,61 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#include "A6Scanout.h"
 +static unsigned pixel_bytes(uint32_t format) {
@@ -5532,6 +5566,18 @@ index 0000000..3ec5bbd
 +    return b && s->pixels && s->width && s->height && s->width<=16384 && s->height<=16384 &&
 +        s->stride>=(uint64_t)s->width*b && s->offset<=s->bytes &&
 +        (uint64_t)s->stride*s->height<=s->bytes-s->offset;
++}
++int a6_scanout_nonblack(const struct a6_scanout *s) {
++    if(!a6_scanout_valid(s))return 0;
++    unsigned b=pixel_bytes(s->format),first=s->format==A6_ARGB?1:0;
++    for(uint32_t y=0;y<s->height;++y) {
++        const volatile uint8_t *row=s->pixels+s->offset+(uint64_t)y*s->stride;
++        for(uint32_t x=0;x<s->width;++x) {
++            const volatile uint8_t *p=row+(uint64_t)x*b+first;
++            if(p[0] || p[1] || p[2])return 1;
++        }
++    }
++    return 0;
 +}
 +int a6_scanout_blit(const struct a6_scanout *src,struct a6_rect a,
 +    const struct a6_scanout *dst,struct a6_rect b,int blend,int *nonblack) {
@@ -5573,10 +5619,10 @@ index 0000000..3ec5bbd
 +}
 diff --git c/iokit/Kernel/arm/A6Scanout.h w/iokit/Kernel/arm/A6Scanout.h
 new file mode 100644
-index 0000000..2931ddb
+index 0000000..3000f3f
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Scanout.h
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,24 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#ifndef A6_SCANOUT_H
 +#define A6_SCANOUT_H
@@ -5594,6 +5640,7 @@ index 0000000..2931ddb
 +};
 +struct a6_rect { int32_t x,y,width,height; };
 +int a6_scanout_valid(const struct a6_scanout *);
++int a6_scanout_nonblack(const struct a6_scanout *);
 +int a6_scanout_blit(const struct a6_scanout *,struct a6_rect,
 +    const struct a6_scanout *,struct a6_rect,int,int *);
 +#ifdef __cplusplus

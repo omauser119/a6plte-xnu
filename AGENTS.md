@@ -877,3 +877,32 @@ Latest PHONE BOOTED kernel/profile is f72b97a. Actual GUI result pending; asked
 whether interface appeared, logs continue or panic occurred. Do not claim GUI
 works from boot ACK or passing host mocks. Keep user's kernel-only/fixes-only,
 no UART, cpus=1/USB-off, no further userspace inspection/edit and own-HID rule.
+
+Latest hardware photos: IMG_3460.HEIC shows launchd exiting with OS_REASON_SIGNAL
+2 / code 0xa (SIGBUS), plus userdata journal strategy ENXIO (6) during the
+critical-exit sync. The driver's offline state is real, but the first underlying
+SDHCI error is not visible; do not claim a proven SIGBUS origin or mask panic.
+The same verified f72b97a image was booted again at the user's request, expected
+phone/hfs-map-v2 checked, fastboot ACK in 0.467 s; private repeat receipt saved
+under build/verified-f72b97a. IMG_3468.PNG then shows process sample 1/40 with
+backboardd[56] and SpringBoard[26], each one thread. There is no panic or GUI in
+this later photo. Do not claim SpringBoard works merely from those processes.
+
+Next fixes: the BGRA default surface introduced by f72b97a was not scanned out
+unless SwapEnd was submitted, unlike native physical default framebuffer memory.
+Enable bounded 10 Hz direct refresh only after an eligible client successfully
+gets its surface; leave untouched black storage/logs alone, display real colored
+pixels, allow later black frames, stop direct refresh once layer swaps begin.
+Panic/power gates remain. Empty SwapWait succeeds. Actual presenter and timer
+ASan/UBSan tests exercise direct writes without any swap, RGB888 conversion,
+refresh cadence, console takeover, black frames, layer takeover, panic/power and
+buffer guards. Full host suite passed. Native Apple build/link still required.
+
+IMG_3460 also provides complete touch status cmd60/reg02000018/value000004c0.
+QUP MAX_OUTPUT_DONE was already set but the old test required OUT_FULL clear.
+Honor counted DONE; input drains on SERVICE/DONE as upstream Linux v6.12 does.
+Host actual transport tests cover the exact 0x4c0 completion and input service
+without NOT_EMPTY, plus prior delayed-STOP/pending-output cases. No controller
+firmware/PMIC power writes or simulated events. Physical touch still unverified.
+No prepared userspace inspected/edited, no new diagnostics, UART, USB network,
+SMP enable or flashing. Continue to the concrete checked image and hardware boot.

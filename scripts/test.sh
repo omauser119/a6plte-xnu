@@ -35,6 +35,7 @@ clang -std=gnu17 -Wall -Wextra -Werror -Wno-deprecated-declarations -fsanitize=a
 python3 "$ROOT/tests/test_cs_cache_vfs.py"
 python3 "$ROOT/tests/test_aks_state.py"
 python3 "$ROOT/tests/test_iosurface_abi.py"
+python3 "$ROOT/tests/test_framebuffer_default.py"
 clang -std=gnu17 -Wall -Wextra -Werror -fsanitize=address,undefined -g "$ROOT/tests/test_scanout.c" "$ROOT/xnu/iokit/Kernel/arm/A6Scanout.c" -o "$ROOT/artifacts/test-scanout"
 "$ROOT/artifacts/test-scanout"
 clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_usb.c" "$ROOT/xnu/bsd/dev/a6plte/usb_ecm.c" "$ROOT/xnu/bsd/dev/a6plte/usb_dwc3.c" -o "$ROOT/artifacts/test-usb"
