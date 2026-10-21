@@ -20,3 +20,5 @@ for directory,repo,commit,patch in sources:
         git('sparse-checkout','set','EXTERNAL_HEADERS/CoreEntitlements/V2','EXTERNAL_HEADERS/TrustCache','EXTERNAL_HEADERS/CodeSignature')
     git('checkout','--detach','FETCH_HEAD')
     if patch: git('apply',str(r/'patches'/patch))
+    if directory=='xnu':
+        subprocess.run(['python3',str(r/'scripts/apply-sweet-0046.py'),str(dest)],check=True)

@@ -62,7 +62,7 @@ class CatalogueTest(unittest.TestCase):
     def test_compiled_profiles_and_real_driver_names(self):
         for a6 in (False,True):
             rows=LegacyCatalogue(catalogue(a6)).parse()
-            self.assertEqual(len(rows),4 if a6 else 1)
+            self.assertEqual(len(rows),5 if a6 else 1)
             drivers={r['IOClass']:r for r in rows}
             self.assertEqual(len(drivers),len(rows))
             self.assertEqual(drivers['IOPanicPlatform']['IOProbeScore'],0)
@@ -74,6 +74,8 @@ class CatalogueTest(unittest.TestCase):
                 self.assertEqual(drivers['A6PLTEPlatformExpert']['IONameMatch'],'samsung,a6plte')
                 self.assertEqual(drivers['AppleCLCD']['IONameMatch'],'samsung,a6plte-display')
                 self.assertEqual(drivers['AppleCLCD']['IOProviderClass'],'IOPlatformDevice')
+                self.assertEqual(drivers['IOCoreSurfaceRoot']['IOProviderClass'],'IOResources')
+                self.assertEqual(drivers['IOCoreSurfaceRoot']['IOMatchCategory'],'IOCoreSurfaceRoot')
     def test_rejects_device_regression_and_malformed_data(self):
         s=catalogue(True)
         for bad in (s.replace("'com_apple_filesystems_hfs'",'com_apple_filesystems_hfs'),s[:-1],s+' garbage',"({'IOClass'=One;'IOClass'=Two;})","({'IOProbeScore'=256:8;})"):

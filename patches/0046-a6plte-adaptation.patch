@@ -1,0 +1,566 @@
+--- a/iokit/Kernel/arm/A6Framebuffer.cpp
++++ b/iokit/Kernel/arm/A6Framebuffer.cpp
+@@ -1,7 +1,6 @@
+ /*
+- * Built-in IOMobileFramebuffer for A6PLTE: the ABL's continuous-splash
+- * framebuffer (1080x2400 a8r8g8b8 in RAM, the panel scans it out by
+- * itself) as the main display, driven by CoreAnimation's CPU renderer.
++ * Built-in IOMobileFramebuffer for A6PLTE: lk2nd's inherited
++ * 1080x2220 RGB888 panel via a BGRA RAM shadow and scalar channel conversion as the main display, driven by CoreAnimation's CPU renderer.
+  *
+  * IOMobileFramebuffer.framework (iOS 16.7) counts /arm-io children with
+  * device_type "display-subsystem", waits for that many services matching
+@@ -24,10 +23,9 @@
+  * sends (count, mach_absolute_time, 0) as 32-bit halves to clients that
+  * enabled it, through the port they registered (IOConnectSetNotificationPort).
+  *
+- * The panel memory itself is published as an IOSurface and returned as the
+- * default framebuffer surface. The kernel text console keeps drawing over
+- * the GUI by default: pausing it (boot-arg a6fb_noconsole=1, on the
+- * first swap) switches the console to serial, which also hides panics.
++ * A6PLTE publishes the BGRA shadow as its default framebuffer surface.
++ * The board scanout hides text after a real GUI frame; panic restores text.
++ * It never disables the screen console or switches to UART.
+  */
+ #include "A6Surface.h"
+ 
+@@ -43,6 +41,11 @@
+ #include <pexpert/pexpert.h>
+ #include <kern/clock.h>
+ #include <sys/proc.h>
++#include "A6Scanout.h"
++#include "A6PlatformServicesABI.h"
++extern "C" void a6_platform_graphics_ready(uint32_t);
++extern "C" void a6_xnu_graphics_presented(void);
++extern "C" int a6_xnu_graphics_stopped(void);
+ 
+ enum {
+ 	kA6FBGetLayerDefaultSurface  = 3,
+@@ -61,7 +64,7 @@
+ #define A6PLTE_FB_NOTIFY_TYPES           8
+ #define A6PLTE_FB_NOTIFY_VSYNC           5
+ #define A6PLTE_FB_VSYNC_US               16667
+-#define A6PLTE_FB_DOT_PITCH              395     /* ppi, 6.67" 1080x2400 */
++#define A6PLTE_FB_DOT_PITCH              411     /* ppi, Galaxy A6+ 6-inch 1080x2220 */
+ #define A6PLTE_FB_FORMAT_BGRA            0x42475241
+ 
+ class IOMobileFramebuffer : public IOService {
+@@ -75,27 +78,35 @@
+ class AppleCLCD : public IOMobileFramebuffer {
+ 	OSDeclareDefaultStructors(AppleCLCD);
+ 
+-	IOWorkLoop         *fWorkLoop;
+-	IOTimerEventSource *fVsync;
+-	uint64_t            fVsyncCount;
++	IOWorkLoop         *fWorkLoop=nullptr;
++	IOTimerEventSource *fVsync=nullptr;
++	uint64_t            fVsyncCount=0;
+ 
+ 	static void vsyncFired(OSObject *owner, IOTimerEventSource *sender);
+ 
+ public:
+-	uint64_t      fPhys;
+-	uint32_t      fWidth, fHeight, fRowBytes;
+-	uintptr_t     fPixels;          /* kernel mapping of the panel memory */
+-	IOMemoryMap  *fMap;
+-	A6Surface *fSurface;         /* the panel memory as an IOSurface */
+-	IOLock       *fLock;            /* swaps and client list */
+-	OSArray      *fClients;
+-	uint32_t      fSwapID;
+-	bool          fConsolePaused;
++	uint64_t      fPhys=0;
++	uint32_t      fWidth=0, fHeight=0, fRowBytes=0;
++	uintptr_t     fPixels=0;          /* kernel mapping of the panel memory */
++	IOMemoryMap  *fMap=nullptr;
++	A6Surface *fSurface=nullptr;         /* the panel memory as an IOSurface */
++	IOLock       *fLock=nullptr;            /* swaps and client list */
++	OSArray      *fClients=nullptr;
++	uint32_t      fSwapID=0;
++	bool          fConsolePaused=false;
++	/* Queue/timer fields from upstream 0056. */
++	uint8_t       fPending[A6PLTE_FB_SWAP_REC_SIZE]={};
++	bool          fDirty=false;
++	uint32_t      fFlushTicks=6;
++	bool          fGUIClient=false;
++	struct a6_scanout fPanel={};
+ 
+ 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+ 	void addClient(IOMobileFramebufferUserClient *client);
+ 	void removeClient(IOMobileFramebufferUserClient *client);
+ 	void swap(const uint8_t *rec);
++	void present(const uint8_t *rec);
++	void scanout();
+ };
+ 
+ OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);
+@@ -104,11 +115,11 @@
+ 	OSDeclareDefaultStructors(IOMobileFramebufferUserClient);
+ 
+ public:
+-	AppleCLCD          *fFB;
+-	task_t              fTask;
+-	mach_port_t         fPort;
+-	io_user_reference_t fFunc[A6PLTE_FB_NOTIFY_TYPES];
+-	io_user_reference_t fRefcon[A6PLTE_FB_NOTIFY_TYPES];
++	AppleCLCD          *fFB=nullptr;
++	task_t              fTask=TASK_NULL;
++	mach_port_t         fPort=MACH_PORT_NULL;
++	io_user_reference_t fFunc[A6PLTE_FB_NOTIFY_TYPES]={};
++	io_user_reference_t fRefcon[A6PLTE_FB_NOTIFY_TYPES]={};
+ 
+ 	bool initWithTask(task_t owningTask, void *securityID, UInt32 type) APPLE_KEXT_OVERRIDE;
+ 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+@@ -126,23 +137,26 @@
+ bool
+ AppleCLCD::start(IOService *provider)
+ {
+-	PE_Video video;
++	struct a6_display video;
+ 
+ 	if (!IOService::start(provider)) {
+ 		return false;
+ 	}
+-	PE_current_console(&video);
+-	fPhys = video.v_baseAddr;
+-	fWidth = (uint32_t)video.v_width;
+-	fHeight = (uint32_t)video.v_height;
+-	fRowBytes = (uint32_t)video.v_rowBytes;
++	if (!a6_xnu_get_display(&video)) return false;
++	fPhys = video.physical_address;
++	fWidth = video.info.width;
++	fHeight = video.info.height;
++	fRowBytes = (fWidth * 4 + 63) & ~63u;
++	fPanel = {(uint8_t *)(uintptr_t)video.virtual_address, video.info.size,
++	    fWidth, fHeight, video.info.stride, video.info.pixel_format, 0};
++	if (!a6_scanout_valid(&fPanel)) return false;
+ 	if (fPhys == 0 || fWidth == 0 || fHeight == 0 || fRowBytes < fWidth * 4) {
+ 		IOLog("A6PLTE FB: no boot framebuffer\n");
+ 		return false;
+ 	}
+ 	fLock = IOLockAlloc();
+ 	fClients = OSArray::withCapacity(4);
+-	fSurface = a6_surface_create_physical(fPhys, fWidth, fHeight, fRowBytes, A6PLTE_FB_FORMAT_BGRA);
++	fSurface = a6_surface_create_physical(0, fWidth, fHeight, fRowBytes, A6PLTE_FB_FORMAT_BGRA);
+ 	fPixels = fSurface != NULL ? fSurface->kernelAddress() : 0;
+ 	fWorkLoop = IOWorkLoop::workLoop();
+ 	if (fLock == NULL || fClients == NULL || fPixels == 0 || fWorkLoop == NULL) {
+@@ -156,12 +170,16 @@
+ 		IOLog("A6PLTE FB: no vsync timer\n");
+ 		return false;
+ 	}
++	uint32_t hz = 10;
++	PE_parse_boot_argn("a6_fb_hz", &hz, sizeof(hz));
++	fFlushTicks = (hz == 0 || hz >= 60) ? 1 : 60 / hz;
+ 	fVsync->setTimeoutUS(A6PLTE_FB_VSYNC_US);
+ 
+ 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
+ 	setProperty("external", false);
+ 	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
+ 	registerService();
++	a6_platform_graphics_ready(8);
+ 	IOLog("A6PLTE FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u\n",
+ 	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id);
+ 	return true;
+@@ -171,6 +189,7 @@
+ AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
+ {
+ 	AppleCLCD *fb = (AppleCLCD *)owner;
++	if (a6_xnu_graphics_stopped()) return;
+ 	uint64_t now = mach_absolute_time();
+ 	uint64_t count = ++fb->fVsyncCount;
+ 	uint64_t values[6] = {
+@@ -185,7 +204,21 @@
+ 		    (IOMobileFramebufferUserClient *)fb->fClients->getObject(i);
+ 		client->notify(A6PLTE_FB_NOTIFY_VSYNC, values, 6);
+ 	}
++	bool flush = fb->fDirty && (count % fb->fFlushTicks) == 0;
++	uint8_t *rec = NULL;
++	if (flush) {
++		rec = (uint8_t *)IOMallocData(A6PLTE_FB_SWAP_REC_SIZE);
++		if (rec != NULL) {
++			memcpy(rec, fb->fPending, A6PLTE_FB_SWAP_REC_SIZE);
++			fb->fDirty = false;
++		}
++	}
+ 	IOLockUnlock(fb->fLock);
++	if (rec != NULL) {
++		fb->present(rec);
++		IOFreeData(rec, A6PLTE_FB_SWAP_REC_SIZE);
++	}
++	if ((count % fb->fFlushTicks) == 0) fb->scanout();
+ 	sender->setTimeoutUS(A6PLTE_FB_VSYNC_US);
+ }
+ 
+@@ -216,23 +249,24 @@
+ 	return v;
+ }
+ 
+-static uint32_t a6_fb_swaps_logged;
+ 
+ /* Copy each enabled layer's surface into the panel memory (no scaling). */
+ void
+ AppleCLCD::swap(const uint8_t *rec)
+ {
++	/* Upstream 0056: keep the latest record and copy at the display rate. */
++	IOLockLock(fLock);
++	memcpy(fPending, rec, A6PLTE_FB_SWAP_REC_SIZE);
++	fDirty = true;
++	IOLockUnlock(fLock);
++}
++
++void
++AppleCLCD::present(const uint8_t *rec)
++{
++	if (a6_xnu_graphics_stopped()) return;
+ 	uint32_t mask = get32(rec, 0x104);
+ 
+-	if (!fConsolePaused) {
+-		int quiet = 0;
+-		fConsolePaused = true;
+-		if (PE_parse_boot_argn("a6fb_noconsole", &quiet, sizeof(quiet)) && quiet != 0) {
+-			PE_Video video;
+-			PE_current_console(&video);
+-			PE_initialize_console(&video, kPEDisableScreen);
+-		}
+-	}
+ 
+ 	for (uint32_t layer = 0; layer < A6PLTE_FB_LAYERS; layer++) {
+ 		uint32_t id = get32(rec, 0x54 + 4 * layer);
+@@ -246,13 +280,7 @@
+ 			continue;
+ 		}
+ 		A6Surface *s = a6_surface_copy(id);
+-		if (a6_fb_swaps_logged < 16) {
+-			a6_fb_swaps_logged++;
+-			IOLog("A6PLTE FB: swap %u layer %u surface %u %ux%u fmt 0x%x bpr %u a %d,%d %ux%u b %d,%d %dx%d\n",
+-			    get32(rec, 0x50), layer, id, s ? s->width : 0, s ? s->height : 0,
+-			    s ? s->pixelFormat : 0, s ? s->bytesPerRow : 0, sx, sy, get32(a, 8),
+-			    get32(a, 12), dx, dy, w, h);
+-		}
++
+ 		if (s == NULL || s == fSurface) {
+ 			OSSafeReleaseNULL(s);
+ 			continue;
+@@ -298,6 +326,26 @@
+ 	}
+ }
+ 
++void
++AppleCLCD::scanout()
++{
++	if (a6_xnu_graphics_stopped()) return;
++	struct a6_scanout source = {(uint8_t *)fPixels, fSurface->allocSize,
++	    fWidth, fHeight, fRowBytes, A6_BGRA, 0};
++	IOLockLock(fLock);
++	bool gui = fGUIClient;
++	IOLockUnlock(fLock);
++	if (!gui || (!fConsolePaused && !a6_scanout_nonblack(&source))) return;
++	struct a6_rect bounds = {0, 0, (int32_t)fWidth, (int32_t)fHeight};
++	if (a6_scanout_blit(&source, bounds, &fPanel, bounds, 0, NULL)) {
++#if defined(__arm64__)
++		__asm__ volatile("dsb sy" ::: "memory");
++#endif
++		fConsolePaused = true;
++		a6_xnu_graphics_presented();
++	}
++}
++
+ bool
+ IOMobileFramebufferUserClient::initWithTask(task_t owningTask, void *securityID, UInt32 type)
+ {
+@@ -314,6 +362,11 @@
+ 	fFB = OSDynamicCast(AppleCLCD, provider);
+ 	if (fFB == NULL || !IOUserClient::start(provider)) {
+ 		return false;
++	}
++	char name[32]={};
++	proc_selfname(name, sizeof(name));
++	if (!strcmp(name, "backboardd") || !strcmp(name, "SpringBoard")) {
++		IOLockLock(fFB->fLock);fFB->fGUIClient=true;IOLockUnlock(fFB->fLock);
+ 	}
+ 	fFB->addClient(this);
+ 	return true;
+@@ -366,7 +419,6 @@
+ 	    kIOUserNotifyOptionCanDrop);
+ }
+ 
+-static uint64_t a6_fb_logged;        /* selectors already logged (< 64) */
+ 
+ IOReturn
+ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *args,
+@@ -423,10 +475,7 @@
+ 			fFunc[type] = args->scalarInput[0];
+ 			fRefcon[type] = args->scalarInput[1];
+ 			IOLockUnlock(fFB->fLock);
+-			char name[32];
+-			proc_selfname(name, sizeof(name));
+-			IOLog("A6PLTE FB: %s notifications type %u %s\n", name, type,
+-			    args->scalarInput[0] ? "on" : "off");
++
+ 		}
+ 		break;
+ 	case kA6FBSwapWait:
+@@ -440,16 +489,7 @@
+ 	if (args->structureOutputDescriptor == NULL && args->structureOutput != NULL) {
+ 		bzero(args->structureOutput, args->structureOutputSize);
+ 	}
+-	if (selector >= 64 || !(a6_fb_logged & (1ULL << selector))) {
+-		if (selector < 64) {
+-			a6_fb_logged |= 1ULL << selector;
+-		}
+-		char name[32];
+-		proc_selfname(name, sizeof(name));
+-		IOLog("A6PLTE FB: %s sel %u in %u/%u out %u/%u -> 0x%x\n", name, selector,
+-		    args->scalarInputCount, args->structureInputSize,
+-		    args->scalarOutputCount, args->structureOutputSize, ret);
+-	}
++
+ 	return ret;
+ }
+ #endif /* A6PLTE */
+--- a/iokit/Kernel/arm/A6Surface.cpp
++++ b/iokit/Kernel/arm/A6Surface.cpp
+@@ -39,6 +39,7 @@
+ #include <libkern/c++/OSNumber.h>
+ #include <libkern/c++/OSUnserialize.h>
+ #include <sys/proc.h>
++extern "C" void a6_platform_graphics_ready(uint32_t);
+ 
+ enum {
+ 	kA6SurfaceCreate             = 0,
+@@ -71,7 +72,6 @@
+ static A6Surface *a6_surface_table[A6PLTE_SURFACE_MAX_ID];
+ static uint32_t      a6_surface_users[A6PLTE_SURFACE_MAX_ID];
+ static uint32_t      a6_surface_next_id = 1;
+-static uint32_t      a6_surface_creates_logged;
+ static uint64_t      a6_surface_wired;       /* bytes of buffer surfaces */
+ #define A6PLTE_SURFACE_WIRED_MAX         (1536ull << 20)
+ 
+@@ -189,6 +189,7 @@
+ {
+ 	if (a6_surface_lock == NULL) {
+ 		IOLock *lock = IOLockAlloc();
++		if (lock == NULL) return;
+ 		if (!OSCompareAndSwapPtr(NULL, lock, &a6_surface_lock)) {
+ 			IOLockFree(lock);
+ 		}
+@@ -199,6 +200,7 @@
+ a6_surface_alloc(void)
+ {
+ 	a6_surface_init_lock();
++	if (a6_surface_lock == NULL) return NULL;
+ 	A6Surface *s = OSTypeAlloc(A6Surface);
+ 	if (s == NULL || !s->init()) {
+ 		OSSafeReleaseNULL(s);
+@@ -239,8 +241,21 @@
+ 	s->elementWidth = s->elementHeight = 1;
+ 	s->pixelFormat = pixelFormat;
+ 	s->allocSize = (uint32_t)round_page(bytesPerRow * height);
+-	s->memory = IOMemoryDescriptor::withPhysicalAddress(phys, s->allocSize, kIODirectionInOut);
+-	s->mapCache = kIOMapWriteCombineCache;
++	if (phys != 0) {
++		s->memory = IOMemoryDescriptor::withPhysicalAddress(phys, s->allocSize, kIODirectionInOut);
++		s->mapCache = kIOMapWriteCombineCache;
++	} else {
++		/* A6PLTE's panel is RGB888. Give the unchanged 0046 client a BGRA
++		 * shadow surface; only the board scanout converts it to the panel. */
++		if ((uint64_t)OSAddAtomic64(s->allocSize, (volatile SInt64 *)&a6_surface_wired) +
++		    s->allocSize <= A6PLTE_SURFACE_WIRED_MAX) {
++			s->memory = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
++			    kIODirectionInOut | kIOMemoryKernelUserShared, s->allocSize, page_size);
++		}
++		if (s->memory == NULL) OSAddAtomic64(-(SInt64)s->allocSize, (volatile SInt64 *)&a6_surface_wired);
++		else bzero(((IOBufferMemoryDescriptor *)s->memory)->getBytesNoCopy(), s->allocSize);
++		s->mapCache = kIOMapDefaultCache;
++	}
+ 	if (s->memory == NULL || !a6_surface_publish(s)) {
+ 		s->release();
+ 		return NULL;
+@@ -260,7 +275,7 @@
+ a6_dict_u32(OSDictionary *dict, const char *key, uint32_t def)
+ {
+ 	OSNumber *n = OSDynamicCast(OSNumber, dict->getObject(key));
+-	return n != NULL ? n->unsigned32BitValue() : def;
++	return n != NULL ? (n->unsigned64BitValue() <= UINT32_MAX ? n->unsigned32BitValue() : UINT32_MAX) : def;
+ }
+ 
+ static uint32_t
+@@ -281,6 +296,9 @@
+ a6_surface_layout(A6Surface *s, OSDictionary *props)
+ {
+ 	uint64_t end;
++	if (a6_dict_u32(props, "IOSurfaceBytesPerElement", 4) > 64 ||
++	    a6_dict_u32(props, "IOSurfaceElementWidth", 1) > 255 ||
++	    a6_dict_u32(props, "IOSurfaceElementHeight", 1) > 255) return kIOReturnBadArgument;
+ 
+ 	s->width = a6_dict_u32(props, "IOSurfaceWidth", 0);
+ 	s->height = a6_dict_u32(props, "IOSurfaceHeight", 0);
+@@ -314,6 +332,9 @@
+ 			if (pd == NULL) {
+ 				return kIOReturnBadArgument;
+ 			}
++			if (a6_dict_u32(pd, "IOSurfacePlaneBytesPerElement", 1) > 64 ||
++			    a6_dict_u32(pd, "IOSurfacePlaneElementWidth", 1) > 255 ||
++			    a6_dict_u32(pd, "IOSurfacePlaneElementHeight", 1) > 255) return kIOReturnBadArgument;
+ 			p->width = a6_dict_u32(pd, "IOSurfacePlaneWidth", s->width);
+ 			p->height = a6_dict_u32(pd, "IOSurfacePlaneHeight", s->height);
+ 			p->bytesPerElement = (uint16_t)a6_dict_u32(pd, "IOSurfacePlaneBytesPerElement", 1);
+@@ -328,6 +349,9 @@
+ 			p->offset = a6_dict_u32(pd, "IOSurfacePlaneOffset", (uint32_t)next);
+ 			p->size = a6_dict_u32(pd, "IOSurfacePlaneSize",
+ 			    p->bytesPerRow * a6_div_up(p->height, p->elementHeight));
++			uint64_t used = (uint64_t)p->bytesPerRow * a6_div_up(p->height, p->elementHeight);
++			if (p->bytesPerRow < (uint64_t)a6_div_up(p->width, p->elementWidth) * p->bytesPerElement ||
++			    p->size < used) return kIOReturnBadArgument;
+ 			next = round_page((uint64_t)p->offset + p->size);
+ 			if ((uint64_t)p->offset + p->size > end) {
+ 				end = (uint64_t)p->offset + p->size;
+@@ -353,10 +377,10 @@
+ 	OSDeclareDefaultStructors(A6SurfaceRef);
+ 
+ public:
+-	A6Surface *surface;
+-	IOMemoryMap  *data;
+-	IOMemoryMap  *state;
+-	uint32_t      count;
++	A6Surface *surface=nullptr;
++	IOMemoryMap  *data=nullptr;
++	IOMemoryMap  *state=nullptr;
++	uint32_t      count=0;
+ 
+ 	bool init() APPLE_KEXT_OVERRIDE { return OSObject::init(); }
+ 	void free() APPLE_KEXT_OVERRIDE;
+@@ -393,18 +417,19 @@
+ 		return false;
+ 	}
+ 	a6_surface_init_lock();
++	if (a6_surface_lock == NULL) return false;
+ 	setProperty(kIOUserClientClassKey, "IOSurfaceRootUserClient");
+ 	registerService();
+-	IOLog("A6PLTE SURF: IOCoreSurfaceRoot registered\n");
++	a6_platform_graphics_ready(4);
+ 	return true;
+ }
+ 
+ class IOSurfaceRootUserClient : public IOUserClient {
+ 	OSDeclareDefaultStructors(IOSurfaceRootUserClient);
+ 
+-	task_t   fTask;
+-	IOLock  *fLock;
+-	OSArray *fRefs;
++	task_t   fTask=TASK_NULL;
++	IOLock  *fLock=nullptr;
++	OSArray *fRefs=nullptr;
+ 
+ 	A6SurfaceRef *findRef(uint32_t id, unsigned int *index);
+ 	IOReturn addRef(A6Surface *s, A6SurfaceRef **refOut, bool *existing);
+@@ -428,20 +453,8 @@
+ 
+ OSDefineMetaClassAndStructors(IOSurfaceRootUserClient, IOUserClient);
+ 
+-static uint64_t a6_surf_logged;      /* selectors / traps already logged (< 64) */
+-
+ static void
+-a6_surf_log_once(const char *what, uint32_t n)
+-{
+-	uint32_t bit = (what[0] == 't' ? 48 : 0) + n;
+-	if (bit >= 64 || (a6_surf_logged & (1ULL << bit))) {
+-		return;
+-	}
+-	a6_surf_logged |= 1ULL << bit;
+-	char name[32];
+-	proc_selfname(name, sizeof(name));
+-	IOLog("A6PLTE SURF: %s %s %u\n", name, what, n);
+-}
++a6_surf_log_once(__unused const char *what, __unused uint32_t n) {}
+ 
+ bool
+ IOSurfaceRootUserClient::initWithTask(task_t owningTask, void *securityID, UInt32 type)
+@@ -510,6 +523,7 @@
+ 	IOLockLock(fLock);
+ 	A6SurfaceRef *ref = findRef(s->id, NULL);
+ 	if (ref != NULL && ref->surface == s) {
++		ref->retain();
+ 		IOLockUnlock(fLock);
+ 		a6_surface_put(s);
+ 		*refOut = ref;
+@@ -536,6 +550,7 @@
+ 	IOLockLock(fLock);
+ 	A6SurfaceRef *raced = findRef(s->id, NULL);
+ 	if (raced != NULL && raced->surface == s) {
++		raced->retain();
+ 		/* Another thread mapped it meanwhile: count there, drop ours. */
+ 		raced->count++;
+ 		IOLockUnlock(fLock);
+@@ -545,7 +560,6 @@
+ 	}
+ 	fRefs->setObject(ref);
+ 	IOLockUnlock(fLock);
+-	ref->release();         /* fRefs holds it */
+ 	*refOut = ref;
+ 	return kIOReturnSuccess;
+ }
+@@ -639,6 +653,7 @@
+ 		ret = a6_struct_out(args, out, A6PLTE_SURFACE_RESULT_SIZE);
+ 		IOFreeData(out, A6PLTE_SURFACE_RESULT_SIZE);
+ 	}
++	ref->release();
+ 	if (ret != kIOReturnSuccess && !existing) {
+ 		/* The caller never learns the id: undo this create/lookup. */
+ 		trapRelease((void *)(uintptr_t)s->id, NULL, NULL, NULL, NULL, NULL);
+@@ -703,14 +718,7 @@
+ 			}
+ 		}
+ 	}
+-	if (ret != kIOReturnSuccess || a6_surface_creates_logged < 64) {
+-		char name[32];
+-		proc_selfname(name, sizeof(name));
+-		a6_surface_creates_logged++;
+-		IOLog("A6PLTE SURF: %s create id %u %ux%u fmt 0x%x bpe %u bpr %u planes %u size %u keys %u -> 0x%x\n",
+-		    name, s->id, s->width, s->height, s->pixelFormat, s->bytesPerElement,
+-		    s->bytesPerRow, s->planeCount, s->allocSize, props->getCount(), ret);
+-	}
++
+ 	props->release();
+ 	if (ret != kIOReturnSuccess) {
+ 		s->release();
+--- a/iokit/Kernel/arm/A6Surface.h
++++ b/iokit/Kernel/arm/A6Surface.h
+@@ -20,25 +20,25 @@
+ 
+ struct a6_surface_plane {
+ 	uint32_t width, height, bytesPerRow, offset, size;
+-	uint16_t bytesPerElement;
+-	uint8_t  elementWidth, elementHeight;
++	uint16_t bytesPerElement=0;
++	uint8_t  elementWidth=0, elementHeight=0;
+ };
+ 
+ class A6Surface : public OSObject {
+ 	OSDeclareDefaultStructors(A6Surface);
+ 
+ public:
+-	uint32_t id;
+-	uint32_t width, height, bytesPerRow, offset, pixelFormat, allocSize;
+-	uint16_t bytesPerElement;
+-	uint8_t  elementWidth, elementHeight;
+-	uint32_t cacheMode, planeCount, parentID;
+-	struct a6_surface_plane planes[A6PLTE_SURFACE_MAX_PLANES];
++	uint32_t id=0;
++	uint32_t width=0, height=0, bytesPerRow=0, offset=0, pixelFormat=0, allocSize=0;
++	uint16_t bytesPerElement=0;
++	uint8_t  elementWidth=0, elementHeight=0;
++	uint32_t cacheMode=0, planeCount=0, parentID=0;
++	struct a6_surface_plane planes[A6PLTE_SURFACE_MAX_PLANES]={};
+ 
+-	IOMemoryDescriptor       *memory;       /* pixels (buffer or physical) */
+-	IOOptionBits              mapCache;     /* cache mode for user mappings */
+-	IOBufferMemoryDescriptor *state;        /* shared state page, read-only for users */
+-	IOMemoryMap              *kernelMap;    /* lazily created for kernel copies */
++	IOMemoryDescriptor       *memory=nullptr;       /* pixels (buffer or physical) */
++	IOOptionBits              mapCache=0;     /* cache mode for user mappings */
++	IOBufferMemoryDescriptor *state=nullptr;        /* shared state page, read-only for users */
++	IOMemoryMap              *kernelMap=nullptr;    /* lazily created for kernel copies */
+ 
+ 	bool init() APPLE_KEXT_OVERRIDE { return OSObject::init(); }
+ 	void free() APPLE_KEXT_OVERRIDE;

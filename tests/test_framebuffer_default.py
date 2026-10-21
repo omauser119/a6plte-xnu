@@ -1,120 +1,106 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-2-Clause
-"""Run the native default-surface presenter/timer against the real pixel converter."""
+"""Run copied 0046/0056 layer copying and the A6 RGB888 adapter with actual pixels."""
 from pathlib import Path
-import subprocess
-import tempfile
-
-root = Path(__file__).resolve().parents[1]
-source = (root / 'xnu/iokit/Kernel/arm/A6Framebuffer.cpp').read_text()
-
+import subprocess,tempfile
+root=Path(__file__).resolve().parents[1]
+source=(root/'xnu/iokit/Kernel/arm/A6Framebuffer.cpp').read_text()
 def body(signature):
-    start = source.index(signature)
-    opening = source.index('{', start)
-    end, depth = opening + 1, 1
-    while depth:
-        depth += (source[end] == '{') - (source[end] == '}')
-        end += 1
-    return source[start:end] + '\n'
-
-fixture = r'''
+ start=source.index(signature);opening=source.index('{',start);end=opening+1;depth=1
+ while depth:
+  depth+=(source[end]=='{')-(source[end]=='}');end+=1
+ return source[start:end]+'\n'
+fixture=r'''
 #include "A6Scanout.h"
 #include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
-#include <initializer_list>
-#define A6_SWAP_BYTES 0x46c
-#define A6_LAYERS 4
-#define A6_VSYNC_US 16667
+#include <cstdlib>
+#define A6PLTE_FB_SWAP_REC_SIZE 0x46c
+#define A6PLTE_FB_LAYERS 4
+#define A6PLTE_FB_VSYNC_US 16667
+#define A6PLTE_FB_NOTIFY_VSYNC 5
+#define OSSafeReleaseNULL(p) do{if(p){(p)->release();(p)=nullptr;}}while(0)
 struct OSObject {};
-#define OSDynamicCast(T,p) static_cast<T *>(p)
-#define OSSafeReleaseNULL(p) do {if(p){(p)->release();(p)=nullptr;}} while(0)
-struct IOLock { bool held=false; };
-static void IOLockLock(IOLock *l){assert(!l->held);l->held=true;}
-static void IOLockUnlock(IOLock *l){assert(l->held);l->held=false;}
-static void IOLockWakeup(IOLock *l,void *,bool){assert(l->held);}
-static unsigned handed=0;static bool stopped=false;
-static void a6_xnu_graphics_presented(){assert(!stopped);++handed;}
+struct IOLock {bool held=false;};
+static void IOLockLock(IOLock *p){assert(!p->held);p->held=true;}
+static void IOLockUnlock(IOLock *p){assert(p->held);p->held=false;}
+static bool stopped=false,failAllocation=false;static unsigned handed=0;
 static int a6_xnu_graphics_stopped(){return stopped;}
+static void a6_xnu_graphics_presented(){assert(!stopped);++handed;}
 static uint64_t mach_absolute_time(){return 123456;}
+static void *IOMallocData(unsigned n){return failAllocation?nullptr:malloc(n);}
+static void IOFreeData(void *p,unsigned){free(p);}
+struct Memory {uint64_t getLength(){return 24;}};
 struct A6Surface {
- uint8_t pixels[24]={};unsigned refs=1;
- uint32_t allocSize=24,width=2,height=2,bytesPerRow=12;
- uintptr_t kernelAddress(){return (uintptr_t)pixels;}
+ uint8_t storage[40];Memory backing,*memory=&backing;unsigned refs=1;
+ uint32_t width=2,height=2,bytesPerRow=12,allocSize=24,offset=0,bytesPerElement=4,elementWidth=1,elementHeight=1;
+ A6Surface(){memset(storage,0xa5,sizeof(storage));memset(storage+8,0,24);}
+ uintptr_t kernelAddress(){return (uintptr_t)(storage+8);}
  void retain(){++refs;}void release(){assert(refs>1);--refs;}
 };
-struct IOMobileFramebufferUserClient {void notify(const uint64_t *){assert(false);}};
+static A6Surface front,layer;
+static A6Surface *a6_surface_copy(uint32_t id){A6Surface *p=id==1?&front:id==2?&layer:nullptr;if(p)p->retain();return p;}
+struct IOMobileFramebufferUserClient {void notify(unsigned,const uint64_t *,unsigned){assert(false);}};
 struct Clients {unsigned getCount(){return 0;}void *getObject(unsigned){assert(false);return nullptr;}};
 struct IOTimerEventSource {unsigned scheduled=0;void setTimeoutUS(unsigned us){assert(us==16667);++scheduled;}};
 class AppleCLCD:public OSObject {
 public:
- IOLock mainLock,presentLock,*fLock=&mainLock,*fPresentLock=&presentLock;
- A6Surface storage,*fSurface=&storage,*fPending[4]={};
- struct a6_scanout fScanout={};Clients clients,*fClients=&clients;
- bool fPowerOn=true,fDefaultActive=false,fDirectPresented=false,fRunning=true,fDirty=false,fEligible=false;
- uint32_t fSubmitted=0,fCompleted=0,fFlushTicks=6;uint64_t fTicks=0;
- uint8_t fRecord[A6_SWAP_BYTES]={};unsigned layerPresents=0;
- uint32_t width(){return 2;}uint32_t height(){return 2;}
- void present(const uint8_t *,A6Surface **,bool){++layerPresents;}
- void enableDefault();void presentDefault();static void tick(OSObject *,IOTimerEventSource *);
+ IOLock lock,*fLock=&lock;Clients clients,*fClients=&clients;
+ A6Surface *fSurface=&front;uintptr_t fPixels=front.kernelAddress();
+ uint32_t fWidth=2,fHeight=2,fRowBytes=12,fFlushTicks=6;
+ uint64_t fVsyncCount=0;bool fDirty=false,fGUIClient=false,fConsolePaused=false;
+ uint8_t fPending[A6PLTE_FB_SWAP_REC_SIZE]={};a6_scanout fPanel={};
+ void swap(const uint8_t *);void present(const uint8_t *);void scanout();
+ static void vsyncFired(OSObject *,IOTimerEventSource *);
 };
 '''
-for name in ('void AppleCLCD::enableDefault(', 'void AppleCLCD::presentDefault(', 'void AppleCLCD::tick('):
-    fixture += body(name)
-fixture += r'''
+for name in ('static uint32_t\nget32(', 'void\nAppleCLCD::swap(', 'void\nAppleCLCD::present(', 'void\nAppleCLCD::scanout(', 'void\nAppleCLCD::vsyncFired('):fixture+=body(name)
+fixture+=r'''
+static void put(uint8_t *p,unsigned n,uint32_t v){memcpy(p+n,&v,4);}
 static void unchanged(const uint8_t *p,unsigned n){for(unsigned i=0;i<n;++i)assert(p[i]==0xa5);}
 int main(){
  AppleCLCD fb;IOTimerEventSource timer;uint8_t panel[34];memset(panel,0xa5,sizeof(panel));
- fb.fScanout={panel+8,18,2,2,9,1,0};
- // No client, then an untouched default surface: neither may erase boot logs.
- fb.presentDefault();unchanged(panel,sizeof(panel));assert(!handed);
- fb.enableDefault();
- for(unsigned row=0;row<2;++row){
-  fb.storage.pixels[row*12+3]=fb.storage.pixels[row*12+7]=255;
-  memset(fb.storage.pixels+row*12+8,255,4); // Alpha/padding are not visible color.
- }
- for(unsigned i=0;i<6;++i)AppleCLCD::tick(&fb,&timer);
+ fb.fPanel={panel+8,18,2,2,9,1,0};
+ for(unsigned i=0;i<6;++i)AppleCLCD::vsyncFired(&fb,&timer);
  unchanged(panel,sizeof(panel));assert(!handed && timer.scheduled==6);
- // A direct BGRA write reaches RGB888 without SwapBegin/SwapEnd.
- fb.storage.pixels[0]=0x33;fb.storage.pixels[1]=0x22;fb.storage.pixels[2]=0x11;
- for(unsigned i=0;i<5;++i)AppleCLCD::tick(&fb,&timer);
- unchanged(panel,sizeof(panel));assert(!handed);
- AppleCLCD::tick(&fb,&timer);
- assert(fb.fDirectPresented && handed==1 && !fb.fSubmitted);
- assert(panel[8]==0x11 && panel[9]==0x22 && panel[10]==0x33);
+ fb.fGUIClient=true;
+ for(unsigned row=0;row<2;++row){front.storage[8+row*12+3]=255;front.storage[8+row*12+7]=255;memset(front.storage+8+row*12+8,255,4);}
+ for(unsigned i=0;i<6;++i)AppleCLCD::vsyncFired(&fb,&timer);
+ unchanged(panel,sizeof(panel));assert(!handed); // alpha and stride padding are not a frame
+ front.storage[8]=0x33;front.storage[9]=0x22;front.storage[10]=0x11;
+ for(unsigned i=0;i<5;++i)AppleCLCD::vsyncFired(&fb,&timer);
+ unchanged(panel,sizeof(panel));
+ AppleCLCD::vsyncFired(&fb,&timer);
+ assert(fb.fConsolePaused && handed==1 && panel[8]==0x11 && panel[9]==0x22 && panel[10]==0x33);
+ // Exercise copied upstream swap/present with a bounded real layer buffer.
+ uint8_t rec[0x46c]={};put(rec,0x104,1);put(rec,0x54,2);put(rec,0xc4+8,2);put(rec,0xc4+12,2);
+ layer.storage[8]=0x99;layer.storage[9]=0x88;layer.storage[10]=0x77;
+ fb.swap(rec);assert(fb.fDirty && panel[8]==0x11);
+ failAllocation=true;
+ for(unsigned i=0;i<6;++i)AppleCLCD::vsyncFired(&fb,&timer);
+ assert(fb.fDirty && panel[8]==0x11); // queue survives failed timer-record allocation
+ failAllocation=false;
+ for(unsigned i=0;i<6;++i)AppleCLCD::vsyncFired(&fb,&timer);
+ assert(!fb.fDirty && panel[8]==0x77 && panel[9]==0x88 && panel[10]==0x99 && layer.refs==1);
+ // Empty IDs, unknown IDs and clipped rectangles cannot read or write beyond storage.
+ put(rec,0x54,999);fb.present(rec);put(rec,0x54,0);fb.present(rec);
+ put(rec,0x54,2);put(rec,0xc4,INT32_MAX);fb.present(rec);
+ put(rec,0xc4,0);put(rec,0x64,INT32_MAX);fb.present(rec);
  for(unsigned row=0;row<2;++row)unchanged(panel+8+row*9+6,3);
- unchanged(panel,8);unchanged(panel+26,8);
- // Subsequent direct writes and black frames continue to scan out.
- fb.storage.pixels[0]=fb.storage.pixels[1]=fb.storage.pixels[2]=0;
- fb.presentDefault();assert(panel[8]==0 && panel[9]==0 && panel[10]==0 && handed==2);
- // A queued layer swap takes over; direct refresh must not overwrite it.
- fb.fSubmitted=17;fb.storage.pixels[0]=255;fb.fDirty=true;fb.fPending[0]=&fb.storage;
- for(unsigned i=0;i<6;++i)AppleCLCD::tick(&fb,&timer);
- assert(fb.layerPresents==1 && fb.fCompleted==17 && fb.storage.refs==1 && !fb.fDirty && handed==2);
- fb.presentDefault();assert(panel[8]==0 && panel[10]==0 && handed==2);
- fb.fSubmitted=0;fb.fPowerOn=false;fb.presentDefault();assert(handed==2);
- fb.fPowerOn=true;stopped=true;unsigned scheduled=timer.scheduled;
- AppleCLCD::tick(&fb,&timer);fb.presentDefault();assert(handed==2 && timer.scheduled==scheduled);
- stopped=false;fb.fDefaultActive=false;fb.presentDefault();assert(handed==2);
- // Invalid backing geometry fails before any store or console takeover.
- fb.fDefaultActive=true;fb.storage.bytesPerRow=UINT32_MAX;fb.presentDefault();assert(handed==2);
- assert(!fb.mainLock.held && !fb.presentLock.held);
- for(unsigned format: {1u,2u,A6_BGRA,A6_RGBA,A6_ARGB}){
-  uint8_t p[16]={};unsigned b=format==1?3:4;
-  a6_scanout s={p,sizeof(p),1,1,8,format,0};
-  memset(p+b,255,sizeof(p)-b);
-  if(b==4)p[format==A6_ARGB?0:3]=255;
-  assert(!a6_scanout_nonblack(&s));p[format==A6_ARGB?1:0]=1;
-  assert(a6_scanout_nonblack(&s));s.bytes=b-1;assert(!a6_scanout_nonblack(&s));
- }
- puts("PASS: actual default-surface scanout without SwapEnd, 10 Hz timer, RGB conversion, console handoff, black frames, layer takeover, panic/power and buffer guards");
+ unchanged(panel,8);unchanged(panel+26,8);unchanged(front.storage,8);unchanged(front.storage+32,8);
+ unchanged(layer.storage,8);unchanged(layer.storage+32,8);
+ // Direct default-surface writes stay visible even after previous layer swaps.
+ memset(front.storage+8,0,24);fb.scanout();assert(!panel[8] && !panel[9] && !panel[10]);
+ stopped=true;unsigned before=timer.scheduled;front.storage[8]=255;
+ fb.scanout();fb.present(rec);AppleCLCD::vsyncFired(&fb,&timer);
+ assert(timer.scheduled==before && !panel[10] && !fb.lock.held && layer.refs==1);
+ puts("PASS: copied 0046 layer copy + 0056 queue, A6 RGB888 conversion, direct default refresh, no premature console handoff, allocation failure, clipping/guards and panic stop");
 }
 '''
-with tempfile.TemporaryDirectory(prefix='fb-default-', dir=root/'artifacts') as directory:
-    p = Path(directory)
-    (p/'test.cpp').write_text(fixture)
-    flags = ['-fsanitize=address,undefined', '-Wall', '-Wextra', '-Werror']
-    subprocess.run(['clang', '-std=c17', *flags, '-c', str(root/'xnu/iokit/Kernel/arm/A6Scanout.c'), '-o', str(p/'scanout.o')], check=True)
-    subprocess.run(['clang++', '-std=c++17', *flags, '-I'+str(root/'xnu/iokit/Kernel/arm'), str(p/'test.cpp'), str(p/'scanout.o'), '-o', str(p/'test')], check=True)
-    subprocess.run([str(p/'test')], check=True)
+with tempfile.TemporaryDirectory(prefix='copied-fb-',dir=root/'artifacts') as directory:
+ p=Path(directory);(p/'test.cpp').write_text(fixture);flags=['-fsanitize=address,undefined','-Wall','-Wextra','-Werror']
+ subprocess.run(['clang','-std=c17',*flags,'-c',str(root/'xnu/iokit/Kernel/arm/A6Scanout.c'),'-o',str(p/'scanout.o')],check=True)
+ subprocess.run(['clang++','-std=c++17',*flags,'-I'+str(root/'xnu/iokit/Kernel/arm'),str(p/'test.cpp'),str(p/'scanout.o'),'-o',str(p/'test')],check=True)
+ subprocess.run([str(p/'test')],check=True)

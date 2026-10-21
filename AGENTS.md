@@ -966,3 +966,40 @@ is 02ec710. Actual GUI result pending; fresh screen-result question asked.
 No claim that restoring the Sweet contracts alone proves working SpringBoard
 or physical touch. Keep kernel-only/fixes-only, own HID, UART forbidden, CPU0,
 USB off, no inspection or edits of prepared user OS files, transient boots only.
+
+User now explicitly requires adapting/copying 0046 itself, not another rewritten
+implementation. Replaced all three graphics files with a reproducible upstream
+copy pipeline: vendor/ios-sweet/0046-sweet-iosurface-iomfb.patch is byte-identical
+to pinned 425b25102b6a9ee4b68fb2b9ca5d6a086b8a4116 (SHA256
+0f23986cf9861ad52a6a0986328fa83c9f0ec222d53dee2bce5921d79c90e5be).
+scripts/apply-sweet-0046.py extracts its complete files, mechanically renames
+Sweet to A6, applies the author's unchanged 0068 cached-client correction, then
+patches/0046-a6plte-adaptation.patch. --verify reconstructs and byte-compares
+the actual compiled files. fetch-sources.py now invokes this after the base
+patch. DO NOT re-export these three source files into the aggregate base patch:
+exclude iokit/Kernel/arm/A6Surface.h, A6Surface.cpp and A6Framebuffer.cpp from
+git diff when updating patches/xnu-a6plte-framebuffer.patch. Modify them through
+the separately reviewable adaptation delta so provenance verification continues.
+
+The copied original selector bodies/result layout and row-copy path are kept.
+Catalogue now matches IOCoreSurfaceRoot on IOResources with its own category,
+as 0046 does; remove manual a6_start_iosurface from the board-services factory.
+AppleCLCD matches the existing real /arm-io/disp0 nub. A6 adaptation uses the
+actual inherited 1080x2220 RGB888 panel, BGRA shared default shadow, scalar
+conversion and framebuffer-only console handoff after a colored GUI frame.
+No PE_initialize_console/kPEDisableScreen/UART redirection. Ordinary logs and
+panic recovery keep their previous board implementation. Latest-frame queuing
+is copied from upstream 0056's core timer/swap changes, with the existing 10 Hz
+default. Default shadow is scanned even after swaps, like physical framebuffer
+storage. Keep upstream 4096 IDs/256 MiB allocation/1536 MiB pool limits and
+allocation-hint semantics. Small init, integer/plane and reply-lifetime guards
+do not alter valid wire calls. No Sweet HID, new diagnostics or userspace edits.
+
+Tests now execute the copied methods, copied layer-copy/timer path and real A6
+RGB conversion, plus byte-for-byte provenance and 5-row native catalogue. Focused
+ASan/UBSan tests passed; full host suite currently running in
+artifacts/test-copied-0046.private.log. Native Apple Clang/NOUNDEFS build still
+required; Linux probes only encounter unavailable Apple allocator builtins.
+No new kernel has been built or booted for this copy yet. Latest actual phone
+boot remains 02ec710. User asks when build/boot: send to Actions immediately
+after the remaining checks, then verify and transiently boot the actual result.

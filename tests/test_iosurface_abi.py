@@ -48,13 +48,13 @@ int main(){
  d.values["IOSurfaceBytesPerElement"]=&bpe;assert(a6_surface_layout(&s,&d)==kIOReturnBadArgument);d.values.erase("IOSurfaceBytesPerElement");
  d.values["IOSurfaceElementWidth"]=&element;assert(a6_surface_layout(&s,&d)==kIOReturnBadArgument);d.values.erase("IOSurfaceElementWidth");
  d.values["IOSurfaceBytesPerRow"]=&badrow;assert(a6_surface_layout(&s,&d)==kIOReturnBadArgument);d.values.erase("IOSurfaceBytesPerRow");
- d.values["IOSurfaceAllocSize"]=&small;assert(a6_surface_layout(&s,&d)==kIOReturnBadArgument);d.values.erase("IOSurfaceAllocSize");
+ d.values["IOSurfaceAllocSize"]=&small;assert(!a6_surface_layout(&s,&d) && s.allocSize==9662464);d.values.erase("IOSurfaceAllocSize"); // 0046 promotes an undersized allocation hint.
  OSArray planes;OSDictionary plane;plane.values={{"IOSurfacePlaneWidth",&width},{"IOSurfacePlaneHeight",&height},{"IOSurfacePlaneBytesPerElement",&small}};
  planes.objects={&plane};d.values["IOSurfacePlaneInfo"]=&planes;assert(!a6_surface_layout(&s,&d));
  plane.values["IOSurfacePlaneSize"]=&small;assert(a6_surface_layout(&s,&d)==kIOReturnBadArgument);plane.values.erase("IOSurfacePlaneSize");
- plane.values["IOSurfacePlaneOffset"]=&max;assert(a6_surface_layout(&s,&d)==kIOReturnBadArgument);plane.values.erase("IOSurfacePlaneOffset");
+ plane.values["IOSurfacePlaneOffset"]=&max;assert(a6_surface_layout(&s,&d)!=kIOReturnSuccess);plane.values.erase("IOSurfacePlaneOffset");
  planes.objects.resize(21,&plane);assert(a6_surface_layout(&s,&d)==kIOReturnBadArgument);
- d.values["IOSurfacePlaneInfo"]=&width;assert(a6_surface_layout(&s,&d)==kIOReturnBadArgument);d.values.erase("IOSurfacePlaneInfo");
+ d.values["IOSurfacePlaneInfo"]=&width;assert(!a6_surface_layout(&s,&d) && !s.planeCount);d.values.erase("IOSurfacePlaneInfo"); // 0046 ignores a non-array optional key.
  OSDictionary opaque;OSNumber page(4096);opaque.values["IOSurfaceAllocSize"]=&page;assert(!a6_surface_layout(&s,&opaque) && s.allocSize==4096);
  OSNumber large(128u<<20),over((256u<<20)+4096);opaque.values["IOSurfaceAllocSize"]=&large;assert(!a6_surface_layout(&s,&opaque) && s.allocSize==(128u<<20));
  opaque.values["IOSurfaceAllocSize"]=&over;assert(a6_surface_layout(&s,&opaque)==kIOReturnNoMemory);
