@@ -627,3 +627,25 @@ not a flash. Actual boot-task identity/launchd result pending; async screen
 question asked. Do not infer success past the previous panic from boot ACK.
 Keep kernel-only/fixes-only, CPU0, no UART, USB networking disabled and no
 inspection or modification of prepared userspace files.
+
+a05051c hardware: user reports `failed to get boot manifest hash no such file
+or dir`, after the boot-task identity failure. User already returned the phone
+to lk2nd for this fix. The Apple DT's /chosen has no boot-manifest-hash or
+boot-objects-path, so native IOGetBootManifestHash fails and kern.bootobjectspath
+returns ENOENT. Kernel-only correction in A6PLTEPlatformExpert::start publishes
+boot-manifest-hash after native DT initialization and before board services/
+BSD launch. There is no Apple Image4 manifest in this boot: the value is a
+standalone compatibility identity, SHA384(ASCII `A6PLTE standalone boot identity
+v1` without NUL || actual linked LC_UUID's 16 bytes). It is stable for that
+image across reboots, contains no entropy/address/time data, and is NOT Apple
+authentication or a matching userspace/preboot manifest. No files are inspected,
+created or modified. Preserve an existing 20/48-byte OSData firmware hash; reject
+malformed data, missing UUID or failed publication. No new logs/diagnostics.
+Actual helper/native IOGetBootManifestHash/native ARM sysctl-body ASan/UBSan
+tests reproduce ENOENT, verify SHA384 with a known UUID, native raw/hex reads,
+stable/changed UUID, firmware preservation, error handling and balanced refs.
+Full host suite passed. Package checker now requires one nonzero native LC_UUID.
+Local C++ header probe hits existing Apple allocator builtins unavailable in Linux;
+do not add fake builtins or header stubs, validate the actual TU with Apple CI.
+CI/native link and exact-image hardware verification are next. CPU0, USB-off,
+UART prohibition and kernel-only/fixes-only scope remain.

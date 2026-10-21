@@ -4432,10 +4432,10 @@ index 0000000..95fa433
 +#endif
 diff --git c/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
 new file mode 100644
-index 0000000..c9ef47c
+index 0000000..0e52c67
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PLTEPlatformExpert.cpp
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,135 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if A6PLTE
 +
@@ -4443,6 +4443,9 @@ index 0000000..c9ef47c
 +#include <IOKit/IOLib.h>
 +#include <IOKit/IOKitDebug.h>
 +#include <IOKit/IOPlatformExpert.h>
++#include <libkern/c++/OSData.h>
++#include <libkern/crypto/sha2.h>
++#include <libkern/kernel_mach_header.h>
 +#include <machine/machine_routines.h>
 +#include <pexpert/arm64/board_config.h>
 +
@@ -4481,12 +4484,47 @@ index 0000000..c9ef47c
 +bool A6PLTEPlatformExpert::getProductName(char *n,int s) { return a6_identity(n,s); }
 +bool A6PLTEPlatformExpert::getTargetName(char *n,int s) { return a6_identity(n,s); }
 +
++static bool a6_publish_boot_hash(void)
++{
++	IORegistryEntry *chosen = IORegistryEntry::fromPath("/chosen", gIODTPlane);
++	if (chosen == NULL) return false;
++	OSObject *existing = chosen->getProperty("boot-manifest-hash");
++	if (existing != NULL) {
++		OSData *data = OSDynamicCast(OSData, existing);
++		bool valid = data && (data->getLength() == 20 || data->getLength() == 48);
++		chosen->release();
++		return valid;
++	}
++
++	unsigned long uuid_size = 0;
++	const void *uuid = getuuidfromheader(&_mh_execute_header, &uuid_size);
++	if (uuid == NULL || uuid_size != 16) {
++		chosen->release();
++		return false;
++	}
++	/* lk2nd supplies no Apple Image4 manifest. Publish a standalone boot
++	 * identity for the native registry/sysctl consumers, not an IMG4 trust
++	 * claim. The linked UUID makes it stable for this image across reboots;
++	 * boot entropy, RAM addresses and mutable kernel data are not hashed. */
++	static const char domain[] = "A6PLTE standalone boot identity v1";
++	uint8_t hash[SHA384_DIGEST_LENGTH];
++	SHA384_CTX context;
++	SHA384_Init(&context);
++	SHA384_Update(&context, domain, sizeof(domain) - 1);
++	SHA384_Update(&context, uuid, uuid_size);
++	SHA384_Final(hash, &context);
++	bool published = chosen->setProperty("boot-manifest-hash", hash, sizeof(hash));
++	chosen->release();
++	return published;
++}
++
 +bool
 +A6PLTEPlatformExpert::start(IOService *provider)
 +{
 +	if (!super::start(provider)) {
 +		return false;
 +	}
++	if (!a6_publish_boot_hash()) return false;
 +
 +	/* Discovery runs with IRQs masked, before EARLY_BOOT installs kernel PRNG.
 +	 * Publish the possible count now; register/start APs after spllo(). */

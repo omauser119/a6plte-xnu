@@ -11,6 +11,18 @@ k=kernel.read_bytes();b=image.read_bytes()
 assert b'Darwin Kernel Version 22.6.0:' in k
 assert b'xnu-8796.141.3/DEVELOPMENT_ARM64_A6PLTE' in k
 assert struct.unpack_from('<4I',k)==(0xfeedfacf,0x100000c,0,2)
+ncmds,command_bytes=struct.unpack_from('<2I',k,16)
+cursor=32;command_end=cursor+command_bytes;uuids=[]
+assert command_end<=len(k)
+for _ in range(ncmds):
+    assert cursor+8<=command_end
+    command,size=struct.unpack_from('<2I',k,cursor)
+    assert size>=8 and size%8==0 and cursor+size<=command_end
+    if command==0x1b: # LC_UUID supplies the standalone boot identity.
+        assert size==24
+        uuids.append(k[cursor+8:cursor+24])
+    cursor+=size
+assert cursor==command_end and len(uuids)==1 and any(uuids[0])
 assert not subprocess.check_output(['llvm-nm','--undefined-only',str(kernel)],text=True).strip()
 symbols=subprocess.check_output(['llvm-nm',str(kernel)],text=True)
 for name in ('_a6_userdata_root','_a6_userdata_root_selected','_IOA6UserdataBSDRoot','_a6_hfs_volume_check','_hfs_vfsops'):

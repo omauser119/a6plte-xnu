@@ -128,6 +128,17 @@ Native-body regressions reproduce the old `ENOENT`, verify the original identifi
 and syscall buffer/error behavior, and reject unsigned/invalid or foreign files.
 Hardware confirmation of this identity fix is pending.
 
+Hardware a05051c passed identity retrieval and next reported a missing boot
+manifest hash. The board platform expert now supplies `/chosen/boot-manifest-hash`
+before BSD startup, so both the native registry reader and `kern.bootobjectspath`
+can read it. Because this lk2nd boot has no Apple Image4 manifest, this value is
+an explicit standalone compatibility identity: SHA-384 of the ASCII domain
+`A6PLTE standalone boot identity v1` followed by the linked kernel's 16-byte UUID.
+It is stable across reboots of that image and changes with the image UUID;
+it authenticates neither an Apple manifest nor any userspace/preboot files.
+Existing valid firmware hashes are preserved. No files or directories are
+created in the prepared OS root. Hardware confirmation is pending.
+
 ## Persistent code-signature conversion
 
 The 16-KiB-to-4-KiB hash conversion now checkpoints to hidden
