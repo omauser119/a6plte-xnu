@@ -610,3 +610,20 @@ regression reproduces ENOENT with a real com.apple.mount CodeDirectory and fixes
 it while preserving all signature bytes, native buffer ABI/errors, flags and
 provider/root/unsigned/invalid rejection. Native compat.c header probe passed.
 Full host suite passed. Native CI and exact-image hardware verification are next.
+
+a05051c: ALL Actions 39600356778 passed (native Apple Clang/NOUNDEFS link,
+host regressions and packaging). Verified native kernel SHA256
+6f859bcaf6ad81771c271fb91673c15674052a0068d90f528569ab9e8fdc187f;
+linked platform helpers, cs_identity_get and real SHA1 descriptor confirmed.
+Image build/verified-a05051c/images/xnu-8796-userdata-cpu0-boot.img,
+17111040 bytes, SHA256
+ec4ef4c89d74688cda1f83745efaa807cab276a34f454e45de72a77b8bc02c21.
+Exact successful CI source/archive/kernel/image hashes, full CRC/CPU0/userdata/
+USB-off profile and expected phone/hfs-map-v2 checked. User already returned
+the phone. fastboot boot accepted this exact image: send 0.372 s, boot 0.078 s,
+total 0.469 s. Private log artifacts/boot-a05051c-cpu0.private.log; image and
+boot receipts in build/verified-a05051c. This is latest PHONE BOOTED image,
+not a flash. Actual boot-task identity/launchd result pending; async screen
+question asked. Do not infer success past the previous panic from boot ACK.
+Keep kernel-only/fixes-only, CPU0, no UART, USB networking disabled and no
+inspection or modification of prepared userspace files.
