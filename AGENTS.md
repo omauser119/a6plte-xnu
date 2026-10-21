@@ -756,3 +756,12 @@ absent from fastboot at packaging completion; NOTHING BOOTED OR FLASHED for
 question asked after concrete image ready. Boot this exact verified image once
 expected phone/hfs-map-v2 are available, no extra permission required. Actual
 MKB result unverified. Preserve kernel-only/fixes-only and prepared OS files.
+
+1909819 hardware boot: user returned phone; expected phone and hfs-map-v2
+verified, exact image SHA256 4405ea7ab91264b9d44d1315aa77855c27a85374351a893819673dbdda7ec3ee
+sent via fastboot boot at 2026-10-21T13:48:07Z, ACKed in 0.484 s. Private log
+artifacts/boot-1909819-cpu0.private.log, receipt build/verified-1909819/boot-receipt.json.
+This supersedes the prior waiting status: latest PHONE BOOTED image is 1909819,
+not a flash. Actual MKB result remains pending; screen text question asked.
+Do not infer passing keybag validation from fastboot ACK. No userspace files
+inspected/modified, no UART, SMP, USB networking or diagnostic-only changes.
