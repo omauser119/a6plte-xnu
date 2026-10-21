@@ -3820,10 +3820,10 @@ index 2613ab5..a5adf3f 100644
  		entitlement,
 diff --git c/iokit/Kernel/arm/A6Framebuffer.cpp w/iokit/Kernel/arm/A6Framebuffer.cpp
 new file mode 100644
-index 0000000..38179e2
+index 0000000..c91e66c
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Framebuffer.cpp
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,316 @@
 +/* Software iOS 16 IOMobileFramebuffer; protocol from ios-sweet patch 0046.
 + * A6+ uses inherited RGB888 scanout, BGRA IOSurfaces and bounded CPU composition.
 + * No Apple GPU/DSI/PMIC implementation or UART is claimed or used. */
@@ -3884,7 +3884,7 @@ index 0000000..38179e2
 +    bool addClient(IOMobileFramebufferUserClient *);
 +    void removeClient(IOMobileFramebufferUserClient *);
 +    uint32_t begin();
-+    IOReturn submit(const uint8_t *,uint32_t,bool);
++    IOReturn submit(const uint8_t *,bool);
 +    IOReturn wait(uint32_t);
 +    void enableDefault();
 +    void power(bool);
@@ -3898,7 +3898,6 @@ index 0000000..38179e2
 +    task_t fTask=TASK_NULL;
 +    mach_port_t fPort=MACH_PORT_NULL;
 +    io_user_reference_t fFunc[A6_NOTIFY_TYPES]={},fRefcon[A6_NOTIFY_TYPES]={};
-+    uint32_t fOpenSwap=0,fLastSwap=0;
 +    bool fClosed=false,fEligible=false,fAdded=false;
 +public:
 +    bool initWithTask(task_t,void *,UInt32) APPLE_KEXT_OVERRIDE;
@@ -3955,26 +3954,25 @@ index 0000000..38179e2
 +uint32_t AppleCLCD::begin() {
 +    IOLockLock(fLock);if(++fNext==0)++fNext;uint32_t n=fNext;IOLockUnlock(fLock);return n;
 +}
-+IOReturn AppleCLCD::submit(const uint8_t *rec,uint32_t token,bool eligible) {
-+    if (!token || get32(rec,0x50)!=token || (get32(rec,0x104)&~15u))return kIOReturnBadArgument;
-+    A6Surface *next[A6_LAYERS]={},*old[A6_LAYERS]={};IOReturn result=kIOReturnSuccess;
++IOReturn AppleCLCD::submit(const uint8_t *rec,bool eligible) {
++    A6Surface *next[A6_LAYERS]={},*old[A6_LAYERS]={};
 +    for(unsigned i=0;i<A6_LAYERS;++i) {
-+        if(!(get32(rec,0x104)&(1u<<i)))continue;
++        if(!(get32(rec,0x104)&(1u<<i)) || !get32(rec,0x54+4*i))continue;
 +        next[i]=a6_surface_copy(get32(rec,0x54+4*i));
-+        if(!next[i]) {result=kIOReturnNotFound;break;}
++        if(!next[i])continue;
 +        if(next[i]->planeCount || next[i]->bytesPerElement!=4 || next[i]->elementWidth!=1 || next[i]->elementHeight!=1 ||
 +            (next[i]->pixelFormat!=A6_BGRA && next[i]->pixelFormat!=A6_RGBA && next[i]->pixelFormat!=A6_ARGB)) {
-+            result=kIOReturnUnsupported;break;
++            OSSafeReleaseNULL(next[i]);
 +        }
 +    }
-+    if(result==kIOReturnSuccess) {
-+        IOLockLock(fLock);
-+        for(unsigned i=0;i<A6_LAYERS;++i) {old[i]=fPending[i];fPending[i]=next[i];next[i]=nullptr;}
-+        memcpy(fRecord,rec,A6_SWAP_BYTES);fSubmitted=token;fEligible=eligible;fDirty=true;
-+        IOLockUnlock(fLock);
-+    }
++    /* 0046 queues the latest record independently of SwapBegin. The record's
++     * client token is not a single outstanding-transaction requirement. */
++    IOLockLock(fLock);
++    for(unsigned i=0;i<A6_LAYERS;++i) {old[i]=fPending[i];fPending[i]=next[i];next[i]=nullptr;}
++    memcpy(fRecord,rec,A6_SWAP_BYTES);if(++fSubmitted==0)++fSubmitted;fEligible=eligible;fDirty=true;
++    IOLockUnlock(fLock);
 +    for(unsigned i=0;i<A6_LAYERS;++i) {OSSafeReleaseNULL(old[i]);OSSafeReleaseNULL(next[i]);}
-+    return result;
++    return kIOReturnSuccess;
 +}
 +void AppleCLCD::present(const uint8_t *rec,A6Surface **surfaces,bool eligible) {
 +    if(a6_xnu_graphics_stopped())return;
@@ -4107,27 +4105,23 @@ index 0000000..38179e2
 +IOReturn IOMobileFramebufferUserClient::externalMethod(uint32_t selector,IOExternalMethodArguments *a,
 +    __unused IOExternalMethodDispatch *dispatch,__unused OSObject *target,__unused void *reference) {
 +    if(!fFB || fClosed || isInactive())return kIOReturnNotOpen;
-+    if(!a || a->asyncWakePort || a->asyncReferenceCount || a->scalarInputCount>16 ||
-+        (a->scalarInputCount && !a->scalarInput) || (a->scalarOutputCount && !a->scalarOutput) ||
-+        a->structureInputDescriptor || a->structureOutputDescriptor)return kIOReturnBadArgument;
++    if(!a || a->scalarInputCount>16 || a->scalarOutputCount>16 ||
++        (a->scalarInputCount && !a->scalarInput) || (a->scalarOutputCount && !a->scalarOutput))return kIOReturnBadArgument;
 +    uint64_t out[2]={};unsigned n=0;IOReturn result=kIOReturnSuccess;
 +    switch(selector) {
 +    case 0:case 1:case 2:
-+        if(a->structureInputSize || a->scalarOutputCount || a->structureOutputSize)return kIOReturnBadArgument;
 +        break; /* Software display has no hardware configuration to program. */
 +    case 3:
-+        if(a->scalarInputCount<1 || a->scalarInput[0]!=0)return kIOReturnBadArgument;
 +        if(a->scalarOutputCount<1)return kIOReturnNoSpace;
 +        {mach_port_name_t port=0;result=IOUserClient::copyPortNameForObjectInTask(fTask,fFB->fSurface,&port);out[0]=port;n=1;
 +         if(result==kIOReturnSuccess && fEligible)fFB->enableDefault();}break;
 +    case 4:
 +        if(a->scalarOutputCount<1)return kIOReturnNoSpace;
-+        out[0]=fOpenSwap=fFB->begin();n=1;break;
++        out[0]=fFB->begin();n=1;break;
 +    case 5:
-+        if(!a->structureInput || a->structureInputSize<A6_SWAP_BYTES || !fOpenSwap)return kIOReturnBadArgument;
-+        result=fFB->submit((const uint8_t *)a->structureInput,fOpenSwap,fEligible);
-+        if(result==kIOReturnSuccess) {fLastSwap=fOpenSwap;fOpenSwap=0;}break;
-+    case 6:if(fLastSwap)result=fFB->wait(fLastSwap);break; /* No queued swap is already complete. */
++        if(a->structureInputDescriptor || !a->structureInput || a->structureInputSize<A6_SWAP_BYTES)return kIOReturnBadArgument;
++        result=fFB->submit((const uint8_t *)a->structureInput,fEligible);break;
++    case 6:break; /* 0046/0056: asynchronous software presentation, no hardware fence. */
 +    case 7:out[0]=0;n=1;break;
 +    case 8:out[0]=fFB->width();out[1]=fFB->height();n=2;break;
 +    case 12:
@@ -4138,12 +4132,12 @@ index 0000000..38179e2
 +    case 72:
 +        if(a->scalarInputCount<3 || a->scalarInput[2]>=A6_NOTIFY_TYPES)return kIOReturnBadArgument;
 +        IOLockLock(fFB->fLock);fFunc[a->scalarInput[2]]=a->scalarInput[0];fRefcon[a->scalarInput[2]]=a->scalarInput[1];IOLockUnlock(fFB->fLock);break;
-+    default:return kIOReturnUnsupported;
++    default:break; /* 0046's optional control/capability queries have zero replies. */
 +    }
 +    if(a->scalarOutputCount<n)return kIOReturnNoSpace;
-+    for(unsigned i=0;i<n;++i)a->scalarOutput[i]=out[i];a->scalarOutputCount=n;
-+    if(a->structureOutput && a->structureOutputSize)bzero(a->structureOutput,a->structureOutputSize);
-+    a->structureOutputSize=0;return result;
++    IOReturn reply=a6_graphics_zero_reply(a);if(reply!=kIOReturnSuccess)return reply;
++    for(unsigned i=0;i<n;++i)a->scalarOutput[i]=out[i];
++    return result;
 +}
 +#endif
 diff --git c/iokit/Kernel/arm/A6GraphicsLayout.c w/iokit/Kernel/arm/A6GraphicsLayout.c
@@ -5649,10 +5643,10 @@ index 0000000..3000f3f
 +#endif
 diff --git c/iokit/Kernel/arm/A6Surface.cpp w/iokit/Kernel/arm/A6Surface.cpp
 new file mode 100644
-index 0000000..dad51af
+index 0000000..9d5747f
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Surface.cpp
-@@ -0,0 +1,835 @@
+@@ -0,0 +1,851 @@
 +/* Adapted from dipa-studio/ios-sweet 0046 at 425b25102b6a9ee4b68fb2b9ca5d6a086b8a4116; cached-lookup contract from 0068. */
 +/*
 + * Built-in IOSurface for A6PLTE.
@@ -5678,7 +5672,7 @@ index 0000000..dad51af
 + * into each task that creates or looks it up; mappings are counted per
 + * client and dropped on release or close.
 + *
-+ * Optional accelerator and shared-event operations remain unsupported.
++ * Optional control/capability operations have Sweet's zero-valued reply.
 + * Geometry, mappings, ports and cached-client replies use real native objects.
 + */
 +#include "A6Surface.h"
@@ -5696,7 +5690,6 @@ index 0000000..dad51af
 +#include <libkern/c++/OSUnserialize.h>
 +#include <sys/proc.h>
 +#include <kern/task.h>
-+#include <IOKit/IOSubMemoryDescriptor.h>
 +extern "C" void a6_platform_graphics_ready(uint32_t);
 +extern "C" int a6_graphics_client_allowed(void);
 +
@@ -5718,9 +5711,9 @@ index 0000000..dad51af
 +};
 +
 +#define A6PLTE_SURFACE_RESULT_SIZE       0xa68
-+#define A6PLTE_SURFACE_MAX_ID            1024
++#define A6PLTE_SURFACE_MAX_ID            4096
 +#define A6PLTE_SURFACE_MAX_DIM           16384
-+#define A6PLTE_SURFACE_MAX_ALLOC         (64u << 20)
++#define A6PLTE_SURFACE_MAX_ALLOC         (256u << 20)
 +#define A6PLTE_SURFACE_MAX_PROPS         (64u << 10)
 +#define A6PLTE_SURFACE_ROW_ALIGN         64
 +#define A6PLTE_SURFACE_TIMESTAMPS        0x800   /* offset in the state page */
@@ -5733,7 +5726,7 @@ index 0000000..dad51af
 +static uint32_t      a6_surface_next_id = 1;
 +static bool          a6_surface_reserved[A6PLTE_SURFACE_MAX_ID];
 +static uint64_t      a6_surface_wired;       /* bytes of buffer surfaces */
-+#define A6PLTE_SURFACE_WIRED_MAX         (64ull << 20)
++#define A6PLTE_SURFACE_WIRED_MAX         (256ull << 20)
 +
 +OSDefineMetaClassAndStructors(A6Surface, OSObject);
 +
@@ -6177,7 +6170,7 @@ index 0000000..dad51af
 +		*refOut = raced;
 +		return kIOReturnSuccess;
 +	}
-+	bool added=fRefs->getCount()<256 && fRefs->setObject(ref);
++	bool added=fRefs->getCount()<A6PLTE_SURFACE_MAX_ID && fRefs->setObject(ref);
 +	IOLockUnlock(fLock);
 +    if(!added) {ref->release();return kIOReturnNoResources;}
 +	*refOut = ref;
@@ -6252,6 +6245,28 @@ index 0000000..dad51af
 +	return kIOReturnSuccess;
 +}
 +
++/* 0046's optional-method contract: acknowledge a software-only operation,
++ * return zero-valued capabilities and preserve the requested wire lengths.
++ * No GPU handles, event objects or hardware support are manufactured. */
++IOReturn a6_graphics_zero_reply(IOExternalMethodArguments *args)
++{
++    if(!args || args->scalarOutputCount>16 ||
++        (args->scalarOutputCount && !args->scalarOutput) ||
++        (!args->structureOutputDescriptor && args->structureOutputSize && !args->structureOutput))return kIOReturnBadArgument;
++    uint64_t length=args->structureOutputDescriptor?args->structureOutputDescriptorSize:args->structureOutputSize;
++    if(length>(64u<<10) || (args->structureOutputDescriptor && length>args->structureOutputDescriptor->getLength()))return kIOReturnNoSpace;
++    for(unsigned i=0;i<args->scalarOutputCount;++i)args->scalarOutput[i]=0;
++    if(args->structureOutputDescriptor) {
++        const uint8_t zero[256]={};
++        for(uint64_t offset=0;offset<length;) {
++            uint64_t bytes=length-offset;if(bytes>sizeof(zero))bytes=sizeof(zero);
++            if(args->structureOutputDescriptor->writeBytes(offset,zero,bytes)!=bytes)return kIOReturnVMError;
++            offset+=bytes;
++        }
++    } else if(length)bzero(args->structureOutput,(size_t)length);
++    return kIOReturnSuccess;
++}
++
 +/* Map s for this client and answer with its lock result. Takes s's user count. */
 +IOReturn
 +IOSurfaceRootUserClient::returnSurface(A6Surface *s, IOExternalMethodArguments *args)
@@ -6295,14 +6310,9 @@ index 0000000..dad51af
 +    surface->parentID=args->scalarInputCount?(uint32_t)args->scalarInput[0]:0;
 +    IOReturn result=a6_surface_layout(surface,props);
 +    if(result==kIOReturnSuccess && props->getObject("IOSurfaceAddress"))result=kIOReturnUnsupported;
-+    if(result==kIOReturnSuccess && surface->parentID) {
-+        surface->parent=a6_surface_copy(surface->parentID);
-+        if(!surface->parent || !surface->parent->memory || surface->allocSize>surface->parent->memory->getLength())result=kIOReturnBadArgument;
-+        else {
-+            surface->memory=IOSubMemoryDescriptor::withSubRange(surface->parent->memory,0,surface->allocSize,kIODirectionInOut);
-+            if(!surface->memory)result=kIOReturnNoMemory;
-+        }
-+    } else if(result==kIOReturnSuccess) {
++    /* 0046 returns parentID as metadata; it does not require a live parent or
++     * alias its allocation. Each created surface owns independent storage. */
++    if(result==kIOReturnSuccess) {
 +        uint64_t old=OSAddAtomic64(surface->allocSize,(volatile SInt64 *)&a6_surface_wired);
 +        if(old+surface->allocSize<=A6PLTE_SURFACE_WIRED_MAX)
 +            surface->memory=IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,kIODirectionInOut|kIOMemoryKernelUserShared,surface->allocSize,page_size);
@@ -6325,7 +6335,7 @@ index 0000000..dad51af
 +    __unused void *reference)
 +{
 +	if(isInactive())return kIOReturnNotReady;
-+    if(!args || args->asyncWakePort || args->asyncReferenceCount || args->scalarInputCount>16 ||
++    if(!args || args->scalarInputCount>16 || args->scalarOutputCount>16 ||
 +        (args->scalarInputCount && !args->scalarInput) || (args->scalarOutputCount && !args->scalarOutput))return kIOReturnBadArgument;
 +    uint64_t arg0 = args->scalarInputCount > 0 ? args->scalarInput[0] : 0;
 +    if((selector==kA6SurfaceLookup || selector==kA6SurfaceLookupFromPort || selector==kA6SurfaceCreatePort) &&
@@ -6378,7 +6388,7 @@ index 0000000..dad51af
 +		return portResult;
 +	}
 +	default:
-+        return kIOReturnUnsupported;
++        return a6_graphics_zero_reply(args);
 +	}
 +}
 +
@@ -6490,10 +6500,10 @@ index 0000000..dad51af
 +#endif /* A6PLTE */
 diff --git c/iokit/Kernel/arm/A6Surface.h w/iokit/Kernel/arm/A6Surface.h
 new file mode 100644
-index 0000000..795c1b8
+index 0000000..f2478a3
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6Surface.h
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,67 @@
 +/*
 + * Built-in IOSurface for A6PLTE (see A6Surface.cpp).
 + *
@@ -6548,6 +6558,9 @@ index 0000000..795c1b8
 +
 +/* Retained surface for an id, or NULL. */
 +A6Surface *a6_surface_copy(uint32_t id);
++
++struct IOExternalMethodArguments;
++IOReturn a6_graphics_zero_reply(IOExternalMethodArguments *);
 +
 +/* BGRA software default surface; converted to inherited RGB888 on present. */
 +A6Surface *a6_surface_create_default(uint32_t width,uint32_t height);

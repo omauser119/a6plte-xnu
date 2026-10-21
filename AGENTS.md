@@ -922,3 +922,31 @@ Latest PHONE BOOTED image is now 4aeb3e6. GUI and sensor hardware result pending
 not established by host tests or boot ACK. Screen result question asked.
 The earlier eMMC offline/SIGBUS is not diagnosed/fixed by these graphics/input
 changes. Preserve all kernel-only/fixes-only, CPU0, USB-off, no-UART constraints.
+
+IMG_3474.HEIC is the 4aeb3e6 hardware result: ordinary spawn output and sample
+1/40 see backboardd[56]/SpringBoard[25], one thread each; no GUI or panic visible.
+User explicitly asks to follow Sweet 0046 properly and is in a hurry. A complete
+reread identified incompatible extra restrictions in our adaptation: 0046
+acknowledges optional selectors with zero replies, preserves caller reply sizes,
+accepts SwapEnd without a single matching outstanding Begin token, returns
+immediately from software SwapWait and skips empty/missing unsupported layers.
+Our Unsupported/BadArgument/timeout replies broke those contracts; fix them
+without new diagnostics. This is a concrete API mismatch, not proof that the
+photo PCs identify any particular failing selector. Do not inspect user OS files.
+
+Next native source restores those 0046/0056 contracts, including bounded
+out-of-line zeros and unchanged scalar/structure reply lengths. Standard reply
+data remains real (ports/geometry/swaps); optional zero replies do not fabricate
+GPU/event objects. Default-surface requests no longer require scalar layer zero.
+Retain each usable pending layer and release replaced/unsupported ones safely.
+Surface parentID again has 0046 metadata semantics, with independent allocation
+rather than requiring a live alias parent. Use 4096 ID slots as 0046, removing
+the extra 256-client-mapping limit, and a bounded 256 MiB per-allocation/pool
+budget instead of 64 MiB (0046's original pool was 1536 MiB). Geometry/pixel
+bounds, zeroing, actual 16-KiB signatures, own HID, panic console and all board
+constraints remain. No new logs, userspace changes, UART, SMP or USB networking.
+Actual client/submit ASan/UBSan tests exercise optional selectors, unchanged
+output sizes/guards, bounded descriptor writes/short failures, nonzero default
+layers, no-fence SwapWait and token-independent retained SwapEnd. Full host
+suite and new large/overflow geometry cases passed; native build/link next.
+Expected phone already visible in fastboot; no repeated permission needed.

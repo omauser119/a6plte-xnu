@@ -17,7 +17,7 @@ fixture=r'''
 #include <vector>
 #include <cstdio>
 #define A6PLTE_SURFACE_MAX_DIM 16384
-#define A6PLTE_SURFACE_MAX_ALLOC (64u<<20)
+#define A6PLTE_SURFACE_MAX_ALLOC (256u<<20)
 #define A6PLTE_SURFACE_ROW_ALIGN 64
 #define A6PLTE_SURFACE_MAX_PLANES 20
 #define A6PLTE_SURFACE_RESULT_SIZE 0xa68
@@ -56,6 +56,8 @@ int main(){
  planes.objects.resize(21,&plane);assert(a6_surface_layout(&s,&d)==kIOReturnBadArgument);
  d.values["IOSurfacePlaneInfo"]=&width;assert(a6_surface_layout(&s,&d)==kIOReturnBadArgument);d.values.erase("IOSurfacePlaneInfo");
  OSDictionary opaque;OSNumber page(4096);opaque.values["IOSurfaceAllocSize"]=&page;assert(!a6_surface_layout(&s,&opaque) && s.allocSize==4096);
+ OSNumber large(128u<<20),over((256u<<20)+4096);opaque.values["IOSurfaceAllocSize"]=&large;assert(!a6_surface_layout(&s,&opaque) && s.allocSize==(128u<<20));
+ opaque.values["IOSurfaceAllocSize"]=&over;assert(a6_surface_layout(&s,&opaque)==kIOReturnNoMemory);
  s=A6Surface{};assert(!a6_surface_layout(&s,&d));s.id=42;s.planeCount=20;
  for(unsigned i=0;i<20;++i)s.planes[i]={64,32,256,8192*i,8192,4,1,1};
  Mapping pixels{0x12340000},state{0x56780000};A6SurfaceRef ref{&pixels,&state};uint8_t out[0xa68+32];memset(out,0xa5,sizeof(out));

@@ -16,8 +16,8 @@ phone evidence; a successful fastboot transfer does not establish either.
 | `IOWatchDogTimer` (`A6PLTEWatchdog`) | Native IOKit diagnostic timer; records requests and expiry count, prints an expiry message | No hardware watchdog, reset register, panic or reboot on expiry |
 | `AppleKeyStore` | Stub state queries 17/35 return bounded DER; selector 7 reports unlocked state, 14 returns system handle, 101 consumes an assertion | No SEP, hardware keys, keybag encryption or cryptographic operations |
 | `AppleSmartBattery` | Explicit IOPMPowerSource stub reporting 100%, installed, not charging | No fuel-gauge measurement; marked `A6Stub` and `A6ActualChargeMeasured=false` |
-| `IOCoreSurfaceRoot` / `IOSurfaceRootUserClient` | iOS 16 creation/limits, ID and Mach-port lookup, shared pixel/state mappings, cached-client result, lock/seed traps and lifetime management | 64 MiB per allocation/pool, 256 mappings per client; accelerator, shared-event and optional attachment operations unsupported |
-| `AppleCLCD` / `IOMobileFramebufferUserClient` | Native type-zero client, display geometry, default BGRA surface, four-layer CPU composition/scaling, retained swaps, completion wait and software vsync notifications | Software subset, default 10 Hz present / 60 Hz notifications; no GPU, mode switching or hardware VBL interrupt |
+| `IOCoreSurfaceRoot` / `IOSurfaceRootUserClient` | iOS 16 creation/limits, ID and Mach-port lookup, shared pixel/state mappings, cached-client result, lock/seed traps and lifetime management | 256 MiB allocation/pool budget, 4096 ID slots; optional methods acknowledge with zero results as in 0046, without GPU/event objects |
+| `AppleCLCD` / `IOMobileFramebufferUserClient` | Native type-zero client, display geometry, default BGRA surface, four-layer CPU composition/scaling, retained asynchronous swaps and software vsync notifications | Software subset, default 10 Hz present / 60 Hz notifications; no GPU, mode switching or hardware VBL interrupt |
 
 The graphics protocol is adapted from the author's
 [0046 implementation](https://github.com/dipa-studio/ios-sweet/blob/425b25102b6a9ee4b68fb2b9ca5d6a086b8a4116/xnu/patches/0046-sweet-iosurface-iomfb.patch),
@@ -29,7 +29,18 @@ panel memory as a falsely advertised 32-bit surface: clients share a real BGRA
 software default surface, and the presenter converts it to the inherited panel's
 actual pixel format. Pending swaps retain their surface objects until replaced;
 port-held objects reserve their IDs, and client mappings/task references have
-bounded lifetimes. Parent buffers retain their storage owner and quota.
+bounded lifetimes. As in 0046, parentID is returned as metadata and each new
+surface owns independent storage; it is not rejected for naming an absent
+parent or forced to alias another allocation.
+
+Optional method replies now follow 0046's software compatibility contract:
+zero scalar/structure values with the original requested wire lengths, including
+bounded out-of-line buffers. They do not return fabricated accelerator ports
+or hardware capabilities. SwapEnd accepts the complete bounded record without
+requiring a single matching outstanding SwapBegin; missing/empty and unsupported
+layers are skipped while retained usable layers proceed. SwapWait acknowledges
+asynchronous presentation as in 0046/0056, rather than imposing a hardware fence
+and timeout on the software latest-frame queue. No selector logging was added.
 
 After a non-black full-canvas frame from backboardd/SpringBoard has actually
 been presented, ordinary console stores stop touching the screen. Logging
