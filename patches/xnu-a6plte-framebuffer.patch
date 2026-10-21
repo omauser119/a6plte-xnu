@@ -2702,6 +2702,22 @@ index f2bd38e..50625c0 100644
  		size_t  uiolen;
  		user_ssize_t    rlen;
  		off_t   pgoff;
+diff --git c/bsd/nfs/gss/ccrypto.c w/bsd/nfs/gss/ccrypto.c
+index 64239e2..91b28fa 100644
+--- c/bsd/nfs/gss/ccrypto.c
++++ w/bsd/nfs/gss/ccrypto.c
+@@ -105,7 +105,11 @@ ccsha1_di(void)
+ 	if (g_crypto_funcs) {
+ 		return g_crypto_funcs->ccsha1_di;
+ 	}
++#if A6PLTE
++	return &ccsha1_ltc_di;
++#else
+ 	return NULL;
++#endif
+ }
+ 
+ void
 diff --git c/bsd/nfs/nfs_serv.c w/bsd/nfs/nfs_serv.c
 index 6ae9b6b..8bda864 100644
 --- c/bsd/nfs/nfs_serv.c
@@ -5051,7 +5067,7 @@ index 5fb0a52..899feee 100644
 +iokit/Kernel/arm/A6Input.c optional a6plte
 +iokit/Kernel/arm/A6HIDWire.c optional a6plte
 diff --git c/libkern/conf/files w/libkern/conf/files
-index ece14c7..b441a1b 100644
+index ece14c7..b01f881 100644
 --- c/libkern/conf/files
 +++ w/libkern/conf/files
 @@ -99,6 +99,11 @@ libkern/crypto/corecrypto_des.c			optional crypto
@@ -5066,11 +5082,12 @@ index ece14c7..b441a1b 100644
  libkern/crypto/corecrypto_rsa.c		    optional crypto
  libkern/crypto/corecrypto_chacha20poly1305.c	optional	crypto
  
-@@ -136,3 +141,6 @@ libkern/libclosure/runtime.cpp      optional config_blocks
+@@ -136,3 +141,7 @@ libkern/libclosure/runtime.cpp      optional config_blocks
  libkern/libclosure/libclosuredata.c optional config_blocks
  
  libkern/compression/compression.c	standard
 +
++libkern/crypto/a6plte_sha1_digest.c optional a6plte
 +libkern/crypto/a6plte_sha512.c optional a6plte
 +libkern/crypto/a6plte_sha512_digest.c optional a6plte
 diff --git c/libkern/crypto/a6plte_aes/SOURCE.txt w/libkern/crypto/a6plte_aes/SOURCE.txt
@@ -8010,6 +8027,79 @@ index 0000000..7085d79
 +void a6_md5_update(MD5_CTX *, const void *, unsigned int);
 +void a6_md5_final(unsigned char [MD5_DIGEST_LENGTH], MD5_CTX *);
 +#endif
+diff --git c/libkern/crypto/a6plte_sha1_digest.c w/libkern/crypto/a6plte_sha1_digest.c
+new file mode 100644
+index 0000000..1b49617
+--- /dev/null
++++ w/libkern/crypto/a6plte_sha1_digest.c
+@@ -0,0 +1,67 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/* Scalar SHA-1 for the native ccdigest ABI when no corecrypto kext is loaded. */
++#include <corecrypto/ccdigest.h>
++#include <corecrypto/ccsha1.h>
++
++void ccdigest_final_64be(const struct ccdigest_info *, ccdigest_ctx_t,
++    unsigned char *);
++
++static const uint32_t initial_state[5] = {
++    0x67452301U, 0xefcdab89U, 0x98badcfeU, 0x10325476U, 0xc3d2e1f0U,
++};
++
++static uint32_t
++rol(uint32_t value, unsigned bits)
++{
++    return (value << bits) | (value >> (32 - bits));
++}
++
++static void
++compress(ccdigest_state_t state, size_t blocks, const void *data)
++{
++    uint32_t *h = ccdigest_u32(state);
++    const uint8_t *p = data;
++
++    while (blocks--) {
++        uint32_t w[16];
++        for (unsigned i = 0; i < 16; ++i) {
++            w[i] = (uint32_t)p[4 * i] << 24 |
++                (uint32_t)p[4 * i + 1] << 16 |
++                (uint32_t)p[4 * i + 2] << 8 | p[4 * i + 3];
++        }
++        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
++        for (unsigned i = 0; i < 80; ++i) {
++            if (i >= 16) {
++                w[i & 15] = rol(w[(i - 3) & 15] ^ w[(i - 8) & 15] ^
++                    w[(i - 14) & 15] ^ w[i & 15], 1);
++            }
++            uint32_t f, k;
++            if (i < 20) {
++                f = (b & c) | (~b & d); k = 0x5a827999U;
++            } else if (i < 40) {
++                f = b ^ c ^ d; k = 0x6ed9eba1U;
++            } else if (i < 60) {
++                f = (b & c) | (b & d) | (c & d); k = 0x8f1bbcdcU;
++            } else {
++                f = b ^ c ^ d; k = 0xca62c1d6U;
++            }
++            uint32_t next = rol(a, 5) + f + e + k + w[i & 15];
++            e = d; d = c; c = rol(b, 30); b = a; a = next;
++        }
++        h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
++        cc_clear(sizeof(w), w);
++        p += CCSHA1_BLOCK_SIZE;
++    }
++}
++
++const struct ccdigest_info ccsha1_ltc_di = {
++    .output_size = CCSHA1_OUTPUT_SIZE,
++    .state_size = CCSHA1_STATE_SIZE,
++    .block_size = CCSHA1_BLOCK_SIZE,
++    .oid_size = ccoid_sha1_len,
++    .oid = CC_DIGEST_OID_SHA1,
++    .initial_state = initial_state,
++    .compress = compress,
++    .final = ccdigest_final_64be,
++    .impl = CC_IMPL_SHA1_LTC,
++};
 diff --git c/libkern/crypto/a6plte_sha512.c w/libkern/crypto/a6plte_sha512.c
 new file mode 100644
 index 0000000..d44ebc1
@@ -8356,6 +8446,73 @@ index d46815b..3624f27 100644
  	g_crypto_funcs->random_kmem_init_fn(ctx);
 +#endif
  }
+diff --git c/libkern/crypto/corecrypto_sha1.c w/libkern/crypto/corecrypto_sha1.c
+index 5fd982b..252e21a 100644
+--- c/libkern/crypto/corecrypto_sha1.c
++++ w/libkern/crypto/corecrypto_sha1.c
+@@ -2,7 +2,20 @@
+ #include <libkern/crypto/sha1.h>
+ #include <kern/debug.h>
+ #include <corecrypto/ccdigest.h>
++#if A6PLTE
++#include <corecrypto/ccsha1.h>
++#endif
+ 
++static const struct ccdigest_info *
++SHA1DigestInfo(void)
++{
++#if A6PLTE
++	if (!g_crypto_funcs) {
++		return &ccsha1_ltc_di;
++	}
++#endif
++	return g_crypto_funcs->ccsha1_di;
++}
+ 
+ static uint64_t
+ getCount(SHA1_CTX *ctx)
+@@ -40,9 +53,14 @@ SHA1ToDi(const struct ccdigest_info *di, SHA1_CTX *sha1_ctx, struct ccdigest_ctx
+ void
+ SHA1Init(SHA1_CTX *ctx)
+ {
+-	const struct ccdigest_info *di = g_crypto_funcs->ccsha1_di;
++	const struct ccdigest_info *di = SHA1DigestInfo();
+ 	ccdigest_di_decl(di, di_ctx);
+ 
++#if A6PLTE
++	if (!g_crypto_funcs) {
++		ccdigest_init(di, di_ctx);
++	} else
++#endif
+ 	g_crypto_funcs->ccdigest_init_fn(di, di_ctx);
+ 
+ 	DiToSHA1(di, di_ctx, ctx);
+@@ -51,10 +69,15 @@ SHA1Init(SHA1_CTX *ctx)
+ void
+ SHA1Update(SHA1_CTX *ctx, const void *data, size_t len)
+ {
+-	const struct ccdigest_info *di = g_crypto_funcs->ccsha1_di;
++	const struct ccdigest_info *di = SHA1DigestInfo();
+ 	ccdigest_di_decl(di, di_ctx);
+ 
+ 	SHA1ToDi(di, ctx, di_ctx);
++#if A6PLTE
++	if (!g_crypto_funcs) {
++		ccdigest_update(di, di_ctx, len, data);
++	} else
++#endif
+ 	g_crypto_funcs->ccdigest_update_fn(di, di_ctx, len, data);
+ 	DiToSHA1(di, di_ctx, ctx);
+ }
+@@ -62,7 +85,7 @@ SHA1Update(SHA1_CTX *ctx, const void *data, size_t len)
+ void
+ SHA1Final(void *digest, SHA1_CTX *ctx)
+ {
+-	const struct ccdigest_info *di = g_crypto_funcs->ccsha1_di;
++	const struct ccdigest_info *di = SHA1DigestInfo();
+ 	ccdigest_di_decl(di, di_ctx);
+ 
+ 	SHA1ToDi(di, ctx, di_ctx);
 diff --git c/libkern/crypto/corecrypto_sha2.c w/libkern/crypto/corecrypto_sha2.c
 index 7392f0c..ee42720 100644
 --- c/libkern/crypto/corecrypto_sha2.c

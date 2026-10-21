@@ -67,7 +67,7 @@ if source in ('pexpert/arm/a6plte/early.c', 'pexpert/arm/a6plte/fb.c'):
     flags += ['-fno-jump-tables'] # No absolute string/dispatch tables before MMU.
 assembly=source.endswith('/genassym.c')
 if assembly: flags+=['-fno-integrated-as']
-if source.startswith(('iokit/Kernel/arm/A6HID', 'iokit/Kernel/arm/A6Input')) or source in ('pexpert/arm/a6plte/early.c','pexpert/arm/a6plte/fb.c','osfmk/prng/a6plte_prng.c','libkern/crypto/a6plte_kmem_rng.c','libkern/crypto/a6plte_sha512.c','libkern/crypto/a6plte_sha512_digest.c','iokit/Kernel/arm/A6PlatformServices.cpp','iokit/Kernel/arm/A6GraphicsLayout.c') or source.startswith(('libkern/crypto/a6plte_aes/','bsd/dev/a6plte/')):
+if source.startswith(('iokit/Kernel/arm/A6HID', 'iokit/Kernel/arm/A6Input')) or source in ('pexpert/arm/a6plte/early.c','pexpert/arm/a6plte/fb.c','osfmk/prng/a6plte_prng.c','libkern/crypto/a6plte_kmem_rng.c','libkern/crypto/a6plte_sha1_digest.c','libkern/crypto/a6plte_sha512.c','libkern/crypto/a6plte_sha512_digest.c','iokit/Kernel/arm/A6PlatformServices.cpp','iokit/Kernel/arm/A6GraphicsLayout.c') or source.startswith(('libkern/crypto/a6plte_aes/','bsd/dev/a6plte/')):
     flags+=['-mgeneral-regs-only','-mstrict-align'] # Early console and bootstrap crypto: scalar, alignment-safe accesses.
 if source.endswith('.s'):
     flags+=['-x','assembler-with-cpp','-DASSEMBLER']

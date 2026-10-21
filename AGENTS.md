@@ -434,3 +434,20 @@ reg02000018 val40. Do not revert current code or diagnose the latest build from
 this older photograph. Latest actual image remains 80a9d97 boot ACK; current
 physical touch/map2 result still pending. Photo converted locally for reading
 only; never add the image to Git or use UART.
+
+IMG_3490.HEIC is current (EXIF 2026-10-21 13:18:29). Native launchd has begun
+executing and prints its own libxpc/launchd journal, so this is beyond the old
+dyld cache refusal. Kernel data abort PC 0xfffffff0078b1a30, LR
+0xfffffff007be1d7c, ESR 0x96000005, FAR 0x28, X22=0 matches the actually booted
+80a9d97 SHA1Init/sha1_init+0x20: load g_crypto_funcs (NULL), then ccsha1_di at
+offset 0x28. No external corecrypto kext is loaded; existing SHA2/MD5 fallbacks
+did not cover legacy SHA1. Add real scalar SHA1 ccdigest descriptor and route
+legacy init/update/final plus ccsha1_di() to it only without a provider. Keep
+native ccdigest streaming/finalization, SHA1_CTX ABI and provider callbacks.
+No hash/signature checks removed and no new diagnostic-only code. All host
+tests pass, including 478 actual-wrapper/actual-ccdigest vectors, null/present
+provider, million-byte input, padding/alignment/chunks/guards and Final_r.
+Original wrapper negative control reproduces the NULL dereference. All three
+changed native units compile against real generated 8796 headers. Native full
+link/build and hardware result pending. CPU0, USB off, userdata/launchd and
+UART prohibition unchanged. Do not claim physical touch from this photograph.
