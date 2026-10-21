@@ -451,3 +451,17 @@ Original wrapper negative control reproduces the NULL dereference. All three
 changed native units compile against real generated 8796 headers. Native full
 link/build and hardware result pending. CPU0, USB off, userdata/launchd and
 UART prohibition unchanged. Do not claim physical touch from this photograph.
+
+aa5824e: ALL Actions 39585752726 passed (Apple Clang, NOUNDEFS, host regressions
+and packaging). Verified downloaded kernel SHA256
+71aabac8a533922bed09deb44c21e76951c653318a1f7ec303036c66ef077673.
+Native linked ccsha1_ltc_di descriptor has the real 20/20/64-byte output/state/
+block sizes, SHA1 OID and scalar compression, using Apple's ccdigest_final_64be.
+READY image build/verified-aa5824e/images/xnu-8796-userdata-cpu0-boot.img,
+17111040 bytes, SHA256
+94894df4eb41bfd76dca060c0c48b0a2b1d84d96b12085b54507d6227f9495ba.
+Source/run/archive/kernel/image receipts and complete CRC/profile checks pass.
+NOT BOOTED yet: expected phone absent from fastboot. Async hardware-reset
+readiness question pending. Load this verified image when the phone returns;
+no new pasta approval needed. No flash, new diagnostics, UART, USB networking
+or SMP. Latest actual phone boot remains 80a9d97 until a new boot ACK.
