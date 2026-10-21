@@ -465,3 +465,12 @@ NOT BOOTED yet: expected phone absent from fastboot. Async hardware-reset
 readiness question pending. Load this verified image when the phone returns;
 no new pasta approval needed. No flash, new diagnostics, UART, USB networking
 or SMP. Latest actual phone boot remains 80a9d97 until a new boot ACK.
+
+User returned the phone, then reconnected USB when the host saw no USB device.
+Native aa5824e image above was rechecked (kernel/image SHA256, complete CRC,
+CPU0, userdata/launchd, USB off) and expected phone/hfs-map-v2 verified.
+fastboot boot accepted this exact image: send 0.382 s, boot 0.078 s, total
+0.478 s. Private log artifacts/boot-aa5824e-cpu0.private.log; boot receipt in
+build/verified-aa5824e/boot-receipt.json. aa5824e is now latest PHONE BOOTED
+image, not a flash. Actual framebuffer/launchd result pending; no new hardware
+success or physical touch claim from fastboot ACK. Keep fixes-only constraint.
