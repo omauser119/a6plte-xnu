@@ -1003,3 +1003,36 @@ required; Linux probes only encounter unavailable Apple allocator builtins.
 No new kernel has been built or booted for this copy yet. Latest actual phone
 boot remains 02ec710. User asks when build/boot: send to Actions immediately
 after the remaining checks, then verify and transiently boot the actual result.
+
+6a4b7ee: ALL three jobs in Actions 39651842413 independently verified successful
+(native Apple Clang/NOUNDEFS, complete host suite including copied-source
+provenance, and packaging). Downloaded kernel SHA256
+c04e6b16fc9033cf1f06186ba895077d1d23067d8a755f2738ab9d0685722d52.
+Immutable ready image build/verified-6a4b7ee/images/xnu-8796-userdata-cpu0-boot.img,
+17242112 bytes, SHA256
+58e041c7f06ae8915654a2d04851d33300d714230ee466d14cfd274936c5de4a.
+Native copied AppleCLCD swap/present/scanout, both externalMethod clients,
+surface allocation and scanout symbols checked; complete CRC, unique LC_UUID,
+CPU0/userdata/launchd/USB-off profile passed again. Image receipt records exact
+source/run/archive/kernel hashes and expected standalone boot identity.
+
+Expected phone 4194f2ce and hfs-map-v2 loader were present, but BOTH fastboot boot
+attempts failed during Sending with `Status read failed (Protocol error)`.
+Host USB journal also reports disconnect/re-enumeration and descriptor error -71.
+No boot ACK and no flash; do NOT call 6a4b7ee booted. Latest actual boot remains
+02ec710. Failure logs artifacts/boot-6a4b7ee-cpu0.private.log and
+artifacts/boot-6a4b7ee-cpu0-retry.private.log; failed receipt beside ready image.
+USB reconnection question pending. As soon as connection is restored, verify
+expected phone/loader and exact ready image hash, then fastboot boot immediately.
+No new permission or kernel build is needed. Keep all board/user constraints.
+
+IMG_3503.HEIC (EXIF 2026-10-21 21:39:32) shows normal iOS spawn messages and
+process sample 1/40: backboardd[56] and SpringBoard[25], each one thread.
+No panic or GUI is visible. The photo contains no kernel-build identity, so do
+not assign it to 6a4b7ee: neither attempted transfer received a boot ACK.
+Fastboot is now empty and the previous USB sysfs device is absent. Hardware-reset
+and USB-reconnection question pending; still boot the exact checked ready image
+when the expected phone returns, without another build/permission question.
+User again reports cmd21/reg02000018/value00000040. That is a QUP completion
+timeout, not a sensor integrity response; physical touch remains unconfirmed.
+No additional input code has been changed based only on this repeated status.

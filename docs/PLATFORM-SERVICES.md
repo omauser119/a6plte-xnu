@@ -1,44 +1,56 @@
 # A6PLTE platform services
 
-These are built-in board implementations, published as children of
-`A6PLTEPlatformExpert`. They use XNU's actual IOService, IOUserClient, IOTimerEventSource,
+These are built-in board implementations. Most are published as children of
+`A6PLTEPlatformExpert`; `IOCoreSurfaceRoot` matches `IOResources` through the
+native IOKit catalogue. They use XNU's actual IOService, IOUserClient, IOTimerEventSource,
 IOBufferMemoryDescriptor and IODeviceMemory classes. They do not load Apple's
 closed platform kexts. The kernel build and actual phone execution are separate
 checks. On SM-A605FN the user confirmed `IO services 31 / watchdog timeout: no reset`
 with a continuing sleep/wakeup counter from source `0cf5061`. All four startup
 paths, the native surface allocation smoke check, and diagnostic timer expiry
-therefore completed on the phone. The f72b97a kernel adds an iOS 16 graphics protocol subset and has been sent
-to the phone. Actual GUI output and private-framework operation still require
-phone evidence; a successful fastboot transfer does not establish either.
+therefore completed on the phone. Source `6a4b7ee` replaces the earlier graphics
+implementation with a reproducible copy of Sweet 0046 and a separate board
+adaptation. Its complete native build, host regressions and packaging passed.
+Actual GUI output and private-framework operation still require phone evidence;
+a successful fastboot transfer does not establish either.
 
 | Service | Implemented behavior | Limit |
 | --- | --- | --- |
 | `IOWatchDogTimer` (`A6PLTEWatchdog`) | Native IOKit diagnostic timer; records requests and expiry count, prints an expiry message | No hardware watchdog, reset register, panic or reboot on expiry |
 | `AppleKeyStore` | Stub state queries 17/35 return bounded DER; selector 7 reports unlocked state, 14 returns system handle, 101 consumes an assertion | No SEP, hardware keys, keybag encryption or cryptographic operations |
 | `AppleSmartBattery` | Explicit IOPMPowerSource stub reporting 100%, installed, not charging | No fuel-gauge measurement; marked `A6Stub` and `A6ActualChargeMeasured=false` |
-| `IOCoreSurfaceRoot` / `IOSurfaceRootUserClient` | iOS 16 creation/limits, ID and Mach-port lookup, shared pixel/state mappings, cached-client result, lock/seed traps and lifetime management | 256 MiB allocation/pool budget, 4096 ID slots; optional methods acknowledge with zero results as in 0046, without GPU/event objects |
-| `AppleCLCD` / `IOMobileFramebufferUserClient` | Native type-zero client, display geometry, default BGRA surface, four-layer CPU composition/scaling, retained asynchronous swaps and software vsync notifications | Software subset, default 10 Hz present / 60 Hz notifications; no GPU, mode switching or hardware VBL interrupt |
+| `IOCoreSurfaceRoot` / `IOSurfaceRootUserClient` | Copied 0046 creation/limits, ID and Mach-port lookup, shared pixel/state mappings, cached-client result and lock/seed traps | Original 256 MiB per allocation, 1536 MiB pool and 4096 ID slots; optional methods acknowledge with zero inline results, without GPU/event objects |
+| `AppleCLCD` / `IOMobileFramebufferUserClient` | Copied type-zero client, geometry, default BGRA surface, software layer row copies and vsync notifications | Latest-record queue, default 10 Hz present / 60 Hz notifications; no GPU, scaling, alpha composition, mode switching or hardware VBL interrupt |
 
-The graphics protocol is adapted from the author's
+The three graphics source files are extracted directly from the author's
 [0046 implementation](https://github.com/dipa-studio/ios-sweet/blob/425b25102b6a9ee4b68fb2b9ca5d6a086b8a4116/xnu/patches/0046-sweet-iosurface-iomfb.patch),
 with the cached-client convention from
 [0068](https://github.com/dipa-studio/ios-sweet/blob/425b25102b6a9ee4b68fb2b9ca5d6a086b8a4116/xnu/patches/0068-sweet-surface-lookup-cached.patch).
+The original patch files are stored byte-for-byte under `vendor/ios-sweet`.
+`scripts/apply-sweet-0046.py` checks their hashes, extracts and mechanically
+renames the files, then applies `patches/0046-a6plte-adaptation.patch`.
+Its `--verify xnu` mode reconstructs and byte-compares the compiled sources.
+The adaptation uses the timer/latest-record queue from
+[0056](https://github.com/dipa-studio/ios-sweet/blob/425b25102b6a9ee4b68fb2b9ca5d6a086b8a4116/xnu/patches/0056-sweet-fb-throttled-present.patch),
+retains the original selector bodies and row-copy path, and adds board scanout
+and allocation/integer/lifetime guards. These files are excluded from the
+aggregate base patch so the copied implementation cannot be applied twice.
 The board publishes a real `disp0` device-tree nub, `display-subsystem` type,
 and 1080x2220 canvas. `AppleCLCD` matches that nub. It never exposes the RGB888
 panel memory as a falsely advertised 32-bit surface: clients share a real BGRA
 software default surface, and the presenter converts it to the inherited panel's
-actual pixel format. Pending swaps retain their surface objects until replaced;
-port-held objects reserve their IDs, and client mappings/task references have
-bounded lifetimes. As in 0046, parentID is returned as metadata and each new
+actual pixel format. The timer retains the latest raw swap record, not its
+surface objects; IDs are resolved when that record is presented, as in 0056.
+As in 0046, parentID is returned as metadata and each new
 surface owns independent storage; it is not rejected for naming an absent
 parent or forced to alias another allocation.
 
 Optional method replies now follow 0046's software compatibility contract:
-zero scalar/structure values with the original requested wire lengths, including
-bounded out-of-line buffers. They do not return fabricated accelerator ports
+zero inline scalar/structure values with the original requested wire lengths.
+They do not return fabricated accelerator ports
 or hardware capabilities. SwapEnd accepts the complete bounded record without
 requiring a single matching outstanding SwapBegin; missing/empty and unsupported
-layers are skipped while retained usable layers proceed. SwapWait acknowledges
+layers are skipped while usable layers proceed. SwapWait acknowledges
 asynchronous presentation as in 0046/0056, rather than imposing a hardware fence
 and timeout on the software latest-frame queue. No selector logging was added.
 
@@ -52,8 +64,9 @@ The default IOSurface also has to act as scanout memory when a client draws
 directly without submitting `SwapEnd`. The A6 BGRA shadow is now refreshed at
 the presentation rate after an eligible backboardd/SpringBoard client obtains
 it. Untouched/black initial storage preserves the boot console. The first real
-colored full frame takes over, subsequent black frames remain valid, and layer
-swaps take over from direct refresh. Waiting for a swap before one was queued
+colored full frame takes over and subsequent black frames remain valid. Direct
+shadow refresh continues after layer swaps, matching physical scanout memory.
+Waiting for a swap before one was queued
 is a successful empty wait. These fixes do not establish that the frameworks
 have reached this path on the phone.
 
