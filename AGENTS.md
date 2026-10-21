@@ -741,3 +741,18 @@ zero-length data, repeat boot/firmware preservation, unrelated metadata and
 allocation/publication/refcount errors. Full host suite/native CI next. Phone
 hardware-reset readiness question pending; boot verified image if fastboot sees
 the expected phone without asking again. CPU0, USB-off, no UART, no flashing.
+
+1909819: ALL Actions 39609959887 passed (Apple Clang/NOUNDEFS, full host
+regressions, packaging). Actual linked kernel contains no-effaceable-storage;
+prior bindfs/boot identity/platform/SHA1 symbols verified. Kernel SHA256
+8c0779c65ed8fe2ff1fb97bcae95863a03a9c1e2881ad425f3f9985f1fbf162a.
+Image build/verified-1909819/images/xnu-8796-userdata-cpu0-boot.img,
+17111040 bytes, SHA256
+4405ea7ab91264b9d44d1315aa77855c27a85374351a893819673dbdda7ec3ee.
+Successful source/archive/kernel/image hashes, complete CRC/UUID/CPU0/userdata/
+USB-off profile checked. Image receipt in build/verified-1909819. Phone was
+absent from fastboot at packaging completion; NOTHING BOOTED OR FLASHED for
+1909819. Latest actually booted kernel remains ada2366. Hardware-reset/readiness
+question asked after concrete image ready. Boot this exact verified image once
+expected phone/hfs-map-v2 are available, no extra permission required. Actual
+MKB result unverified. Preserve kernel-only/fixes-only and prepared OS files.
