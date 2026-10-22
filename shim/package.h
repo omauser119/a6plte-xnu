@@ -2,6 +2,8 @@
 #ifndef A6_PACKAGE_H
 #define A6_PACKAGE_H
 #include <stdint.h>
+/* Bound the initial contiguous RAM donation to the native bootstrap tables. */
+#define A6_XNU_MAX_MEMORY UINT64_C(0x40000000)
 struct a6_xnu_package {
     char magic[8]; uint32_t version, header;
     uint64_t virt, entry, span, bytes;

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
 #include "fdt.h"
+#include "package.h"
 static uint32_t be32(const void *v) { const uint8_t *p=v; return (uint32_t)p[0]<<24|(uint32_t)p[1]<<16|(uint32_t)p[2]<<8|p[3]; }
 static uint64_t cells(const uint8_t *p,unsigned n) { return n==2 ? (uint64_t)be32(p)<<32|be32(p+4) : be32(p); }
 static int eq(const char *a,const char *b) { while(*a && *a==*b) { ++a;++b; } return *a==*b; }
@@ -79,15 +80,48 @@ int platform_parse(const void *blob,struct platform *out) {
 }
 static int overlap(uint64_t a,uint64_t n,struct range r) { return n && r.size && a<r.base+r.size && r.base<a+n; }
 int platform_alloc(const struct platform *p,uint64_t size,uint64_t align,struct range image,uint64_t *result) {
-    if(!size || !align || (align&(align-1)) || size>0x10000000) return -1;
+    if(!p || !result || p->nr_ram>16 || p->nr_reserved>96 ||
+       !size || !align || (align&(align-1)) || align>0x100000000ULL ||
+       size>A6_XNU_MAX_MEMORY || image.size>UINT64_MAX-image.base) return -1;
+    for(unsigned j=0;j<p->nr_reserved;++j)
+        if(p->reserved[j].size>UINT64_MAX-p->reserved[j].base) return -1;
     for(unsigned i=0;i<p->nr_ram;++i) {
-        uint64_t a=(p->ram[i].base+align-1)&~(align-1),end=p->ram[i].base+p->ram[i].size;
+        uint64_t base=p->ram[i].base;
+        if(p->ram[i].size>UINT64_MAX-base) return -1;
+        uint64_t end=base+p->ram[i].size;
         if(end>0x100000000ULL) end=0x100000000ULL;
+        if(base>=end) continue;
+        uint64_t a=(base+align-1)&~(align-1);
         for(;a<end && size<=end-a;a+=align) {
             int bad=overlap(a,size,image);
             for(unsigned j=0;j<p->nr_reserved;++j) bad|=overlap(a,size,p->reserved[j]);
             if(p->initrd_end>p->initrd_start) bad|=overlap(a,size,(struct range){p->initrd_start,p->initrd_end-p->initrd_start});
             if(!bad) { *result=a; return 0; }
+        }
+    }
+    return -1;
+}
+int platform_alloc_xnu(const struct platform *p,struct range image,struct range *out) {
+    if(!out) return -1;
+    *out=(struct range){0};
+    if(!p || p->nr_reserved>=96 || !p->fb.base || !p->fb.size ||
+       p->fb.size>UINT64_MAX-(uintptr_t)p->fb.base) return -1;
+    struct platform bounded=*p;
+    /* Native start.s installs the framebuffer's identity L2 table separately.
+     * Until that map is retired, kernel RAM must use different L1 entries;
+     * otherwise the framebuffer mapping would replace a live kernel table.
+     * Reserve the covering 1-GiB entries, not just the visible pixel bytes. */
+    uint64_t fb_base=(uintptr_t)p->fb.base,fb_end=fb_base+p->fb.size;
+    uint64_t first=fb_base&~UINT64_C(0x3fffffff);
+    if(fb_end>UINT64_MAX-0x3fffffff) return -1;
+    uint64_t end=(fb_end+0x3fffffff)&~UINT64_C(0x3fffffff);
+    bounded.reserved[bounded.nr_reserved++]=(struct range){first,end-first};
+    /* Use only a whole verified window within a real bank, never firmware
+     * holes. Keep the old 256-MiB fallback on fragmented/smaller devices. */
+    for(uint64_t size=A6_XNU_MAX_MEMORY;size>=0x10000000;size-=0x08000000) {
+        uint64_t address;
+        if(!platform_alloc(&bounded,size,0x200000,image,&address)) {
+            *out=(struct range){address,size};return 0;
         }
     }
     return -1;

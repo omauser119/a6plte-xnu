@@ -1335,3 +1335,47 @@ return it again. ac56aaf remains the latest actual boot until a new ACK.
 Full local scripts/test.sh passed (artifacts/test-exec-console.private.log),
 pristine aggregate patch application and actual branch preprocessing for both
 A6PLTE=0/1 pass. Native full build/checked transient boot remain next.
+
+
+Latest user instruction (uppercase): ONLY FIXES. Do not add/extend diagnostic
+code or logging. Existing sampler stays as-is; its earlier scoped permission
+must not be used for further additions after this instruction.
+
+Source review found a separate real boot-memory limitation: shim/loader.c
+always reserves256MiB for userdata and package_layout/platform_alloc reject
+larger windows. Thus all of native userspace is limited to under256MiB despite
+real firmware RAM being3GiB. Read only the existing lk2nd DT via oem dtb and
+get_staged (no storage/user OS read): memory reg contains40000000+40000000 and
+80000000+80000000. Raw firmware DT in artifacts/firmware-memory.private.dtb.
+
+Correct kernel memory donation up to1GiB with256MiB fallback in128MiB steps,
+using only one fully validated contiguous RAM bank below4GiB. Preserve every
+firmware/FDT/image/payload reservation. Also exclude the framebuffer's ENTIRE
+1GiB L1 coverage: native start.s installs its identity L2 table separately;
+putting kernel RAM in the same L1 entry would replace that RAM identity table.
+This avoids a bootstrap regression without changing native assembly or LK.
+The1GiB cap fits the native8-page bootstrap table budget (2roots, at most2L2
+per RAM mapping plus1 framebuffer L2). BootArgs/ADT get the exact selected
+window and alignment padding; no invented RAM or crossing firmware carveouts.
+Smaller profiles retain their old fixed donation. No new diagnostics/markers,
+UART, USB, SMP, fake hardware identity or prepared-userspace changes.
+
+Actual allocator/layout ASan/UBSan tests cover1GiB ending exactly4GiB,
+768/384/256MiB fallback, exclusion of framebuffer L1 and unsorted firmware/DTB,
+image/payload ranges, refusal of fragmentation and high/overflowing addresses.
+Three new C primitives are the actual shipped source, not mock algorithms.
+Userdata bridge compiles and links; disassembly verifies xnu_load calls the
+new allocator then checked package layout. More memory corrects an artificial
+limit; do not assert the complete SpringBoard cause or working GUI until boot.
+a44f455 native/package jobs already pass; its Linux job is still in apt, do
+not cancel or pretend it passed. Do not boot a44f455 alone while preparing the
+concrete memory correction; prefer the new fully checked combined image.
+
+Full local scripts/test.sh passed (artifacts/test-boot-memory.private.log).
+The staged firmware DT lacks the boot-only simplefb node, so platform_parse
+correctly rejects it as-is. For an offline cross-check only, added the known
+90001000 RGB888/1080x2220/3240 simplefb metadata to a PRIVATE HOST COPY, kept
+all original firmware RAM/reservations, and added conservative image/DTB/payload
+reservations. This is not a device or user OS modification. The complete native
+parser/allocator accepts that copy and selects a verified1GiB window atC0000000.
+Actual selection is repeated from the live boot DT in the bridge, not hardcoded.

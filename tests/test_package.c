@@ -40,7 +40,12 @@ int main(void) {
         else assert(l.ramdisk==0);
         assert(a6_package_layout(&h,0x50000001,0x10000000,&l)!=0);
         assert(a6_package_layout(&h,UINT64_MAX-0xffff,0x10000000,&l)!=0);
-        assert(a6_package_layout(&h,0x50000000,0x20000000,&l)!=0);
+        assert(a6_package_layout(&h,0x50000000,0x40000000,&l)==0);
+        assert(l.kernel==0x50004000 && l.donated==0x3fffc000 && l.top<=0x90000000);
+        assert(a6_package_layout(&h,0xc0000000,0x40000000,&l)==0);
+        assert(l.kernel==0xc0004000 && l.kernel+l.donated==0x100000000ULL);
+        assert(a6_package_layout(&h,0xc0200000,0x40000000,&l)!=0);
+        assert(a6_package_layout(&h,0x50000000,A6_XNU_MAX_MEMORY+0x200000,&l)!=0);
         h.span=64*1024*1024;h.ramdisk_bytes=64*1024*1024;
         assert(a6_package_layout(&h,0x50000000,128*1024*1024,&l)!=0);
         assert(a6_package_layout(&h,0x50000000,256*1024*1024,&l)==0);

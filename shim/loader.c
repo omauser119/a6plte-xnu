@@ -52,13 +52,16 @@ void xnu_load(struct platform *p,const void *dtb,struct range image) {
     if(el!=4 || (sctlr&5)) FAIL("EL1 with MMU and D-cache off required");
     /* Only donate a verified contiguous free window, never all RAM across firmware carveouts. */
     uint64_t allocation,arena=h.ramdisk_bytes ? 256*1024*1024 : 128*1024*1024;
-#if A6_ROOT_USERDATA
-    arena=256*1024*1024;
-#endif
     if(p->nr_reserved>=96) FAIL("reservation table full");
     const uint8_t *d=dtb; uint32_t dtlen=(uint32_t)d[4]<<24|(uint32_t)d[5]<<16|(uint32_t)d[6]<<8|d[7];
     p->reserved[p->nr_reserved++]=(struct range){(uintptr_t)dtb,dtlen};
+#if A6_ROOT_USERDATA
+    struct range window;
+    if(platform_alloc_xnu(p,image,&window)) FAIL("no safe RAM window");
+    allocation=window.base;arena=window.size;
+#else
     if(platform_alloc(p,arena,0x200000,image,&allocation)) FAIL("no safe RAM window");
+#endif
     /* Preserve PA/VA low-21-bit alignment and reserve all ramdisk pages. */
     struct a6_xnu_layout layout;
     if(a6_package_layout(&h,allocation,arena,&layout)) FAIL("invalid bootstrap memory placement");

@@ -13,4 +13,5 @@ struct platform {
 };
 int platform_parse(const void *, struct platform *);
 int platform_alloc(const struct platform *, uint64_t, uint64_t, struct range, uint64_t *);
+int platform_alloc_xnu(const struct platform *, struct range, struct range *);
 #endif

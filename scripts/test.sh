@@ -17,6 +17,8 @@ clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_ap
 "$ROOT/artifacts/test-apple-dt"
 clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_package.c" "$ROOT/shim/package.c" -o "$ROOT/artifacts/test-package"
 "$ROOT/artifacts/test-package"
+clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_boot_memory.c" "$ROOT/shim/fdt.c" "$ROOT/shim/package.c" "$ROOT/console/fb.c" -o "$ROOT/artifacts/test-boot-memory"
+"$ROOT/artifacts/test-boot-memory"
 python3 "$ROOT/tests/test_pack.py"
 python3 "$ROOT/tests/test_hfs_image.py"
 python3 "$ROOT/tests/test_hfs_finderinfo.py"

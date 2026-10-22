@@ -22,7 +22,7 @@ int a6_package_parse(const void *data, uint64_t size, struct a6_xnu_package *h) 
     return 0;
 }
 int a6_package_layout(const struct a6_xnu_package *h,uint64_t allocation,uint64_t arena,struct a6_xnu_layout *l) {
-    if((allocation&0x1fffff) || arena>0x10000000 || arena<0x200000 ||
+    if((allocation&0x1fffff) || arena>A6_XNU_MAX_MEMORY || arena<0x200000 ||
        allocation>0x100000000ULL-arena) return -1;
     uint64_t padding=h->virt&0x1fffff;
     l->donated=arena-padding;
