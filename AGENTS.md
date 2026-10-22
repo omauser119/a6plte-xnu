@@ -1220,3 +1220,23 @@ PMU-stage dictionary acknowledgements follow 0045 independently of caller uid:
 they are software no-ops, not hardware/registry writes. The existing numeric
 diagnostic timer still requires administrator privilege. Focused actual-method
 test covers both cases; do not assume watchdogd's uid from an unknown OS image.
+
+8cf05e7: ALL three jobs of Actions 39765730667 passed. Downloaded native kernel
+archive SHA256 f755f7963f3a72d199d70518b5aaa68f57e74384cc83b2cb5f901a3d3ad74f72,
+kernel SHA256 e7d4d70d64d1c8b44172f46387e2d46a18ad223324cc6f296d92ba6d4260a49d.
+Actual linked IOWatchdog metaclass/UserClient, a6_sample_task and native Mach
+trap-name table verified. Immutable locally packaged/checked CPU0 image:
+build/verified-8cf05e7/images/xnu-8796-userdata-cpu0-boot.img, 17242112 bytes,
+SHA256 17f4d35c81e90175637dfcf20d1ed53d1a3e97598a17508c557063cdcc2770c2.
+Full CRC/native equality/NOUNDEFS/UUID/profile checks passed; source/archive/
+kernel/image and standalone boot-identity receipts retained beside the image.
+
+Expected phone 4194f2ce was in fastboot, hfs-map-v2 checked, exact frozen image
+rehashed and transiently booted at 2026-10-22T10:56:17Z. Send 0.420 s, boot
+0.078 s, total 0.507 s, both OKAY. No flash. Private log:
+artifacts/boot-8cf05e7-cpu0-20261022T105617Z.private.log. Latest PHONE BOOTED
+image is NOW 8cf05e7; a0f9161 was never booted separately. User is asked for
+SpringBoard t0 WAIT kind/cont and CALL last (repeated every 10 s), not an
+unavailable fatal photo. Do not claim resolving the SpringBoard hang or working
+GUI before hardware evidence. Use the exact 8cf05e7 kernel to symbolize any
+continuation/function address returned, with its fixed native virtual base.
