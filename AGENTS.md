@@ -1491,3 +1491,18 @@ Latest actual PHONE BOOTED image is NOWc1ff263. Working SpringBoard/GUI is
 UNCONFIRMED; do not equate fixing VFS discovery or boot ACK with working UI.
 Do not ask the user to repeat the same sampler photos. No new QUP fix was
 included in this image; QUP0x40 remains separate and unverified on hardware.
+
+User now explicitly requests the real SpringBoard error reason on framebuffer.
+This authorizes scoped exit-reason diagnostics despite the earlier fixes-only
+restriction. Show committed native reason namespace/code/flags and bounded
+kcdata text for SpringBoard/backboardd before crash delivery; missing text is
+reported as missing, not guessed from sampled PCs or heap strings. Existing
+crash scan moved after the reason report. Temporary diagnostic console handoff
+does not latch graphics_stopped; a recovered GUI can present normally. No
+userspace changes, SMP/USB startup or UART. Hardware outcome still pending.
+GUI reason parser regression executes native kcdata iterators with ASan/UBSan:
+missing/malformed/unterminated and >512-byte descriptions, 64-bit reason codes,
+normal exits, signals and process filtering pass. Actual framebuffer regression
+confirms diagnostic visibility and subsequent GUI recovery. Full host suite
+passed (artifacts/test-gui-exit.private.log). early.c native probe passed;
+kern_exit.c requires Apple Clang allocator builtins, so full native CI is required.

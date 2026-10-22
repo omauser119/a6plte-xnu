@@ -46,6 +46,11 @@ int main(void) {
     unsigned char *frame=malloc(3240*2220);assert(frame);memcpy(frame,b,3240*2220);
     a6_xnu_graphics_presented();a6_xnu_puts("hidden ordinary log\n");
     assert(!memcmp(frame,b,3240*2220) && !a6_xnu_graphics_stopped());
+    a6_xnu_diagnostic_message("GUI PROCESS EXIT: supplied reason\n");
+    assert(memcmp(frame,b,3240*2220) && !a6_xnu_graphics_stopped());
+    memcpy(frame,b,3240*2220);
+    a6_xnu_graphics_presented();a6_xnu_puts("hidden after GUI recovery\n");
+    assert(!memcmp(frame,b,3240*2220));
     a6_xnu_panic_console();assert(a6_xnu_graphics_stopped());
     a6_xnu_puts("visible panic after GUI takeover\n");
     assert(memcmp(frame,b,3240*2220));free(frame);

@@ -2313,10 +2313,65 @@ index f41b75b..f9cd670 100644
  	}
  #endif /* XNU_TARGET_OS_OSX */
 diff --git c/bsd/kern/kern_exit.c w/bsd/kern/kern_exit.c
-index 1161432..87cc30e 100644
+index 1161432..c44ec48 100644
 --- c/bsd/kern/kern_exit.c
 +++ w/bsd/kern/kern_exit.c
-@@ -1821,6 +1821,15 @@ proc_handle_critical_exit(proc_t p, int rv)
+@@ -1303,6 +1303,54 @@ exit_reason_get_string_desc(os_reason_t exit_reason)
+ 	return (char *)kcdata_iter_payload(iter);
+ }
+ 
++#if A6PLTE
++/* Report the committed reason before exception delivery can wait on ReportCrash.
++ * The reason belongs to the exiting process. Never read beyond its kcdata item
++ * or interpret arbitrary heap strings as an authoritative termination reason. */
++static void
++a6_display_gui_exit(proc_t p, int rv)
++{
++	if (strcmp(p->p_comm, "SpringBoard") && strcmp(p->p_comm, "backboardd")) {
++		return;
++	}
++	os_reason_t reason = p->p_exit_reason;
++	char description[513] = {0};
++	const char *status = "not supplied";
++	if (reason && reason->osr_kcd_buf && reason->osr_bufsize) {
++		kcdata_iter_t iter = kcdata_iter(reason->osr_kcd_buf, reason->osr_bufsize);
++		status = "missing or invalid description";
++		if (kcdata_iter_valid(iter) && kcdata_iter_type(iter) == KCDATA_BUFFER_BEGIN_OS_REASON) {
++			iter = kcdata_iter_find_type(iter, EXIT_REASON_USER_DESC);
++			if (kcdata_iter_valid(iter)) {
++				const unsigned char *text = kcdata_iter_payload(iter);
++				size_t size = kcdata_iter_size(iter);
++				size_t n = 0;
++				while (n < size && n < sizeof(description) - 1 && text[n]) {
++					description[n] = text[n] >= 32 && text[n] != 127 ? text[n] : ' ';
++					++n;
++				}
++				description[n] = 0;
++				status = n ? description : "empty description";
++			}
++		}
++	}
++	char report[896];
++	snprintf(report, sizeof(report),
++	    "\n=== GUI PROCESS EXIT: %s[%d] ===\n"
++	    "signal=%d exit_status=%d raw_status=0x%x\n"
++	    "reason_present=%d namespace=%u code=0x%llx flags=0x%llx\n"
++	    "description: %s\n"
++	    "No description means the process supplied no usable reason text.\n"
++	    "=== END GUI EXIT ===\n",
++	    p->p_comm, proc_pid(p), WTERMSIG(rv), WEXITSTATUS(rv), rv,
++	    reason != NULL, reason ? reason->osr_namespace : 0,
++	    (unsigned long long)(reason ? reason->osr_code : 0),
++	    (unsigned long long)(reason ? reason->osr_flags : 0), status);
++	extern void a6_xnu_diagnostic_message(const char *);
++	a6_xnu_diagnostic_message(report);
++}
++#endif
++
+ static int initproc_spawned = 0;
+ 
+ static int
+@@ -1821,6 +1869,15 @@ proc_handle_critical_exit(proc_t p, int rv)
  
  	sync(p, (void *)NULL, (int *)NULL);
  
@@ -2332,6 +2387,19 @@ index 1161432..87cc30e 100644
  	if (p->p_exit_reason == OS_REASON_NULL) {
  		panic_with_options(0, NULL, DEBUGGER_OPTION_INITPROC_PANIC, "%s -- no exit reason available -- (signal %d, exit status %d %s)",
  		    prefix_str, WTERMSIG(rv), WEXITSTATUS(rv), ((proc_getcsflags(p) & CS_KILLED) ? "CS_KILLED" : ""));
+@@ -1845,6 +1902,12 @@ proc_prepareexit(proc_t p, int rv, boolean_t perf_notify)
+ 	int kr = 0;
+ 	int create_corpse = FALSE;
+ 
++#if A6PLTE
++	a6_display_gui_exit(p, rv);
++	extern void a6_crash_process(proc_t, int);
++	if (WTERMSIG(rv)) a6_crash_process(p, WTERMSIG(rv));
++#endif
++
+ 	if (p->p_crash_behavior != 0 || p == initproc) {
+ 		proc_handle_critical_exit(p, rv);
+ 	}
 diff --git c/bsd/kern/kern_ktrace.c w/bsd/kern/kern_ktrace.c
 index 9f521f6..c94f527 100644
 --- c/bsd/kern/kern_ktrace.c
@@ -2424,21 +2492,6 @@ index 56f3d58..b330a1f 100644
  	return error;
  }
  
-diff --git c/bsd/kern/kern_sig.c w/bsd/kern/kern_sig.c
-index ca53f9b..51f7611 100644
---- c/bsd/kern/kern_sig.c
-+++ w/bsd/kern/kern_sig.c
-@@ -3125,6 +3125,10 @@ postsig_locked(int signum)
- 		KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_FRCEXIT) | DBG_FUNC_NONE,
- 		    proc_getpid(p), W_EXITCODE(0, signum), 3, 0, 0);
- 
-+#if A6PLTE
-+		extern void a6_crash_process(proc_t, int);
-+		a6_crash_process(p, signum & ~WCOREFLAG);
-+#endif
- 		exit_with_reason(p, W_EXITCODE(0, signum), (int *)NULL, TRUE, TRUE, 0, ut_exit_reason);
- 
- 		proc_lock(p);
 diff --git c/bsd/kern/kern_trustcache.c w/bsd/kern/kern_trustcache.c
 index 4c22764..325e2af 100644
 --- c/bsd/kern/kern_trustcache.c
@@ -10989,10 +11042,10 @@ index 0000000..731e33d
 +#endif
 diff --git c/pexpert/arm/a6plte/early.c w/pexpert/arm/a6plte/early.c
 new file mode 100644
-index 0000000..af3de2d
+index 0000000..cfa1c7c
 --- /dev/null
 +++ w/pexpert/arm/a6plte/early.c
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,181 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if defined(A6PLTE)
 +#include "fb.h"
@@ -11071,6 +11124,15 @@ index 0000000..af3de2d
 +}
 +void a6_xnu_puts(const char *s) {
 +    uint64_t flags=console_enter();while(*s) a6_xnu_putc(*s++);console_leave(flags);
++}
++/* A GUI process failure must remain visible even after console handoff.
++ * Do not latch graphics_stopped: a restarted compositor can present again. */
++void a6_xnu_diagnostic_message(const char *message) {
++    uint64_t flags=console_enter();
++    if (graphics_active && state!=DEFERRED) a6_fb_clear(&screen);
++    graphics_active=0;
++    a6_xnu_puts(message);
++    console_leave(flags);
 +}
 +void a6_xnu_graphics_presented(void) {
 +    uint64_t flags=console_enter();
@@ -11167,10 +11229,10 @@ index 0000000..af3de2d
 +#endif
 diff --git c/pexpert/arm/a6plte/early.h w/pexpert/arm/a6plte/early.h
 new file mode 100644
-index 0000000..4c66313
+index 0000000..b3e4d42
 --- /dev/null
 +++ w/pexpert/arm/a6plte/early.h
-@@ -0,0 +1,16 @@
+@@ -0,0 +1,17 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#ifndef A6_EARLY_H
 +#define A6_EARLY_H
@@ -11182,6 +11244,7 @@ index 0000000..4c66313
 +void a6_xnu_suspend_console(void);
 +void a6_xnu_graphics_presented(void);
 +void a6_xnu_panic_console(void);
++void a6_xnu_diagnostic_message(const char *);
 +int a6_xnu_graphics_stopped(void);
 +void a6_xnu_stage(unsigned);
 +void a6_xnu_early_fault(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
