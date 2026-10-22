@@ -25,6 +25,9 @@ for _ in range(ncmds):
 assert cursor==command_end and len(uuids)==1 and any(uuids[0])
 assert not subprocess.check_output(['llvm-nm','--undefined-only',str(kernel)],text=True).strip()
 symbols=subprocess.check_output(['llvm-nm',str(kernel)],text=True)
+assert '_ZN9AppleCLCD12publishModesEv' in symbols
+for name in (b'TimingElements\0',b'ColorElements\0',b'PreciseSyncRate\0',b'HorizontalAttributes\0'):
+    assert name in k,name
 for name in ('_a6_userdata_root','_a6_userdata_root_selected','_IOA6UserdataBSDRoot','_a6_hfs_volume_check','_hfs_vfsops','_bindfs_vfsops','_bindfs_vnodeop_opv_desc','_a6_bindfs_boot_allowed','_a6_bindfs_firmware_source'):
     assert name in symbols,name
 assert b[:8]==b'ANDROID!'

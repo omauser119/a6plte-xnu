@@ -29,7 +29,7 @@ static void IOLockUnlock(IOLock *p){assert(p->held);p->held=false;}
 static bool stopped=false,failAllocation=false;static unsigned handed=0;
 static int a6_xnu_graphics_stopped(){return stopped;}
 static void a6_xnu_graphics_presented(){assert(!stopped);++handed;}
-static uint64_t mach_absolute_time(){return 123456;}
+static uint64_t mach_absolute_time(){return 0x123456789abcdef0ULL;}
 static void *IOMallocData(unsigned n){return failAllocation?nullptr:malloc(n);}
 static void IOFreeData(void *p,unsigned){free(p);}
 struct Memory {uint64_t getLength(){return 24;}};
@@ -42,8 +42,11 @@ struct A6Surface {
 };
 static A6Surface front,layer;
 static A6Surface *a6_surface_copy(uint32_t id){A6Surface *p=id==1?&front:id==2?&layer:nullptr;if(p)p->retain();return p;}
-struct IOMobileFramebufferUserClient {void notify(unsigned,const uint64_t *,unsigned){assert(false);}};
-struct Clients {unsigned getCount(){return 0;}void *getObject(unsigned){assert(false);return nullptr;}};
+struct IOMobileFramebufferUserClient {
+ unsigned calls=0;uint64_t values[6]={};
+ void notify(unsigned type,const uint64_t *v,unsigned n){assert(type==5 && n==6);++calls;memcpy(values,v,sizeof(values));}
+};
+struct Clients {unsigned n=0;void *client=nullptr;unsigned getCount(){return n;}void *getObject(unsigned i){assert(i<n);return client;}};
 struct IOTimerEventSource {unsigned scheduled=0;void setTimeoutUS(unsigned us){assert(us==16667);++scheduled;}};
 class AppleCLCD:public OSObject {
 public:
@@ -93,10 +96,15 @@ int main(){
  unchanged(layer.storage,8);unchanged(layer.storage+32,8);
  // Direct default-surface writes stay visible even after previous layer swaps.
  memset(front.storage+8,0,24);fb.scanout();assert(!panel[8] && !panel[9] && !panel[10]);
+ // Native vsync ABI: timestamp, presented timestamp, counter, each split low/high.
+ IOMobileFramebufferUserClient client;fb.clients.n=1;fb.clients.client=&client;fb.fVsyncCount=0xffffffffULL;
+ AppleCLCD::vsyncFired(&fb,&timer);
+ uint64_t expected[6]={0x9abcdef0,0x12345678,0x9abcdef0,0x12345678,0,1};
+ assert(client.calls==1 && !memcmp(client.values,expected,sizeof(expected)));
  stopped=true;unsigned before=timer.scheduled;front.storage[8]=255;
  fb.scanout();fb.present(rec);AppleCLCD::vsyncFired(&fb,&timer);
  assert(timer.scheduled==before && !panel[10] && !fb.lock.held && layer.refs==1);
- puts("PASS: copied 0046 layer copy + 0056 queue, A6 RGB888 conversion, direct default refresh, no premature console handoff, allocation failure, clipping/guards and panic stop");
+ puts("PASS: copied 0046 layer copy + 0056 queue, real vsync payload, A6 RGB888 conversion, direct default refresh, console handoff, allocation failure, clipping/guards and panic stop");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='copied-fb-',dir=root/'artifacts') as directory:

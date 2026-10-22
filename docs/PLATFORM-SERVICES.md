@@ -22,6 +22,19 @@ a successful fastboot transfer does not establish either.
 | `IOCoreSurfaceRoot` / `IOSurfaceRootUserClient` | Copied 0046 creation/limits, ID and Mach-port lookup, shared pixel/state mappings, cached-client result and lock/seed traps | Original 256 MiB per allocation, 1536 MiB pool and 4096 ID slots; optional methods acknowledge with zero inline results, without GPU/event objects |
 | `AppleCLCD` / `IOMobileFramebufferUserClient` | Copied type-zero client, geometry, default BGRA surface, software layer row copies and vsync notifications | Latest-record queue, default 10 Hz present / 60 Hz notifications; no GPU, scaling, alpha composition, mode switching or hardware VBL interrupt |
 
+The board publishes one 1080x2220 timing and 8-bit RGB color mode in
+`TimingElements`/`ColorElements` before registering the framebuffer. The
+current-mode query (selector 79, block 0x40) returns those same color/timing IDs;
+selector 77 returns the real `mach_absolute_time`. Mode rate is nominal 60 Hz,
+matching the software notification clock; actual panel copies remain limited
+to the configured presentation rate. Vsync's six scalar halves encode refresh
+time, presentation time and counter in that order. Each notification type owns
+its port, with a type-zero fallback for the original Sweet client convention.
+These compatibility corrections follow
+[MiniIOMobileFramebuffer.cpp](https://github.com/oosexgang/hackios-xnu-kernel/blob/8e61187098f2c26c5daee8f9f72b6416aa64b9ab/xnu/files/iokit/Kernel/MiniIOMobileFramebuffer.cpp).
+They address concrete differences in the native interface; passing host tests
+does not establish the cause of the reported SpringBoard crash or a working GUI.
+
 The three graphics source files are extracted directly from the author's
 [0046 implementation](https://github.com/dipa-studio/ios-sweet/blob/425b25102b6a9ee4b68fb2b9ca5d6a086b8a4116/xnu/patches/0046-sweet-iosurface-iomfb.patch),
 with the cached-client convention from

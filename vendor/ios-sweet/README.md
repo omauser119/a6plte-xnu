@@ -15,5 +15,15 @@ for its RGB888 scanout, scalar pixel conversion, framebuffer-only console handof
 and panic recovery, and the author's 0056-style latest-frame timer. Catalogue
 integration follows 0046's IOResources/IOCoreSurfaceRoot and AppleCLCD matching.
 Small allocation/lifetime and integer bounds corrections preserve valid wire
-behavior. The original selector methods, result layout and rectangle-copy path
-remain the copied implementation. Sweet HID is not imported.
+behavior. The base selector methods, surface result layout and rectangle-copy
+path remain the copied implementation. Sweet HID is not imported.
+
+The explicit adaptation also fixes display-mode publication, the current-mode
+reply, the absolute-time query and vsync timestamp/port semantics using
+[OOSEX GANG's MiniIOMobileFramebuffer.cpp](https://github.com/oosexgang/hackios-xnu-kernel/blob/8e61187098f2c26c5daee8f9f72b6416aa64b9ab/xnu/files/iokit/Kernel/MiniIOMobileFramebuffer.cpp)
+as the primary compatibility reference (APSL 2.0, commit
+`8e61187098f2c26c5daee8f9f72b6416aa64b9ab`, source SHA-256
+`78141b3294b6c16b9173d5a7af64dc0b8a16f57d8027c93be608ef9dbbf764e9`).
+Samsung geometry/identity, RGB888 conversion, CPU0-only operation and our own HID
+are retained. No other device's GPU, injected userspace, logging/recording or
+loader-return paths are imported.

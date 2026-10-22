@@ -1036,3 +1036,38 @@ when the expected phone returns, without another build/permission question.
 User again reports cmd21/reg02000018/value00000040. That is a QUP completion
 timeout, not a sensor integrity response; physical touch remains unconfirmed.
 No additional input code has been changed based only on this repeated status.
+
+6a4b7ee hardware boot on 2026-10-22: the expected phone returned to fastboot.
+Exact kernel/image SHA256 and full CRC/profile checked again, hfs-map-v2 verified.
+This time fastboot boot succeeded at 2026-10-22T07:43:20Z: 0.417 s send, 0.058 s
+boot, total 0.487 s. Log artifacts/boot-6a4b7ee-cpu0-20261022T074320Z.private.log;
+successful receipt in build/verified-6a4b7ee (previous failed receipt archived).
+Latest actually booted image is NOW 6a4b7ee, not 02ec710. No flash. User reports
+SpringBoard crashing but cannot capture the fatal text; do not repeatedly ask
+for a photo or invent its reason. IMG_3505.jpeg shows normal spawn output and
+sample 1/40 with backboardd[56]/SpringBoard[25], one thread each. No fatal line
+or GUI is in this photo; it does not establish a specific selector failure.
+
+User points to the newly public oosexgang/hackios-xnu-kernel, specifically
+xnu/files/iokit/Kernel/MiniIOMobileFramebuffer.cpp. Downloaded that primary kernel
+source only, pinned commit 8e61187098f2c26c5daee8f9f72b6416aa64b9ab, source SHA256
+78141b3294b6c16b9173d5a7af64dc0b8a16f57d8027c93be608ef9dbbf764e9.
+Concrete API gaps: copied 0046 exposes no TimingElements/ColorElements, returns
+zero IDs for current-mode block 0x40 (selector79) and zero absolute time
+(selector77), and sends counter/time/zero rather than time/time/counter in vsync.
+Next source fixes those using the new primary reference, preserving 1080x2220
+Samsung identity and the copied 0046 base through the separate adaptation delta.
+Typed notification ports no longer overwrite each other; type-zero fallback is
+retained, while an explicit NULL typed registration disables that type. Close
+releases each owned send right. No new selector logs, diagnostics or userspace
+injection; no GPU/SMP/USB enable or Sweet HID. Do not copy the other project's
+iPhone identity, board MMIO, recording or loader return paths.
+
+Actual native-method ASan/UBSan regressions pass: mode IDs select published
+timing/color dictionaries, correct physical geometry/16.16 rate, every allocation
+and publication failure rolls back/refcounts balance, short/unknown block bounds,
+real clock, per-type/default notification routing, explicit disabling and right
+release. Actual timer test verifies both timestamps and a 64-bit counter rollover.
+Importer provenance verification and the complete host suite passed; log:
+artifacts/test-display-modes.private.log. Actual Apple Clang/full link and exact
+checked boot image are still required before loading these corrections.

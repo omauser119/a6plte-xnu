@@ -24,7 +24,14 @@
   */
  #include "A6Surface.h"
  
-@@ -43,6 +41,11 @@
+@@ -40,9 +38,18 @@
+ #include <IOKit/IOWorkLoop.h>
+ #include <IOKit/IOTimerEventSource.h>
+ #include <IOKit/system.h>
++#include <libkern/c++/OSArray.h>
++#include <libkern/c++/OSBoolean.h>
++#include <libkern/c++/OSDictionary.h>
++#include <libkern/c++/OSNumber.h>
  #include <pexpert/pexpert.h>
  #include <kern/clock.h>
  #include <sys/proc.h>
@@ -36,16 +43,29 @@
  
  enum {
  	kA6FBGetLayerDefaultSurface  = 3,
-@@ -61,7 +64,7 @@
+@@ -54,6 +61,8 @@
+ 	kA6FBIsMainDisplay           = 18,
+ 	kA6FBGetDotPitch             = 28,
+ 	kA6FBNotifications           = 72,
++	kA6FBGetCurrentAbsoluteTime  = 77,
++	kA6FBGetBlock                = 79,
+ };
+ 
+ #define A6PLTE_FB_SWAP_REC_SIZE          0x46c
+@@ -61,8 +70,11 @@
  #define A6PLTE_FB_NOTIFY_TYPES           8
  #define A6PLTE_FB_NOTIFY_VSYNC           5
  #define A6PLTE_FB_VSYNC_US               16667
 -#define A6PLTE_FB_DOT_PITCH              395     /* ppi, 6.67" 1080x2400 */
 +#define A6PLTE_FB_DOT_PITCH              411     /* ppi, Galaxy A6+ 6-inch 1080x2220 */
  #define A6PLTE_FB_FORMAT_BGRA            0x42475241
++#define A6PLTE_FB_TIMING_ID              1
++#define A6PLTE_FB_COLOR_ID               1
++#define A6PLTE_FB_REFRESH_HZ             60
  
  class IOMobileFramebuffer : public IOService {
-@@ -75,27 +78,35 @@
+ 	OSDeclareDefaultStructors(IOMobileFramebuffer);
+@@ -75,27 +87,36 @@
  class AppleCLCD : public IOMobileFramebuffer {
  	OSDeclareDefaultStructors(AppleCLCD);
  
@@ -85,6 +105,7 @@
 +	struct a6_scanout fPanel={};
  
  	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++	bool publishModes();
  	void addClient(IOMobileFramebufferUserClient *client);
  	void removeClient(IOMobileFramebufferUserClient *client);
  	void swap(const uint8_t *rec);
@@ -93,7 +114,7 @@
  };
  
  OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);
-@@ -104,11 +115,11 @@
+@@ -104,11 +125,12 @@
  	OSDeclareDefaultStructors(IOMobileFramebufferUserClient);
  
  public:
@@ -104,13 +125,84 @@
 -	io_user_reference_t fRefcon[A6PLTE_FB_NOTIFY_TYPES];
 +	AppleCLCD          *fFB=nullptr;
 +	task_t              fTask=TASK_NULL;
-+	mach_port_t         fPort=MACH_PORT_NULL;
++	mach_port_t         fPorts[A6PLTE_FB_NOTIFY_TYPES]={};
++	uint32_t            fPortMask=0;
 +	io_user_reference_t fFunc[A6PLTE_FB_NOTIFY_TYPES]={};
 +	io_user_reference_t fRefcon[A6PLTE_FB_NOTIFY_TYPES]={};
  
  	bool initWithTask(task_t owningTask, void *securityID, UInt32 type) APPLE_KEXT_OVERRIDE;
  	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
-@@ -126,23 +137,26 @@
+@@ -123,26 +145,96 @@
+ 
+ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ 
++/* Mode properties and the current-mode block follow MiniIOMobileFramebuffer
++ * by OOSEX GANG, 8e61187098f2c26c5daee8f9f72b6416aa64b9ab (APSL 2.0).
++ * Keep the actual Samsung geometry and the existing framebuffer-only path. */
++static bool
++a6_fb_number(OSDictionary *dict, const char *key, uint32_t value)
++{
++	OSNumber *number = OSNumber::withNumber(value, 32);
++	if (number == NULL) return false;
++	bool ok = dict->setObject(key, number);
++	number->release();
++	return ok;
++}
++
++bool
++AppleCLCD::publishModes()
++{
++	OSDictionary *timing = OSDictionary::withCapacity(8);
++	OSDictionary *horizontal = OSDictionary::withCapacity(4);
++	OSDictionary *vertical = OSDictionary::withCapacity(4);
++	OSDictionary *color = OSDictionary::withCapacity(8);
++	OSArray *timings = OSArray::withCapacity(1);
++	OSArray *colors = OSArray::withCapacity(1);
++	const uint32_t rate = A6PLTE_FB_REFRESH_HZ << 16;
++	bool ok = timing && horizontal && vertical && color && timings && colors;
++
++	if (ok) {
++		ok = a6_fb_number(color, "ID", A6PLTE_FB_COLOR_ID) &&
++		    a6_fb_number(color, "PixelEncoding", 0) &&
++		    a6_fb_number(color, "Depth", 8) &&
++		    a6_fb_number(color, "Colorimetry", 1) &&
++		    a6_fb_number(color, "EOTF", 1) &&
++		    a6_fb_number(color, "DynamicRange", 0) &&
++		    a6_fb_number(color, "Score", 1) &&
++		    color->setObject("IsVirtual", kOSBooleanFalse) &&
++		    colors->setObject(color) &&
++		    a6_fb_number(horizontal, "Active", fWidth) &&
++		    a6_fb_number(horizontal, "Total", fWidth) &&
++		    a6_fb_number(horizontal, "SyncRate", rate) &&
++		    a6_fb_number(horizontal, "PreciseSyncRate", rate) &&
++		    a6_fb_number(vertical, "Active", fHeight) &&
++		    a6_fb_number(vertical, "Total", fHeight) &&
++		    a6_fb_number(vertical, "SyncRate", rate) &&
++		    a6_fb_number(vertical, "PreciseSyncRate", rate) &&
++		    a6_fb_number(timing, "ID", A6PLTE_FB_TIMING_ID) &&
++		    a6_fb_number(timing, "Score", 1) &&
++		    timing->setObject("IsVirtual", kOSBooleanFalse) &&
++		    timing->setObject("IsOverscanned", kOSBooleanFalse) &&
++		    timing->setObject("HorizontalAttributes", horizontal) &&
++		    timing->setObject("VerticalAttributes", vertical) &&
++		    timing->setObject("ColorModes", colors) &&
++		    timings->setObject(timing);
++	}
++	/* Publish both before registerService, or expose no partial mode. */
++	if (ok) ok = setProperty("TimingElements", timings) && setProperty("ColorElements", colors);
++	if (!ok) {
++		removeProperty("TimingElements");
++		removeProperty("ColorElements");
++	}
++	OSSafeReleaseNULL(timings);
++	OSSafeReleaseNULL(colors);
++	OSSafeReleaseNULL(timing);
++	OSSafeReleaseNULL(horizontal);
++	OSSafeReleaseNULL(vertical);
++	OSSafeReleaseNULL(color);
++	return ok;
++}
++
  bool
  AppleCLCD::start(IOService *provider)
  {
@@ -144,7 +236,13 @@
  	fPixels = fSurface != NULL ? fSurface->kernelAddress() : 0;
  	fWorkLoop = IOWorkLoop::workLoop();
  	if (fLock == NULL || fClients == NULL || fPixels == 0 || fWorkLoop == NULL) {
-@@ -156,12 +170,16 @@
+@@ -151,17 +243,22 @@
+ 		OSSafeReleaseNULL(fWorkLoop);
+ 		return false;
+ 	}
++	if (!publishModes()) return false;
+ 	fVsync = IOTimerEventSource::timerEventSource(this, &AppleCLCD::vsyncFired);
+ 	if (fVsync == NULL || fWorkLoop->addEventSource(fVsync) != kIOReturnSuccess) {
  		IOLog("A6PLTE FB: no vsync timer\n");
  		return false;
  	}
@@ -161,7 +259,7 @@
  	IOLog("A6PLTE FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u\n",
  	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id);
  	return true;
-@@ -171,6 +189,7 @@
+@@ -171,12 +268,13 @@
  AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
  {
  	AppleCLCD *fb = (AppleCLCD *)owner;
@@ -169,7 +267,15 @@
  	uint64_t now = mach_absolute_time();
  	uint64_t count = ++fb->fVsyncCount;
  	uint64_t values[6] = {
-@@ -185,7 +204,21 @@
++		(uint32_t)now, (uint32_t)(now >> 32),
++		(uint32_t)now, (uint32_t)(now >> 32),
+ 		(uint32_t)count, (uint32_t)(count >> 32),
+-		(uint32_t)now, (uint32_t)(now >> 32),
+-		0, 0,
+ 	};
+ 
+ 	IOLockLock(fb->fLock);
+@@ -185,7 +283,21 @@
  		    (IOMobileFramebufferUserClient *)fb->fClients->getObject(i);
  		client->notify(A6PLTE_FB_NOTIFY_VSYNC, values, 6);
  	}
@@ -191,7 +297,7 @@
  	sender->setTimeoutUS(A6PLTE_FB_VSYNC_US);
  }
  
-@@ -216,23 +249,24 @@
+@@ -216,23 +328,24 @@
  	return v;
  }
  
@@ -226,7 +332,7 @@
  
  	for (uint32_t layer = 0; layer < A6PLTE_FB_LAYERS; layer++) {
  		uint32_t id = get32(rec, 0x54 + 4 * layer);
-@@ -246,13 +280,7 @@
+@@ -246,13 +359,7 @@
  			continue;
  		}
  		A6Surface *s = a6_surface_copy(id);
@@ -241,7 +347,7 @@
  		if (s == NULL || s == fSurface) {
  			OSSafeReleaseNULL(s);
  			continue;
-@@ -298,6 +326,26 @@
+@@ -298,6 +405,26 @@
  	}
  }
  
@@ -268,19 +374,74 @@
  bool
  IOMobileFramebufferUserClient::initWithTask(task_t owningTask, void *securityID, UInt32 type)
  {
-@@ -314,6 +362,11 @@
- 	fFB = OSDynamicCast(AppleCLCD, provider);
+@@ -315,6 +442,11 @@
  	if (fFB == NULL || !IOUserClient::start(provider)) {
  		return false;
-+	}
+ 	}
 +	char name[32]={};
 +	proc_selfname(name, sizeof(name));
 +	if (!strcmp(name, "backboardd") || !strcmp(name, "SpringBoard")) {
 +		IOLockLock(fFB->fLock);fFB->fGUIClient=true;IOLockUnlock(fFB->fLock);
- 	}
++	}
  	fFB->addClient(this);
  	return true;
-@@ -366,7 +419,6 @@
+ }
+@@ -324,12 +456,16 @@
+ {
+ 	if (fFB != NULL) {
+ 		fFB->removeClient(this);
++		mach_port_t old[A6PLTE_FB_NOTIFY_TYPES];
+ 		IOLockLock(fFB->fLock);
+-		mach_port_t old = fPort;
+-		fPort = MACH_PORT_NULL;
++		for (unsigned i = 0; i < A6PLTE_FB_NOTIFY_TYPES; ++i) {
++			old[i] = fPorts[i];
++			fPorts[i] = MACH_PORT_NULL;
++		}
++		fPortMask = 0;
+ 		IOLockUnlock(fFB->fLock);
+-		if (old != MACH_PORT_NULL) {
+-			releaseNotificationPort(old);
++		for (unsigned i = 0; i < A6PLTE_FB_NOTIFY_TYPES; ++i) {
++			if (old[i] != MACH_PORT_NULL) releaseNotificationPort(old[i]);
+ 		}
+ 	}
+ 	terminate();
+@@ -337,13 +473,15 @@
+ }
+ 
+ IOReturn
+-IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, __unused UInt32 type,
++IOMobileFramebufferUserClient::registerNotificationPort(mach_port_t port, UInt32 type,
+     __unused io_user_reference_t refCon)
+ {
++	if (type >= A6PLTE_FB_NOTIFY_TYPES) return kIOReturnBadArgument;
+ 	mach_port_t old;
+ 	IOLockLock(fFB->fLock);
+-	old = fPort;
+-	fPort = port;
++	old = fPorts[type];
++	fPorts[type] = port;
++	fPortMask |= 1u << type;
+ 	IOLockUnlock(fFB->fLock);
+ 	if (old != MACH_PORT_NULL) {
+ 		releaseNotificationPort(old);
+@@ -357,16 +495,19 @@
+ {
+ 	OSAsyncReference64 ref;
+ 
+-	if (type >= A6PLTE_FB_NOTIFY_TYPES || fFunc[type] == 0 || fPort == MACH_PORT_NULL) {
++	if (type >= A6PLTE_FB_NOTIFY_TYPES || fFunc[type] == 0) {
+ 		return;
+ 	}
++	/* Older clients register a common port as type zero; typed ports win,
++	 * including an explicit NULL registration that disables that type. */
++	mach_port_t port = fPorts[(fPortMask & (1u << type)) ? type : 0];
++	if (port == MACH_PORT_NULL) return;
+ 	bzero(ref, sizeof(ref));
+-	setAsyncReference64(ref, fPort, (mach_vm_address_t)fFunc[type], fRefcon[type], fTask);
++	setAsyncReference64(ref, port, (mach_vm_address_t)fFunc[type], fRefcon[type], fTask);
+ 	sendAsyncResult64WithOptions(ref, kIOReturnSuccess, (io_user_reference_t *)values, count,
  	    kIOUserNotifyOptionCanDrop);
  }
  
@@ -288,7 +449,18 @@
  
  IOReturn
  IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *args,
-@@ -423,10 +475,7 @@
+@@ -414,6 +555,10 @@
+ 		break;
+ 	case kA6FBGetDotPitch:
+ 		out[0] = A6PLTE_FB_DOT_PITCH;
++		outCount = 1;
++		break;
++	case kA6FBGetCurrentAbsoluteTime:
++		out[0] = mach_absolute_time();
+ 		outCount = 1;
+ 		break;
+ 	case kA6FBNotifications:
+@@ -423,10 +568,7 @@
  			fFunc[type] = args->scalarInput[0];
  			fRefcon[type] = args->scalarInput[1];
  			IOLockUnlock(fFB->fLock);
@@ -300,10 +472,11 @@
  		}
  		break;
  	case kA6FBSwapWait:
-@@ -440,16 +489,7 @@
+@@ -439,17 +581,13 @@
+ 	}
  	if (args->structureOutputDescriptor == NULL && args->structureOutput != NULL) {
  		bzero(args->structureOutput, args->structureOutputSize);
- 	}
+-	}
 -	if (selector >= 64 || !(a6_fb_logged & (1ULL << selector))) {
 -		if (selector < 64) {
 -			a6_fb_logged |= 1ULL << selector;
@@ -314,6 +487,12 @@
 -		    args->scalarInputCount, args->structureInputSize,
 -		    args->scalarOutputCount, args->structureOutputSize, ret);
 -	}
++		if (selector == kA6FBGetBlock && args->scalarInputCount >= 1 &&
++		    args->scalarInput[0] == 0x40 && args->structureOutputSize >= 12) {
++			const uint32_t ids[2] = { A6PLTE_FB_COLOR_ID, A6PLTE_FB_TIMING_ID };
++			memcpy((uint8_t *)args->structureOutput + 4, ids, sizeof(ids));
++		}
++	}
 +
  	return ret;
  }
