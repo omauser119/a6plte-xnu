@@ -1279,3 +1279,27 @@ Reference protocol cross-check: official Linux v6.12 drivers/mmc/host/sdhci.c/.h
 
 Complete local scripts/test.sh passed; log artifacts/test-read-batches.private.log.
 Pristine native aggregate patch application and git diff --check passed.
+
+
+ac56aaf: ALL3 Actions39769932073 jobs passed (native Apple Clang/full NOUNDEFS,
+full host suite including SDHCI/strategy regressions and packaging).
+Downloaded and verified source/archive SHA256 and exact ZIP member/CRC.
+Kernel build/verified-ac56aaf/kernel/kernel.a6plte SHA256
+6bd2b4a53e6acd0930ffc0423377da0e922dd9070d702fda0b150b84f119515f.
+Actual linked transfer has the128-sector bound, CMD23->CMD18 reads/CMD17 tail,
+unchanged CMD24 writes. Linked strategy calls a6_slice_validate and native
+lck_mtx_yield between complete read batches. Native lock-event layout probe
+confirms lck_mtx.data offset8, matching the photographed a6_emmc_lock+8.
+
+Immutable ready image (17242112B):
+build/verified-ac56aaf/images/xnu-8796-userdata-cpu0-boot.img, SHA256
+89361b56c23138439f1b049820bf538b9cda9d2fe22a2f6f8124d058c67e4be1.
+Complete CRC/native equality/nonzero UUID/CPU0/userdata/launchd/USB-off checks
+passed. Source/archive/kernel/image receipts retained beside the image.
+Expected phone is absent from fastboot; hardware-reset/readiness question now
+pending. ac56aaf has NOT been booted or flashed. Latest actual phone image is
+still8cf05e7. On device return check serial4194f2ce and loaderhfs-map-v2, rehash
+this exact frozen image and transient fastboot boot, with no redundant build or
+permission question. Working UI is unconfirmed; don't claim the I/O correction
+by itself establishes the complete SpringBoard hang cause. No prepared userspace
+files were inspected/edited; UART forbidden, USB off, SMP disabled and own HID.
