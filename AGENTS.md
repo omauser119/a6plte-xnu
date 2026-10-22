@@ -1139,3 +1139,23 @@ pending. Image has NOT been booted or flashed; latest actual phone boot remains
 compatibility issue remain unconfirmed. Kernel-only/fixes-only constraints
 remain. On device return, check 4194f2ce/hfs-map-v2 and rehash the exact ready
 image before transient fastboot boot. No rebuild or new boot permission needed.
+
+Hardware returned: expected 4194f2ce and hfs-map-v2 checked, exact immutable
+b4d9ab4 image rehashed and fastboot boot ACK at 2026-10-22T10:02:04Z.
+Send 0.417 s, boot 0.078 s, total 0.512 s; no flash. Receipt records image SHA256
+0ab03a1a31aa1ed4a5e8bf8a1b368186907641e84a433145debef0c10b18f1a1;
+log artifacts/boot-b4d9ab4-cpu0-20261022T100204Z.private.log. Latest actual
+PHONE BOOTED image is NOW b4d9ab4. Kernel/UI outcome pending; asked only if
+logs continue, UI appears or panic/reboot, not for unavailable fatal photos.
+
+Actions 39753103914 ultimately cancelled the Linux framebuffer-and-lk2nd job
+at its 25-minute timeout; native kernel and package jobs both succeeded.
+Downloaded actual Linux-job log verifies its entire timeout was in apt,
+specifically recommended libstdc++-arm-none-eabi-newlib (463 MB); install plan
+576 MB download / 3112 MB disk. No kernel/test/compiler failure is reported by
+that job: source fetching/builds never ran. We did not manually cancel it.
+Workflow install now uses --no-install-recommends, keeping every explicitly
+required compiler, C newlib, header and tool package. Bare-metal lk2nd links
+without the system C++ runtime. Validate this build-setup correction in the
+next workflow; do not replace the already booted native b4d9ab4 kernel merely
+for a CI dependency change. User/kernel/boot constraints remain unchanged.

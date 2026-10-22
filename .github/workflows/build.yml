@@ -17,7 +17,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y clang llvm lld device-tree-compiler gcc-arm-none-eabi libnewlib-arm-none-eabi ripgrep libssl-dev uuid-dev
+      # Bare-metal lk2nd does not use the recommended 463 MB ARM C++ runtime.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang llvm lld device-tree-compiler gcc-arm-none-eabi libnewlib-arm-none-eabi ripgrep libssl-dev uuid-dev
       - run: python3 scripts/fetch-sources.py
       - run: ./scripts/test.sh
       - run: ./scripts/build-smoke.sh
