@@ -47,6 +47,7 @@ assert span==length and len(payload)==64+span and zlib.crc32(payload[64:])==crc
 assert b'rd=a6userdata launchdsuffix=release\0' in bridge
 assert b'unentitled_ios_sim_launch=1 ' in bridge
 assert b'launchd_unsecure_cache=1 ' in bridge
+assert b'dtrace_dof_mode=0 ' in bridge
 assert '_unentitled_ios_sim_launch' in symbols
 assert b'cpus=1 ' in bridge and b'cpus=8 ' not in bridge
 assert b'CPU: CPU0 only; SMP temporarily disabled\n\0' in bridge

@@ -94,7 +94,10 @@ void xnu_load(struct platform *p,const void *dtb,struct range image) {
     /* This standalone port has no AppleMobileFileIntegrity trust-cache
      * service. Use launchd_cache_loader's native unsecure data-cache mode,
      * rather than pretending an Apple trust-cache query authenticated it. */
-    const char cmd[]="-v debug=0x14 cpus=1 serial=1 startup_debug=1 unentitled_ios_sim_launch=1 launchd_unsecure_cache=1 rd=a6userdata launchdsuffix=release";
+    /* Restore the native iOS DOF policy: this kernel's macOS configuration
+     * otherwise advertises lazy user probes through the commpage, making
+     * dyld scan every loaded image's sections before its initializers run. */
+    const char cmd[]="-v debug=0x14 cpus=1 serial=1 startup_debug=1 unentitled_ios_sim_launch=1 launchd_unsecure_cache=1 dtrace_dof_mode=0 rd=a6userdata launchdsuffix=release";
     _Static_assert(sizeof(cmd)<=sizeof(args->command_line),"BootArgs command line overflow");
     copy(args->command_line,cmd,sizeof(cmd));
     a6_fb_puts(fb,"Root: userdata HFS+; PID1: /sbin/launchd\n");

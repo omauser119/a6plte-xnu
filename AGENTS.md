@@ -1406,3 +1406,45 @@ Screen/UI outcome pending. Do not claim actual live RAM amount or GUI success
 from host selection/fastboot ACK alone. User authorizes ONLY FIXES; no further
 diagnostic extensions. Keep kernel-only, own HID, CPU0, USB-off/no-UART and no
 prepared-userspace inspection/edit. Source/payload/boot receipts in verified path.
+
+User explicitly stopped internet searching. Do not resume web searches. They
+then explicitly approved ONLY reading local dyld/shared-cache symbol tables
+to identify the repeated startup addresses. This is not permission to edit
+userspace, disassemble its code or add more kernel diagnostics/sampler fields.
+Read the sparse/HFS catalog, cache image/local-symbol metadata and LC_UUID
+read-only from /home/damstik/ios16.1.simg. Local launchd UUID matches the photo:
+5c15db07-b3bc-3df3-b62f-3e498b993b8e. Cache UUID8f970452-c9e3-3e88-b114-feb1864bc9e0,
+dyld UUID199941a5-95ee-3054-8e54-ae6387a9fa9a. Private lookup/index files remain
+ignored under build; no user OS file was modified.
+
+Repeated unslid0x1a4613d08 resolves to MachOFile::forEachSection+0x34;
+0x1a4615108 to its block+0x40, caller0x1a46617b4 to forEachDOFSection+0x44,
+0x1a462e1d8 to RuntimeState::notifyDtrace+0x10c. The old stack is the DTrace
+section sweep before application initializers, not an established framebuffer
+mutex hang. Local Apple dyld source gates it on _COMM_PAGE_DTRACE_DOF_ENABLED.
+Native XNU8796 dtrace_init defaults to LAZY_ON under the macOS profile, NEVER
+under iOS. Userdata boot now supplies native dtrace_dof_mode=0 to restore the
+iOS policy. No native kernel source, prepared OS or existing sampler changed.
+
+Actual native DOF setup/commpage writer plus the local public dyld consumer
+were executed under ASan/UBSan for macOS/iOS defaults, explicit0 and invalid
+mode fallback. Compiled userdata bridge/full CRC/native equality/UUID/CPU0/
+userdata/launchd/USB-off checks passed; checker now requires the DOF argument.
+This is a locally repackaged bridge with the SAME verified dd86519 native
+kernel (SHA256583e189e5b5c4c10acde4f5e9c1cef607fe19889b0cb230dfd2fb83789da78d4),
+not a new native CI kernel. Frozen image:
+build/verified-dd86519-dof0/images/xnu-8796-userdata-cpu0-dof0-boot.img,
+SHA2566071caf5559b9345fa4cf08ba88afc054616b586574f4ba30c239f0de778bac5.
+Expected4194f2ce/hfs-map-v2 checked, exact frozen image rehashed, transient boot
+ACK at2026-10-22T13:21:23.057936+00:00; send0.419s, boot0.078s, total0.513s.
+Receipts in build/verified-dd86519-dof0, private boot log in artifacts. No flash.
+Latest actual PHONE BOOTED image is NOW dd86519-dof0.
+
+New photo /home/damstik/111.png shows different stacks after DOF is skipped:
+SpringBoard reaches libSystem initializers and ObjC map_images/getHeaderInfoRW;
+backboardd is in dyld initializeClosureMode. Slide0x49940000. Working GUI still
+not established. Local-only symbol results artifacts/photo-111-symbols.private.log
+are nearest LOCAL symbols; missing exported symbols can make a nearest name
+imprecise. Do not turn those names into an unsupported new root-cause claim.
+Touch still fails cmd21/reg02000018/val40 (QUP OPERATIONAL.OUT_FULL timeout,
+not an I2C NACK). Preserve fixes-only/kernel-only/CPU0/no-UART/USB-off/own-HID.
