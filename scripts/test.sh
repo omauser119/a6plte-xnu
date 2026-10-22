@@ -36,6 +36,7 @@ clang -std=gnu17 -Wall -Wextra -Werror -Wno-deprecated-declarations -fsanitize=a
 python3 "$ROOT/tests/test_cs_cache_vfs.py"
 python3 "$ROOT/tests/test_aks_state.py"
 python3 "$ROOT/tests/test_watchdog_compat.py"
+python3 "$ROOT/tests/test_wait_sampler.py"
 python3 "$ROOT/tests/test_iosurface_abi.py"
 python3 "$ROOT/scripts/apply-sweet-0046.py" --verify "$ROOT/xnu"
 python3 "$ROOT/tests/test_framebuffer_default.py"

@@ -1187,3 +1187,36 @@ passed; fresh pristine aggregate patch application checked. Boot-image checker
 now requires the actual watchdog metaclass/userclient and PMU property symbols.
 Native Apple Clang/full link/packaging and hardware verification remain next.
 Keep CPU0, USB disabled, UART forbidden, own HID and kernel-only/fixes-only.
+
+a0f9161: ALL three jobs in Actions 39762755224 passed for the native watchdogd
+compatibility fix. It has NOT been booted; do not confuse its host/native tests
+with resolving the SpringBoard hang. The user explicitly does not want another
+image represented as fixing the same hang without evidence.
+
+The user now explicitly approved: "Разрешаю дополнить sampler", in response
+to adding wait state and kernel function addresses to the existing framebuffer
+sampler. This is a scoped exception to fixes-only; it does NOT authorize new
+userspace changes, UART, USB networking, SMP or arbitrary diagnostic projects.
+Add a scalar scheduler snapshot under splsched/thread_lock and release both
+before printing or reading user registers. Record tid/state/priority/block_hint,
+opaque wait event/queue addresses and continuation, classifying native wait
+hints (IPC, mutex, semaphore, workloop, etc.). Do NOT dereference wait objects
+or walk an unstable remote kernel stack. WAIT is printed before thread_getstatus
+so a stalled register query cannot hide the scheduler snapshot. After the
+existing user-register query, print its saved x16 as a LAST trap (possibly
+stale), with bounded native Mach trap name/function lookup; never call it.
+The existing 40-shot sampler now starts at 5 seconds and repeats every 10 seconds
+to capture the processes before watchdog deadlines, instead of 90/120 seconds.
+Normal framebuffer-console handoff still hides logs after a real GUI frame.
+
+Actual snapshot/trap/scheduling ASan/UBSan test passes: IRQ/lock restoration,
+opaque-pointer-only handling, copied state independent of later mutation,
+native wait hints, positive/negative/overflow trap numbers and exactly 40 finite
+samples plus the existing '-' disable option. Both changed C units compile
+against generated native headers without stubs; pristine aggregate patch
+application passes. Complete final host suite passed; next send the combined
+watchdog + sampler image through native CI and only then boot it once ready.
+PMU-stage dictionary acknowledgements follow 0045 independently of caller uid:
+they are software no-ops, not hardware/registry writes. The existing numeric
+diagnostic timer still requires administrator privilege. Focused actual-method
+test covers both cases; do not assume watchdogd's uid from an unknown OS image.

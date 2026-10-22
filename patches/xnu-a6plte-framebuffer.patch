@@ -46,7 +46,7 @@ index a77bd10..5fc6f17 100644
  bsd/dev/arm/kern_machdep.c	standard
 diff --git c/bsd/dev/a6plte/compat.c w/bsd/dev/a6plte/compat.c
 new file mode 100644
-index 0000000..c5af823
+index 0000000..535aee3
 --- /dev/null
 +++ w/bsd/dev/a6plte/compat.c
 @@ -0,0 +1,202 @@
@@ -228,11 +228,11 @@ index 0000000..c5af823
 +static void sample_thread(__unused void *arg,__unused wait_result_t wr) {
 +    static int channel;
 +    if (sample_names[0]!='-') {
-+        (void)tsleep(&channel,PZERO,"a6sample",90*hz);
++        (void)tsleep(&channel,PZERO,"a6sample",5*hz);
 +        for (unsigned n=0;n<40;++n) {
 +            printf("A6PLTE SMP: process sample %u/40\n",n+1);
 +            proc_iterate(PROC_ALLPROCLIST,sample_process,NULL,NULL,NULL);
-+            if (n+1<40) (void)tsleep(&channel,PZERO,"a6sample",120*hz);
++            if (n+1<40) (void)tsleep(&channel,PZERO,"a6sample",10*hz);
 +        }
 +    }
 +    thread_terminate_self();
@@ -4685,7 +4685,7 @@ index 0000000..48163be
 +#endif /* A6PLTE */
 diff --git c/iokit/Kernel/arm/A6PlatformServices.cpp w/iokit/Kernel/arm/A6PlatformServices.cpp
 new file mode 100644
-index 0000000..e17d4c8
+index 0000000..895b053
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PlatformServices.cpp
 @@ -0,0 +1,532 @@
@@ -4804,11 +4804,11 @@ index 0000000..e17d4c8
 +    IOLockUnlock(stateLock);
 +}
 +IOReturn IOWatchdog::setProperties(OSObject *properties) {
-+    if (IOUserClient::clientHasPrivilege(current_task(),kIOClientPrivilegeAdministrator)!=kIOReturnSuccess)
-+        return kIOReturnNotPrivileged;
 +    /* watchdogd publishes its boot stage through the primary PMU service.
 +     * This software compatibility endpoint never touches the PMIC/reset path. */
 +    if (OSDynamicCast(OSDictionary,properties)) return kIOReturnSuccess;
++    if (IOUserClient::clientHasPrivilege(current_task(),kIOClientPrivilegeAdministrator)!=kIOReturnSuccess)
++        return kIOReturnNotPrivileged;
 +    OSNumber *number=OSDynamicCast(OSNumber,properties);
 +    if (!number || number->unsigned64BitValue()>UINT32_MAX) return kIOReturnBadArgument;
 +    setWatchDogTimer(number->unsigned32BitValue());return kIOReturnSuccess;
@@ -9386,20 +9386,82 @@ index df672c6..b5dce9e 100644
  #define pmap_pending_preemption _pmap_pending_preemption_real
 diff --git c/osfmk/arm64/a6plte_diagnostics.c w/osfmk/arm64/a6plte_diagnostics.c
 new file mode 100644
-index 0000000..513b4f1
+index 0000000..d125ffe
 --- /dev/null
 +++ w/osfmk/arm64/a6plte_diagnostics.c
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,125 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if A6PLTE
 +#include <kern/task.h>
 +#include <kern/thread.h>
 +#include <kern/queue.h>
 +#include <kern/misc_protos.h>
++#include <kern/syscall_sw.h>
 +#include <vm/vm_map.h>
 +#include <vm/vm_shared_region.h>
 +#include <arm/thread.h>
 +#include <arm64/proc_reg.h>
++
++struct a6_wait_state {
++    uint64_t tid,event,queue,continuation;
++    int state,priority;
++    unsigned hint;
++};
++
++/* Capture only scheduler-owned scalars. Never walk another thread's kernel
++ * stack or dereference its wait object; either can change after unlocking. */
++static void a6_capture_wait(thread_t thread,struct a6_wait_state *out) {
++    spl_t level=splsched();
++    thread_lock(thread);
++    out->tid=thread->thread_id;
++    out->state=thread->state;
++    out->priority=thread->sched_pri;
++    out->hint=thread->block_hint;
++    out->event=thread->wait_event;
++    out->queue=(uintptr_t)thread->waitq.wq_q;
++    out->continuation=(uintptr_t)thread->continuation;
++    thread_unlock(thread);
++    splx(level);
++}
++
++static const char *a6_wait_kind(int state,unsigned hint) {
++    if (!(state&TH_WAIT)) return (state&TH_RUN)?"runnable":"stopped";
++    switch (hint) {
++    case kThreadWaitKernelMutex: return "kernel-mutex";
++    case kThreadWaitPortReceive: return "IPC-receive";
++    case kThreadWaitPortSetReceive: return "IPC-receive-set";
++    case kThreadWaitPortSend: return "IPC-send";
++    case kThreadWaitPortSendInTransit: return "IPC-send-transit";
++    case kThreadWaitSemaphore: return "semaphore";
++    case kThreadWaitKernelRWLockRead: return "kernel-rw-read";
++    case kThreadWaitKernelRWLockWrite: return "kernel-rw-write";
++    case kThreadWaitKernelRWLockUpgrade: return "kernel-rw-upgrade";
++    case kThreadWaitUserLock: return "ulock";
++    case kThreadWaitPThreadMutex: return "pthread-mutex";
++    case kThreadWaitPThreadRWLockRead: return "pthread-rw-read";
++    case kThreadWaitPThreadRWLockWrite: return "pthread-rw-write";
++    case kThreadWaitPThreadCondVar: return "pthread-condvar";
++    case kThreadWaitParkedWorkQueue: return "workqueue";
++    case kThreadWaitWorkloopSyncWait: return "workloop-sync";
++    case kThreadWaitOnProcess: return "process";
++    case kThreadWaitSleepWithInheritor: return "sleep-inheritor";
++    case kThreadWaitEventlink: return "eventlink";
++    case kThreadWaitCompressor: return "compressor";
++    default: return "event";
++    }
++}
++
++/* x16 is the last saved user register, not proof of a currently executing
++ * syscall. Translate only bounded Mach trap numbers using the native table. */
++static const char *a6_last_trap(uint64_t x16,uintptr_t *function) {
++    *function=0;
++    if (!(x16>>63)) return "BSD/user";
++    uint64_t index=0-x16;
++    if (index>=MACH_TRAP_TABLE_COUNT || index>=(uint64_t)mach_trap_count) return "unknown";
++    *function=(uintptr_t)mach_trap_table[index].mach_trap_function;
++    const char *name=mach_syscall_name_table[index];
++    return name?name:"unknown";
++}
 +
 +/* References are captured under the task lock. All pageable memory reads and
 + * framebuffer logging happen after releasing it, so a fault cannot sleep
@@ -9420,8 +9482,21 @@ index 0000000..513b4f1
 +    printf("A6PLTE SMP: %s[%d] slide 0x%llx mh 0x%llx, %u threads\n",
 +        name,pid,slide,task->mach_header_vm_address,n);
 +    for (unsigned i=0;i<n;++i) {
++        struct a6_wait_state wait={0};
++        a6_capture_wait(captured[i],&wait);
++        /* Log before thread_getstatus: retain the wait snapshot even when
++         * obtaining the user register state cannot complete immediately. */
++        printf("A6PLTE WAIT: %s[%d] t%u tid %llu state 0x%x kind %s hint %u pri %d event 0x%llx q 0x%llx cont 0x%llx\n",
++            name,pid,i,(unsigned long long)wait.tid,wait.state,
++            a6_wait_kind(wait.state,wait.hint),wait.hint,wait.priority,
++            (unsigned long long)wait.event,(unsigned long long)wait.queue,
++            (unsigned long long)wait.continuation);
 +        arm_thread_state64_t state={0};mach_msg_type_number_t count=ARM_THREAD_STATE64_COUNT;
 +        if (thread_getstatus(captured[i],ARM_THREAD_STATE64,(thread_state_t)&state,&count)==KERN_SUCCESS) {
++            uintptr_t function;
++            const char *call=a6_last_trap(state.x[16],&function);
++            printf("A6PLTE CALL: %s[%d] t%u last %s x16 %lld fn 0x%llx\n",
++                name,pid,i,call,(long long)state.x[16],(unsigned long long)function);
 +            char line[480];
 +            int used=snprintf(line,sizeof(line),"SMP %s[%d] t%u pc 0x%llx lr 0x%llx sp 0x%llx bt",
 +                name,pid,i,state.pc,state.lr,state.sp);

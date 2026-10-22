@@ -30,6 +30,7 @@ assert '_ZN10IOWatchdog10gMetaClassE' in symbols
 assert '_ZN20IOWatchdogUserClient14externalMethodE' in symbols
 for name in (b'IOWatchdogUserClient\0',b'IOPMUPrimary\0',b'A6HardwareResetEnabled\0'):
     assert name in k,name
+assert b'A6PLTE WAIT: ' in k
 for name in (b'TimingElements\0',b'ColorElements\0',b'PreciseSyncRate\0',b'HorizontalAttributes\0'):
     assert name in k,name
 for name in ('_a6_userdata_root','_a6_userdata_root_selected','_IOA6UserdataBSDRoot','_a6_hfs_volume_check','_hfs_vfsops','_bindfs_vfsops','_bindfs_vnodeop_opv_desc','_a6_bindfs_boot_allowed','_a6_bindfs_firmware_source'):

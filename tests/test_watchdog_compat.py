@@ -110,7 +110,7 @@ int main(){
     assert(w.setProperties(&overflow)==kIOReturnBadArgument && w.timerCalls==1);
     assert(w.setProperties(&unknown)==kIOReturnBadArgument && w.setProperties(nullptr)==kIOReturnBadArgument);
     admin=false;assert(w.setProperties(&two)==kIOReturnNotPrivileged);
-    assert(w.setProperties(&dictionary)==kIOReturnNotPrivileged && w.timerCalls==1);
+    assert(!w.setProperties(&dictionary) && w.timerCalls==1);
     assert(!client.clientClose() && client.terminated);
     puts("PASS: native watchdogd selectors, zero replies, short writes/guards, bounded check-ins, PMU dictionary, legacy timer privilege and close");
 }
