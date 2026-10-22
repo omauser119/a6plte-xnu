@@ -1116,3 +1116,26 @@ fails on unavailable Apple allocator builtins (__builtin_xnu_type_summary,
 type_signature/types_compatible); actual Apple Clang/full link is required.
 No new diagnostic logging or changes to userspace/graphics/HID/SMP/USB startup.
 Next: native CI, verify the exact linked copy and packaged image, transient boot.
+
+b4d9ab4: native Apple Clang/full NOUNDEFS job and package-xnu job both succeeded
+in Actions 39753103914. The independent framebuffer-and-lk2nd job is still
+installing its ARM toolchain; do NOT claim the overall workflow passed. No
+lk2nd sources changed in this commit. Complete local host suite already passed.
+Downloaded the successful native-job artifact while the Linux job runs,
+verifying exact source SHA, GitHub archive SHA256, member list and ZIP CRC.
+Kernel SHA256 3b204dfc67935b43787697d0e8889f01fcd708c37d4724f7b3fa1e49f8b01644.
+Actual linked HFS inline-copy call at 0xfffffff007a2f3fc still invokes the real
+__memmove_chk; x3 is attrsize + (attrsize & 1), not the old constant 2.
+Disassembly also verifies the 65518-byte padded-record bound. Native strict
+guard remains at 0xfffffff00729bc90; unrelated copies retain their own bounds.
+Repackaged locally and passed complete native equality/CRC/UUID/CPU0/userdata/
+launchd/USB-off checks. Immutable ready image (17242112 bytes):
+build/verified-b4d9ab4/images/xnu-8796-userdata-cpu0-boot.img,
+SHA256 0ab03a1a31aa1ed4a5e8bf8a1b368186907641e84a433145debef0c10b18f1a1.
+Source/archive/kernel/image receipts are in build/verified-b4d9ab4.
+Phone currently absent from fastboot; hardware-reset/readiness question is
+pending. Image has NOT been booted or flashed; latest actual phone boot remains
+322d238. SpringBoard/physical touch and the separate userspace watchdog
+compatibility issue remain unconfirmed. Kernel-only/fixes-only constraints
+remain. On device return, check 4194f2ce/hfs-map-v2 and rehash the exact ready
+image before transient fastboot boot. No rebuild or new boot permission needed.
