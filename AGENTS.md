@@ -1476,3 +1476,18 @@ Native userdata.c header probe and full scripts/test.sh passed. Pristine
 aggregate patch application passes. Native full CI/image verification remains
 next; this corrects a demonstrated I/O bug, not yet proof that all SpringBoard
 startup blockers are gone. No new hardware result claimed.
+
+c1ff263: ALL3 Actions39811019148 jobs passed. Verified archive SHA256
+103eb9e518012bac99225b31ae233376d93a2c3b972465dc6402a0b4822cfb51;
+kernel SHA256cb70a6bebd5ca66871bdfa991b095ef3d5f648b99ec33779c48a6c478dd32aa9.
+Frozen checked CPU0/userdata/launchd/dof0 image:
+build/verified-c1ff263/images/xnu-8796-userdata-cpu0-boot.img,
+SHA2560ae9618ba11d685c4e685db21e7342d72e65c6c701f503fe8a858522295b4812.
+Phone4194f2ce was already present; hfs-map-v2 and exact frozen image rechecked.
+Transient fastboot boot ACK at2026-10-22T16:13:05.537191+00:00; send0.421s,
+boot0.078s,total0.506s. No flash. Receipts in build/verified-c1ff263;
+log artifacts/boot-c1ff263-cpu0-20261022T161305537191Z.private.log.
+Latest actual PHONE BOOTED image is NOWc1ff263. Working SpringBoard/GUI is
+UNCONFIRMED; do not equate fixing VFS discovery or boot ACK with working UI.
+Do not ask the user to repeat the same sampler photos. No new QUP fix was
+included in this image; QUP0x40 remains separate and unverified on hardware.
