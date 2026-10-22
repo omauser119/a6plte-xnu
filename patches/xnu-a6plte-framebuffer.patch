@@ -4685,10 +4685,10 @@ index 0000000..48163be
 +#endif /* A6PLTE */
 diff --git c/iokit/Kernel/arm/A6PlatformServices.cpp w/iokit/Kernel/arm/A6PlatformServices.cpp
 new file mode 100644
-index 0000000..984e698
+index 0000000..e17d4c8
 --- /dev/null
 +++ w/iokit/Kernel/arm/A6PlatformServices.cpp
-@@ -0,0 +1,485 @@
+@@ -0,0 +1,532 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Board services with an explicitly versioned bring-up ABI, not Apple's private ABI. */
 +#if A6PLTE
@@ -4703,6 +4703,7 @@ index 0000000..984e698
 +#include <IOKit/pwr_mgt/IOPMPowerSource.h>
 +#include <IOKit/IOLib.h>
 +#include <libkern/c++/OSNumber.h>
++#include <libkern/c++/OSDictionary.h>
 +#include <kern/clock.h>
 +#include <pexpert/pexpert.h>
 +#include "A6PlatformServicesABI.h"
@@ -4714,8 +4715,49 @@ index 0000000..984e698
 +extern "C" void a6_platform_graphics_ready(uint32_t bits) { __atomic_fetch_or(&serviceStatus,bits,__ATOMIC_RELEASE); }
 +static void ready(uint32_t bits) { __atomic_fetch_or(&serviceStatus,bits,__ATOMIC_RELEASE); }
 +
-+class A6PLTEWatchdog : public IOWatchDogTimer {
-+    OSDeclareDefaultStructors(A6PLTEWatchdog);
++/* watchdogd service name, type-1 client and selectors follow ios-sweet
++ * 0040/0045 at 425b25102b6a9ee4b68fb2b9ca5d6a086b8a4116. Keep A6PLTE's
++ * working diagnostic timer below; neither interface can reset the hardware. */
++class IOWatchdogUserClient : public IOUserClient {
++    OSDeclareDefaultStructors(IOWatchdogUserClient);
++public:
++    IOReturn clientClose() APPLE_KEXT_OVERRIDE;
++    IOReturn externalMethod(uint32_t,IOExternalMethodArguments *,
++        IOExternalMethodDispatch *,OSObject *,void *) APPLE_KEXT_OVERRIDE;
++};
++OSDefineMetaClassAndStructors(IOWatchdogUserClient,IOUserClient);
++IOReturn IOWatchdogUserClient::clientClose() {
++    terminate();return kIOReturnSuccess;
++}
++IOReturn IOWatchdogUserClient::externalMethod(uint32_t selector,IOExternalMethodArguments *args,
++    __unused IOExternalMethodDispatch *dispatch,__unused OSObject *target,__unused void *reference) {
++    switch (selector) {
++    case 0: case 1: case 2: case 3: case 4: case 5: case 9: break;
++    default: return kIOReturnUnsupported;
++    }
++    if (!args || args->scalarOutputCount>kIOExternalMethodScalarOutputCountMax ||
++        (args->scalarOutputCount && !args->scalarOutput)) return kIOReturnBadArgument;
++    IOMemoryDescriptor *descriptor=args->structureOutputDescriptor;
++    IOByteCount length=descriptor?descriptor->getLength():args->structureOutputSize;
++    /* Bound each software check-in; there is no hardware payload to copy. */
++    if (length>65536) return kIOReturnMessageTooLarge;
++    if (!descriptor && length && !args->structureOutput) return kIOReturnBadArgument;
++    for (uint32_t i=0;i<args->scalarOutputCount;++i) args->scalarOutput[i]=0;
++    if (descriptor) {
++        const uint8_t zeros[64]={};
++        for (IOByteCount off=0;off<length;) {
++            IOByteCount size=length-off;
++            if (size>sizeof(zeros)) size=sizeof(zeros);
++            if (descriptor->writeBytes(off,zeros,size)!=size) return kIOReturnVMError;
++            off+=size;
++        }
++        args->structureOutputDescriptorSize=(uint32_t)length;
++    } else if (length) bzero(args->structureOutput,(size_t)length);
++    return kIOReturnSuccess;
++}
++
++class IOWatchdog : public IOWatchDogTimer {
++    OSDeclareDefaultStructors(IOWatchdog);
 +    IOWorkLoop *loop=nullptr;
 +    IOTimerEventSource *timer=nullptr;
 +    IOLock *stateLock=nullptr;
@@ -4728,13 +4770,15 @@ index 0000000..984e698
 +    void setWatchDogTimer(UInt32) APPLE_KEXT_OVERRIDE;
 +    IOReturn setProperties(OSObject *) APPLE_KEXT_OVERRIDE;
 +};
-+OSDefineMetaClassAndStructors(A6PLTEWatchdog,IOWatchDogTimer);
-+bool A6PLTEWatchdog::start(IOService *provider) {
++OSDefineMetaClassAndStructors(IOWatchdog,IOWatchDogTimer);
++bool IOWatchdog::start(IOService *provider) {
 +    stateLock=IOLockAlloc();loop=IOWorkLoop::workLoop();
 +    if (!stateLock || !loop) return false;
 +    timer=IOTimerEventSource::timerEventSource(this,expired);
 +    if (!timer || loop->addEventSource(timer)!=kIOReturnSuccess) return false;
-+    setName("IOWatchDogTimer");
++    setName("IOWatchdog");
++    if (!setProperty(kIOUserClientClassKey,"IOWatchdogUserClient") ||
++        !setProperty("IOPMUPrimary",1ULL,32)) return false;
 +    setProperty("A6WatchdogLogOnly",true);
 +    setProperty("A6HardwareResetEnabled",false);
 +    if (!IOWatchDogTimer::start(provider)) return false;
@@ -4744,7 +4788,7 @@ index 0000000..984e698
 +    ready(A6_READY_WATCHDOG);
 +    return true;
 +}
-+void A6PLTEWatchdog::setWatchDogTimer(UInt32 seconds) {
++void IOWatchdog::setWatchDogTimer(UInt32 seconds) {
 +    if (!stateLock || !timer) return;
 +    IOLockLock(stateLock);
 +    timer->cancelTimeout();deadline=0;
@@ -4759,15 +4803,18 @@ index 0000000..984e698
 +    }
 +    IOLockUnlock(stateLock);
 +}
-+IOReturn A6PLTEWatchdog::setProperties(OSObject *properties) {
++IOReturn IOWatchdog::setProperties(OSObject *properties) {
 +    if (IOUserClient::clientHasPrivilege(current_task(),kIOClientPrivilegeAdministrator)!=kIOReturnSuccess)
 +        return kIOReturnNotPrivileged;
++    /* watchdogd publishes its boot stage through the primary PMU service.
++     * This software compatibility endpoint never touches the PMIC/reset path. */
++    if (OSDynamicCast(OSDictionary,properties)) return kIOReturnSuccess;
 +    OSNumber *number=OSDynamicCast(OSNumber,properties);
 +    if (!number || number->unsigned64BitValue()>UINT32_MAX) return kIOReturnBadArgument;
 +    setWatchDogTimer(number->unsigned32BitValue());return kIOReturnSuccess;
 +}
-+void A6PLTEWatchdog::expired(OSObject *target,__unused IOTimerEventSource *source) {
-+    A6PLTEWatchdog *self=OSDynamicCast(A6PLTEWatchdog,target);
++void IOWatchdog::expired(OSObject *target,__unused IOTimerEventSource *source) {
++    IOWatchdog *self=OSDynamicCast(IOWatchdog,target);
 +    if (!self) return;
 +    IOLockLock(self->stateLock);
 +    if (self->deadline && mach_absolute_time()>=self->deadline) {
@@ -4779,12 +4826,12 @@ index 0000000..984e698
 +    }
 +    IOLockUnlock(self->stateLock);
 +}
-+void A6PLTEWatchdog::stop(IOService *provider) {
++void IOWatchdog::stop(IOService *provider) {
 +    IOWatchDogTimer::stop(provider);
 +    if (timer && loop) loop->removeEventSource(timer);
 +    IOService::stop(provider);
 +}
-+void A6PLTEWatchdog::free() {
++void IOWatchdog::free() {
 +    if (timer) { timer->cancelTimeout();if (loop) loop->removeEventSource(timer);timer->release(); }
 +    if (loop) loop->release();if (stateLock) IOLockFree(stateLock);
 +    IOWatchDogTimer::free();
@@ -5168,7 +5215,7 @@ index 0000000..984e698
 +}
 +extern void a6_start_input(IOService *);
 +void a6_start_platform_services(IOService *provider) {
-+    startBoardService<A6PLTEWatchdog>(provider,"watchdog");
++    startBoardService<IOWatchdog>(provider,"watchdog");
 +    startBoardService<AppleKeyStore>(provider,"AppleKeyStore");
 +    startBoardService<AppleSmartBattery>(provider,"battery");
 +    a6_start_input(provider);

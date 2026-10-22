@@ -27,3 +27,12 @@ as the primary compatibility reference (APSL 2.0, commit
 Samsung geometry/identity, RGB888 conversion, CPU0-only operation and our own HID
 are retained. No other device's GPU, injected userspace, logging/recording or
 loader-return paths are imported.
+
+`0040-sweet-iowatchdog.patch` and `0045-sweet-iowatchdog-pmu-primary.patch`
+document the watchdogd-facing service/client class names, selectors and primary
+PMU property. The A6 implementation in `A6PlatformServices.cpp` adapts that
+interface around its existing diagnostic timer: supported check-ins return
+bounded zeroed replies, boot-stage dictionary writes are accepted and hardware
+reset remains disabled. No selector tracing is added. Their SHA-256 values are
+`c58a94a2ce3acc03e5b60efc1a98a8c8fd723fe139908186396a119248879669` and
+`5733977651e593d6a4179b7b16d3d8c14459dff1ae48dc16d1ff718cff0ca4d2`.

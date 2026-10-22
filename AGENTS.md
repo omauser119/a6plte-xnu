@@ -1159,3 +1159,31 @@ required compiler, C newlib, header and tool package. Bare-metal lk2nd links
 without the system C++ runtime. Validate this build-setup correction in the
 next workflow; do not replace the already booted native b4d9ab4 kernel merely
 for a CI dependency change. User/kernel/boot constraints remain unchanged.
+
+dc80c9c: ALL three Actions 39760573692 jobs passed. After disabling recommended
+ARM C++ runtime installation, framebuffer-and-lk2nd finished in 72 seconds;
+native XNU 171 seconds, package 24 seconds. No kernel source changed between
+b4d9ab4 and dc80c9c; do not load another image for this CI-only correction.
+
+User now reports SpringBoard hangs and does not answer check-ins, with only
+framebuffer console logs visible (no GUI). Do not describe this as a visible
+SpringBoard UI that has frozen. This is not a captured fatal stack/cause.
+Read pinned Sweet 0040/0045, which explicitly document watchdogd matching the
+IOWatchdog class, opening IOWatchdogUserClient/type 1 and querying IOPMUPrimary.
+The previous A6PLTEWatchdog only derived from IOWatchDogTimer and had no such
+user client: this explains the older, photographed watchdogd discovery failure,
+not yet the SpringBoard hang. Reference patches retained unchanged in vendor.
+
+Adapt that documented interface around the existing diagnostic watchdog:
+native IOWatchdog metaclass/service, IOWatchdogUserClient, PMU-primary property,
+root PMU-stage dictionary compatibility and known 0/1/2/3/4/5/9 selectors.
+Output clearing is bounded, descriptor writes checked, unknown selectors return
+unsupported. Keep the real existing timer and its no-hardware-reset behavior;
+no added selector logs or fake SpringBoard check-ins. No new graphics changes:
+the current CanDrop async send is nonblocking in native IOUserClient; no
+framebuffer mutex deadlock is established. Leave copied 0046 sources unchanged.
+Actual native reply/property/close ASan/UBSan tests and the full local host suite
+passed; fresh pristine aggregate patch application checked. Boot-image checker
+now requires the actual watchdog metaclass/userclient and PMU property symbols.
+Native Apple Clang/full link/packaging and hardware verification remain next.
+Keep CPU0, USB disabled, UART forbidden, own HID and kernel-only/fixes-only.
