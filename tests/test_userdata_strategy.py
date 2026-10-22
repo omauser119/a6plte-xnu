@@ -27,7 +27,7 @@ enum { B_READ=1, BLOCKS=16384 };
 struct buffer { uint32_t count,resid;daddr64_t block;int flags,minor,error,done,mapped;char *data; };
 typedef struct buffer *buf_t;
 static unsigned char media[BLOCKS*512];
-static unsigned reads,writes,flushes;
+static unsigned reads,writes,flushes,yields,fail_read;
 static int published=1,a6_emmc_lock;
 static uint32_t buf_count(buf_t b) { return b->count; }
 static daddr64_t buf_blkno(buf_t b) { return b->block; }
@@ -42,8 +42,10 @@ static void buf_unmap(buf_t b) { assert(b->mapped);b->mapped=0; }
 static void buf_biodone(buf_t b) { assert(!b->mapped);++b->done; }
 static void lck_mtx_lock(int *p) { assert(!*p);*p=1; }
 static void lck_mtx_unlock(int *p) { assert(*p);*p=0; }
+static int lck_mtx_yield(int *p) { assert(*p);++yields;return 0; }
 static int disk_read(void *p,uint64_t lba,uint32_t n,void *out) {
-    assert(p==media && lba<BLOCKS && n<=BLOCKS-lba);++reads;
+    assert(p==media && lba<BLOCKS && n<=BLOCKS-lba && n<=A6_EMMC_READ_BATCH);++reads;
+    if(reads==fail_read)return A6_IO_ERROR;
     memcpy(out,media+lba*512,(size_t)n*512);return 0;
 }
 static int disk_write(void *p,uint64_t lba,uint32_t n,const void *in) {
@@ -59,7 +61,7 @@ int main(void) {
     const uint32_t length=1024*1024;unsigned char *memory=malloc(length+32);assert(memory);
     memset(memory,0xa5,length+32);
     struct buffer b={.count=length,.block=9,.flags=B_READ,.data=(char *)memory+16};
-    strategy(&b);assert(!b.error && !b.resid && b.done==1 && reads==1);
+    strategy(&b);assert(!b.error && !b.resid && b.done==1 && reads==16 && yields==15);
     assert(!memcmp(memory+16,media+(userdata.first+9)*512,length));
     for(unsigned i=0;i<16;++i)assert(memory[i]==0xa5 && memory[16+length+i]==0xa5);
     uint32_t prefix=a6_storage_crc32(media,userdata.first*512);
@@ -76,11 +78,18 @@ int main(void) {
     b=(struct buffer){.count=length,.block=1,.data=(char *)memory+16};userdata.writable=0;
     strategy(&b);assert(b.error==EROFS && writes==1 && flushes==1);userdata.writable=1;
     b=(struct buffer){.count=65537,.block=1,.flags=B_READ,.data=(char *)memory+16};
-    strategy(&b);assert(b.error==EINVAL && b.resid==65537 && reads==1);
+    strategy(&b);assert(b.error==EINVAL && b.resid==65537 && reads==16);
     b=(struct buffer){.count=512,.block=-1,.flags=B_READ,.data=(char *)memory+16};
-    strategy(&b);assert(b.error==EINVAL && reads==1);
+    strategy(&b);assert(b.error==EINVAL && reads==16);
     b=(struct buffer){.count=512,.block=(daddr64_t)userdata.count,.flags=B_READ,.data=(char *)memory+16};
-    strategy(&b);assert(!b.error && b.resid==512 && b.done==1 && reads==1);
+    strategy(&b);assert(!b.error && b.resid==512 && b.done==1 && reads==16);
+    b=(struct buffer){.count=length,.block=(daddr64_t)userdata.count-1,.flags=B_READ,.data=(char *)memory+16};
+    strategy(&b);assert(b.error==EINVAL && b.resid==length && b.done==1 && reads==16 && yields==15);
+    memset(memory,0xa5,length+32);fail_read=18;
+    b=(struct buffer){.count=length,.block=9,.flags=B_READ,.data=(char *)memory+16};
+    strategy(&b);assert(b.error==EIO && b.resid==length-65536 && b.done==1 && reads==18 && yields==16);
+    assert(!memcmp(memory+16,media+(userdata.first+9)*512,65536));
+    for(unsigned i=16+65536;i<length+32;++i)assert(memory[i]==0xa5);
     b=(struct buffer){.count=length};assert(bound_transfer(&b)==65536 && b.count==65536);
     free(memory);return 0;
 }
@@ -91,4 +100,4 @@ with tempfile.TemporaryDirectory(prefix='userdata-strategy-',dir=ROOT/'artifacts
         '-I'+str(ROOT/'xnu/bsd/dev/a6plte'),str(temp/'test.c'),str(ROOT/'xnu/bsd/dev/a6plte/gpt.c'),
         '-o',str(temp/'test')],check=True)
     subprocess.run([str(temp/'test')],check=True)
-print('PASS: native strategy 1-MiB reads/writes, buffer guards, whole-request partition bounds, readonly, EOF and raw I/O cap')
+print('PASS: native strategy bounded reads/yield/partial-error residual, 1-MiB writes, buffer guards, whole-request bounds, readonly, EOF and raw I/O cap')

@@ -778,10 +778,10 @@ index 0000000..b0a5c5c
 +#endif
 diff --git c/bsd/dev/a6plte/gpt.c w/bsd/dev/a6plte/gpt.c
 new file mode 100644
-index 0000000..c8c1346
+index 0000000..ec4157f
 --- /dev/null
 +++ w/bsd/dev/a6plte/gpt.c
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,115 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Bounded GPT verification and userdata-only block translation. */
 +#include "storage.h"
@@ -877,7 +877,7 @@ index 0000000..c8c1346
 +    *out=result;
 +    return 0;
 +}
-+int a6_slice_io(struct a6_slice *p, int write, uint64_t lba, uint32_t count, void *buf) {
++int a6_slice_validate(const struct a6_slice *p, int write, uint64_t lba, uint32_t count, const void *buf) {
 +    if (!p || !p->disk || !p->count || p->first>=p->disk->blocks ||
 +        p->count>p->disk->blocks-p->first || lba>p->count || count>p->count-lba ||
 +        (count && !buf) || (uint64_t)count>SIZE_MAX/512) return A6_IO_INVALID;
@@ -885,10 +885,16 @@ index 0000000..c8c1346
 +    if (write) {
 +        if (!p->writable || (p->attributes & (UINT64_C(1)<<60))) return A6_IO_READONLY;
 +        if (!p->disk->write || !p->disk->flush) return A6_IO_OFFLINE;
++    } else if (!p->disk->read) return A6_IO_OFFLINE;
++    return 0;
++}
++int a6_slice_io(struct a6_slice *p, int write, uint64_t lba, uint32_t count, void *buf) {
++    int error=a6_slice_validate(p,write,lba,count,buf);
++    if (error || !count) return error;
++    if (write) {
 +        int err=p->disk->write(p->disk->cookie,p->first+lba,count,buf);
 +        return err ? err : p->disk->flush(p->disk->cookie);
 +    }
-+    if (!p->disk->read) return A6_IO_OFFLINE;
 +    return p->disk->read(p->disk->cookie,p->first+lba,count,buf);
 +}
 diff --git c/bsd/dev/a6plte/hfs_volume.c w/bsd/dev/a6plte/hfs_volume.c
@@ -940,10 +946,10 @@ index 0000000..b15d1b9
 +}
 diff --git c/bsd/dev/a6plte/sdhci.c w/bsd/dev/a6plte/sdhci.c
 new file mode 100644
-index 0000000..87032ef
+index 0000000..e74a67a
 --- /dev/null
 +++ w/bsd/dev/a6plte/sdhci.c
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,134 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* SDHCI 3.0 PIO backend adopting lk2nd's tuned, selected eMMC user area. */
 +#include "storage.h"
@@ -968,13 +974,28 @@ index 0000000..87032ef
 +    }
 +    return failure(h,A6_IO_TIMEOUT);
 +}
-+static int command(struct a6_emmc *h,unsigned cmd,uint32_t arg,void *buffer,int write,int busy) {
++/* Buffer-ready interrupts are edge/status bits, not the FIFO's current level.
++ * Poll the read-available level for every block, preserving controller errors.
++ * This also handles two buffered blocks without losing a ready notification. */
++static int read_available(struct a6_emmc *h) {
++    uint64_t start=h->ops->ticks(h->cookie);
++    for (unsigned tries=0;tries<10000000;++tries) {
++        h->last_status=rd(h,STATUS,2);h->last_error=rd(h,ERROR,2);
++        if ((h->last_status&0x8000) || h->last_error) return failure(h,A6_IO_ERROR);
++        if (rd(h,PRESENT,4)&0x800) return 0;
++        if (h->last_status&2) return failure(h,A6_IO_ERROR); /* Short transfer. */
++        if (expired(h,start,1000)) return failure(h,A6_IO_TIMEOUT);
++    }
++    return failure(h,A6_IO_TIMEOUT);
++}
++static int command(struct a6_emmc *h,unsigned cmd,uint32_t arg,void *buffer,unsigned blocks,int write,int busy) {
 +    h->last_command=cmd;h->last_response=0;h->last_status=0;h->last_error=0;
 +    int err=wait_bits(h,PRESENT,buffer || busy ? 3 : 1,0,1000);
 +    if (err) return err;
 +    wr(h,STATUS,2,0xffff);wr(h,ERROR,2,0xffff);
-+    if (buffer) { wr(h,BLOCK_SIZE,2,512);wr(h,BLOCK_COUNT,2,1); }
-+    wr(h,TRANSFER,2,buffer ? 2u|(!write?0x10u:0u) : 0); /* One counted block; DMA remains off. */
++    if (buffer) { wr(h,BLOCK_SIZE,2,512);wr(h,BLOCK_COUNT,2,blocks); }
++    /* CMD23 supplies the card's block count. Do not use Auto CMD12/23 or DMA. */
++    wr(h,TRANSFER,2,buffer ? 2u|(!write?0x10u:0u)|(blocks>1?0x20u:0u) : 0);
 +    wr(h,ARGUMENT,4,arg);
 +    wr(h,COMMAND,2,(cmd<<8)|0x18|(busy?3:2)|(buffer?0x20:0));
 +    if ((err=wait_bits(h,STATUS,1,1,1000))) return err;
@@ -982,18 +1003,21 @@ index 0000000..87032ef
 +    if (h->last_response&0xffff8080u) return failure(h,A6_IO_ERROR);
 +    if (buffer) {
 +        unsigned ready=write?0x10:0x20;
-+        if ((err=wait_bits(h,STATUS,ready,ready,1000))) return err;
 +        uint8_t *p=buffer;
-+        for (unsigned i=0;i<512;i+=4) {
-+            if (write) {
-+                uint32_t v=(uint32_t)p[i]|(uint32_t)p[i+1]<<8|(uint32_t)p[i+2]<<16|(uint32_t)p[i+3]<<24;
-+                wr(h,DATA,4,v);
-+            } else {
-+                uint32_t v=rd(h,DATA,4);
-+                p[i]=(uint8_t)v;p[i+1]=(uint8_t)(v>>8);p[i+2]=(uint8_t)(v>>16);p[i+3]=(uint8_t)(v>>24);
++        for (unsigned block=0;block<blocks;++block,p+=512) {
++            err=write?wait_bits(h,STATUS,ready,ready,1000):read_available(h);
++            if (err) return err;
++            wr(h,STATUS,2,ready);
++            for (unsigned i=0;i<512;i+=4) {
++                if (write) {
++                    uint32_t v=(uint32_t)p[i]|(uint32_t)p[i+1]<<8|(uint32_t)p[i+2]<<16|(uint32_t)p[i+3]<<24;
++                    wr(h,DATA,4,v);
++                } else {
++                    uint32_t v=rd(h,DATA,4);
++                    p[i]=(uint8_t)v;p[i+1]=(uint8_t)(v>>8);p[i+2]=(uint8_t)(v>>16);p[i+3]=(uint8_t)(v>>24);
++                }
 +            }
 +        }
-+        wr(h,STATUS,2,ready);
 +    }
 +    if (buffer || busy) {
 +        if ((err=wait_bits(h,STATUS,2,2,3000))) return err;
@@ -1004,7 +1028,7 @@ index 0000000..87032ef
 +static int ready(struct a6_emmc *h) {
 +    uint64_t start=h->ops->ticks(h->cookie);
 +    do {
-+        int err=command(h,13,h->rca<<16,NULL,0,0);
++        int err=command(h,13,h->rca<<16,NULL,0,0,0);
 +        if (err) return err;
 +        unsigned state=(h->last_response>>9)&15;
 +        if (state==4 && (h->last_response&0x100)) return 0;
@@ -1023,7 +1047,7 @@ index 0000000..87032ef
 +    int err=ready(h);
 +    if (err) return err;
 +    uint8_t ext[512];
-+    if ((err=command(h,8,0,ext,0,0))) return err;
++    if ((err=command(h,8,0,ext,1,0,0))) return err;
 +    if ((ext[179]&7) || ext[61] || ext[62] || ext[192]<5) return A6_IO_INVALID;
 +    h->blocks=(uint32_t)ext[212]|(uint32_t)ext[213]<<8|(uint32_t)ext[214]<<16|(uint32_t)ext[215]<<24;
 +    if (h->blocks<68) return A6_IO_INVALID;
@@ -1037,10 +1061,15 @@ index 0000000..87032ef
 +    if (lba>h->blocks || count>h->blocks-lba || (count && !buffer) ||
 +        (uint64_t)count>SIZE_MAX/512) return A6_IO_INVALID;
 +    uint8_t *p=buffer;
-+    for (uint32_t i=0;i<count;++i) {
-+        int err=command(h,write?24:17,(uint32_t)(lba+i),p+(size_t)i*512,write,0);
++    for (uint32_t i=0;i<count;) {
++        uint32_t blocks=write?1:count-i;
++        if (blocks>A6_EMMC_READ_BATCH) blocks=A6_EMMC_READ_BATCH;
++        int err;
++        if (blocks>1 && (err=command(h,23,blocks,NULL,0,0,0))) return err;
++        err=command(h,write?24:(blocks>1?18:17),(uint32_t)(lba+i),p+(size_t)i*512,blocks,write,0);
 +        if (err) return err; /* Never automatically retry an ambiguous write. */
 +        if (write && (err=ready(h))) return err;
++        i+=blocks;
 +    }
 +    return 0;
 +}
@@ -1050,7 +1079,7 @@ index 0000000..87032ef
 +    struct a6_emmc *h=cookie;
 +    if (!h || !h->online) return A6_IO_OFFLINE;
 +    if (h->cache_enabled) {
-+        int err=command(h,6,(3u<<24)|(32u<<16)|(1u<<8),NULL,0,1);
++        int err=command(h,6,(3u<<24)|(32u<<16)|(1u<<8),NULL,0,0,1);
 +        if (err) return err;
 +    }
 +    return ready(h);
@@ -1075,10 +1104,10 @@ index 0000000..f265e07
 +    NULL,0,service_status,"I","A6 platform service readiness and diagnostic watchdog expiry");
 diff --git c/bsd/dev/a6plte/storage.h w/bsd/dev/a6plte/storage.h
 new file mode 100644
-index 0000000..f7a48ec
+index 0000000..e5bff9c
 --- /dev/null
 +++ w/bsd/dev/a6plte/storage.h
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,53 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#ifndef A6PLTE_STORAGE_H
 +#define A6PLTE_STORAGE_H
@@ -1102,6 +1131,7 @@ index 0000000..f7a48ec
 +};
 +uint32_t a6_storage_crc32(const void *, size_t);
 +int a6_gpt_userdata(struct a6_blockdev *, struct a6_slice *);
++int a6_slice_validate(const struct a6_slice *, int, uint64_t, uint32_t, const void *);
 +int a6_slice_io(struct a6_slice *, int, uint64_t, uint32_t, void *);
 +struct a6_hfs_volume {
 +    uint64_t bytes;
@@ -1111,6 +1141,7 @@ index 0000000..f7a48ec
 +int a6_hfs_volume_check(struct a6_slice *, struct a6_hfs_volume *);
 +
 +/* Register accesses are injectable for host tests. No DMA or firmware calls. */
++#define A6_EMMC_READ_BATCH 128u /* 64 KiB, also the BSD device's preferred I/O size. */
 +struct a6_sdhci_ops {
 +    uint32_t (*read)(void *, unsigned, unsigned);
 +    void (*write)(void *, unsigned, unsigned, uint32_t);
@@ -1784,10 +1815,10 @@ index 0000000..d9a45df
 +#endif
 diff --git c/bsd/dev/a6plte/userdata.c w/bsd/dev/a6plte/userdata.c
 new file mode 100644
-index 0000000..6db0aa1
+index 0000000..b6cbe5b
 --- /dev/null
 +++ w/bsd/dev/a6plte/userdata.c
-@@ -0,0 +1,184 @@
+@@ -0,0 +1,202 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Native BSD block/raw devices exposing only the GPT userdata slice. */
 +#include <sys/param.h>
@@ -1859,7 +1890,25 @@ index 0000000..6db0aa1
 +    else if (!write && (uint64_t)number==userdata.count) { /* EOF; leave resid unchanged. */ }
 +    else if ((error=buf_map(bp,&address))==0) {
 +        lck_mtx_lock(&a6_emmc_lock);
-+        error=to_errno(a6_slice_io(&userdata,write,(uint64_t)number,count/512,address));
++        if (write) {
++            error=to_errno(a6_slice_io(&userdata,1,(uint64_t)number,count/512,address));
++        } else {
++            /* Validate the ENTIRE request before reading even its first batch.
++             * A large cluster/page-in must not monopolize the controller while
++             * backboardd and other processes wait on this same mutex. Yield
++             * only after a complete card transfer, never with data in flight. */
++            error=to_errno(a6_slice_validate(&userdata,0,(uint64_t)number,count/512,address));
++            uint32_t done=0;
++            while (!error && done<count/512) {
++                uint32_t blocks=count/512-done;
++                if (blocks>A6_EMMC_READ_BATCH) blocks=A6_EMMC_READ_BATCH;
++                error=to_errno(a6_slice_io(&userdata,0,(uint64_t)number+done,blocks,address+(size_t)done*512));
++                if (!error) {
++                    done+=blocks;buf_setresid(bp,count-done*512);
++                    if (done<count/512) (void)lck_mtx_yield(&a6_emmc_lock);
++                }
++            }
++        }
 +        lck_mtx_unlock(&a6_emmc_lock);
 +        buf_unmap(bp);
 +        if (!error) buf_setresid(bp,0);

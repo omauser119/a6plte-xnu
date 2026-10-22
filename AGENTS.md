@@ -1240,3 +1240,42 @@ SpringBoard t0 WAIT kind/cont and CALL last (repeated every 10 s), not an
 unavailable fatal photo. Do not claim resolving the SpringBoard hang or working
 GUI before hardware evidence. Use the exact 8cf05e7 kernel to symbolize any
 continuation/function address returned, with its fixed native virtual base.
+
+
+User photo /home/damstik/test.png from the booted 8cf05e7 sampler identifies
+backboardd[56] t0 tid302 state0x9 / kernel-mutex, event 0xfffffff007c1dee0,
+queue 0xfffffff447757b70 and continuation0. Exact linked symbols put the event
+at a6_emmc_lock+8, which matches native LCK_MTX_EVENT (&lck_mtx.data).
+The earlier runnable continuation 0xfffffff0072cb910 is thread_preempted.
+SpringBoard[25] t0 is waiting on dynamic events that CHANGE between samples;
+its saved user PC changes too. Do not misreport a proven permanent deadlock
+or a graphics-mutex hang. Saved positive x16 values are not valid syscall IDs.
+No prepared userspace was inspected to establish these facts.
+
+Native eMMC reads issue CMD17 once per 512-byte sector, and a filesystem
+cluster of arbitrary size monopolizes a6_emmc_lock until it all completes.
+Correct the actual controller bottleneck: CMD23-counted CMD18 read batches of
+at most128 sectors (64KiB), with no DMA/AutoCMD12/23, inherited tuning/voltage
+preserved. Poll PRESENT's data-available LEVEL per block, not repeated buffer
+interrupt edges, and preserve R1/CRC/timeout/short-transfer failure/offline
+semantics. Errors do not retry a partially completed transaction. The existing
+CMD24 single-sector write and final flush semantics remain in place.
+BSD strategy validates the ENTIRE GPT-slice read first, then yields the native
+mutex to existing waiters between complete 64KiB transfers. No card command is
+in flight at a yield. Partial read error reports remaining bytes correctly.
+Writes remain serialized through their flush; GPT/readonly/bounds stay active.
+
+Focused ASan/UBSan tests execute actual SDHCI and strategy implementations:
+513-sector read now uses9 commands instead of513, exact data/unaligned-buffer
+guards and final-sector/tail handling; lost buffer-ready edge, second-block
+CRC/short/timeout and command/complete failures; no retry/offline access.
+Strategy tests cover16 batches/15 yield points for1MiB, invalid whole-request
+rejection before any read, and partial-error residual. Native-header probes
+for all3 changed C units pass. This fixes demonstrated I/O serialization and
+command overhead; working SpringBoard is still NOT established by the photo
+or host tests. Need native CI/exact package/transient boot and hardware result.
+Reference protocol cross-check: official Linux v6.12 drivers/mmc/host/sdhci.c/.h
+(PRESENT FIFO levels, counted multi-block mode without DMA/auto commands).
+
+Complete local scripts/test.sh passed; log artifacts/test-read-batches.private.log.
+Pristine native aggregate patch application and git diff --check passed.
