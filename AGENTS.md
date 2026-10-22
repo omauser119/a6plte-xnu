@@ -1506,3 +1506,14 @@ normal exits, signals and process filtering pass. Actual framebuffer regression
 confirms diagnostic visibility and subsequent GUI recovery. Full host suite
 passed (artifacts/test-gui-exit.private.log). early.c native probe passed;
 kern_exit.c requires Apple Clang allocator builtins, so full native CI is required.
+
+4f2c6fc: all three Actions39816359127 jobs passed, full Apple Clang native
+link and host checks. Verified downloaded kernel SHA256001a0e6a801361b853ebe0093e721f6f6b3cc0e1a3a2290c126dd4ee5d0ec4d4.
+Frozen image /home/damstik/a6plte-xnu-8796/build/verified-4f2c6fc/images/xnu-8796-userdata-cpu0-boot.img
+SHA2565637b0733bf6ae2ef75f8253a37447bc50e0ccac30af72860bf34c5679208c4b. Full CRC/native/profile checks passed.
+Phone4194f2ce/hfs-map-v2 checked and transient boot ACK at20261022T171833Z.
+Latest actual PHONE BOOTED is now4f2c6fc. GUI PROCESS EXIT reports native
+committed reason for SpringBoard/backboardd, before existing crash scan and
+ReportCrash delivery. It does not infer a hang cause or invent missing reason
+text. No hardware screen result or working GUI confirmed. Receipts under
+build/verified-4f2c6fc. No flash, userspace changes, SMP or USB-network startup.
