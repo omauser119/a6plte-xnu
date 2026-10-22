@@ -1815,10 +1815,10 @@ index 0000000..d9a45df
 +#endif
 diff --git c/bsd/dev/a6plte/userdata.c w/bsd/dev/a6plte/userdata.c
 new file mode 100644
-index 0000000..b6cbe5b
+index 0000000..908296c
 --- /dev/null
 +++ w/bsd/dev/a6plte/userdata.c
-@@ -0,0 +1,202 @@
+@@ -0,0 +1,211 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Native BSD block/raw devices exposing only the GPT userdata slice. */
 +#include <sys/param.h>
@@ -1933,11 +1933,20 @@ index 0000000..b6cbe5b
 +    case DKIOCISWRITABLE:*(uint32_t *)data=userdata.writable && !(userdata.attributes&(UINT64_C(1)<<60));return 0;
 +    case DKIOCISFORMATTED:*(uint32_t *)data=1;return 0;
 +    case DKIOCISVIRTUAL:*(uint32_t *)data=0;return 0;
++    case DKIOCISSOLIDSTATE:*(uint32_t *)data=1;return 0;
++    /* There is one serialized eMMC controller. VFS requires COMMANDPOOLSIZE
++     * before applying ANY of the limits below; ENOTTY leaves a 64-MiB maximum
++     * and the default scatter/alignment constraints on the root mount. */
++    case DKIOCGETCOMMANDPOOLSIZE:*(uint32_t *)data=1;return 0;
++    case DKIOCGETBSDUNIT:*(uint32_t *)data=0;return 0;
++    case DKIOCGETTHROTTLEMASK:*(uint64_t *)data=1;return 0;
 +    case DKIOCGETBASE:*(uint64_t *)data=userdata.first*512;return 0;
 +    case DKIOCGETFEATURES:*(uint32_t *)data=0;return 0;
 +    case DKIOCGETMAXBLOCKCOUNTREAD:case DKIOCGETMAXBLOCKCOUNTWRITE:*(uint64_t *)data=128;return 0;
 +    case DKIOCGETMAXBYTECOUNTREAD:case DKIOCGETMAXBYTECOUNTWRITE:*(uint64_t *)data=65536;return 0;
-+    case DKIOCGETMAXSEGMENTCOUNTREAD:case DKIOCGETMAXSEGMENTCOUNTWRITE:*(uint64_t *)data=1;return 0;
++    /* PIO accesses buf_map's virtual mapping, not physical DMA segments.
++     * Let VFS derive the page count from the bounded transfer length. */
++    case DKIOCGETMAXSEGMENTCOUNTREAD:case DKIOCGETMAXSEGMENTCOUNTWRITE:*(uint64_t *)data=0;return 0;
 +    case DKIOCGETMAXSEGMENTBYTECOUNTREAD:case DKIOCGETMAXSEGMENTBYTECOUNTWRITE:*(uint64_t *)data=65536;return 0;
 +    case DKIOCGETMINSEGMENTALIGNMENTBYTECOUNT:*(uint64_t *)data=1;return 0;
 +    case DKIOCGETMAXSEGMENTADDRESSABLEBITCOUNT:*(uint64_t *)data=64;return 0;

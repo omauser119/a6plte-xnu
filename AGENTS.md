@@ -1448,3 +1448,31 @@ are nearest LOCAL symbols; missing exported symbols can make a nearest name
 imprecise. Do not turn those names into an unsupported new root-cause claim.
 Touch still fails cmd21/reg02000018/val40 (QUP OPERATIONAL.OUT_FULL timeout,
 not an I2C NACK). Preserve fixes-only/kernel-only/CPU0/no-UART/USB-off/own-HID.
+
+IMG_3545.PNG correction: slide39be0000, runtime PC1de1fc128, LR1de1f8614.
+Unslid PC1a461c128 is MachOFile::hasThreadLocalVariables (exact symbol start),
+NOT1a465c128/DyldSharedCache::patchTable. The older photo-111 report misread
+that runtime PC; do not treat its patchTable name as evidence. This is still
+libSystem/dyld initialization, state4/runnable; no proven permanent wait or GUI.
+User is exhausted by repeated photo requests: do not ask for the same logs again.
+
+Source audit reproduced a real root-device contract error: userdata ioctl
+returns ENOTTY for mandatory DKIOCGETCOMMANDPOOLSIZE. Native8796
+vfs_init_io_attributes returns BEFORE applying advertised read/write/segment
+limits, leaving mnt_maxreadcnt/mnt_maxwritecnt at64MiB. It also cannot identify
+the actual flash as SSD. Correct the controller's queue depth1, BSD unit0 and
+throttle mask1, and report solid-state storage. PIO uses buf_map virtual
+addresses with no single-physical-page restriction: return segment count0 so
+VFS derives16 pages from the existing64KiB transfer limit. Preserve native
+flushes, GPT/readonly/bounds, CPU0, USB-off, UART prohibition and prepared OS.
+No additional logs, sampler fields, HID or userspace changes.
+
+tests/test_userdata_ioattrs.py executes the ACTUAL driver ioctl and native
+vfs_init_io_attributes with native ioctl encoding/types: old ENOTTY/64MiB
+failure reproduced, corrected complete discovery/64KiB/16segments/SSD passes
+under ASan/UBSan. Also checks32/64-bit reply guards, error propagation,
+unpublished/minor rejection and that discovery performs no flush/storage I/O.
+Native userdata.c header probe and full scripts/test.sh passed. Pristine
+aggregate patch application passes. Native full CI/image verification remains
+next; this corrects a demonstrated I/O bug, not yet proof that all SpringBoard
+startup blockers are gone. No new hardware result claimed.

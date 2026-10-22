@@ -54,6 +54,7 @@ for unit in storage sdhci; do
     "$ROOT/artifacts/test-$unit"
 done
 python3 "$ROOT/tests/test_userdata_strategy.py"
+python3 "$ROOT/tests/test_userdata_ioattrs.py"
 clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_hfs_volume.c" "$ROOT/xnu/bsd/dev/a6plte/gpt.c" "$ROOT/xnu/bsd/dev/a6plte/hfs_volume.c" -o "$ROOT/artifacts/test-hfs-volume"
 "$ROOT/artifacts/test-hfs-volume"
 python3 "$ROOT/tests/test_bootimg.py"
