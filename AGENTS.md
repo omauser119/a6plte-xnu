@@ -1303,3 +1303,14 @@ this exact frozen image and transient fastboot boot, with no redundant build or
 permission question. Working UI is unconfirmed; don't claim the I/O correction
 by itself establishes the complete SpringBoard hang cause. No prepared userspace
 files were inspected/edited; UART forbidden, USB off, SMP disabled and own HID.
+
+
+User returned phone: expected4194f2ce and loaderhfs-map-v2 verified, exact frozen
+ac56aaf image rehashed and complete CRC/native/profile check repeated. Transient
+fastboot boot ACK at2026-10-22T11:30:49.866890+00:00; send0.408s, boot0.068s, total0.485s.
+Log artifacts/boot-ac56aaf-cpu0-20261022T113049Z.private.log.
+Successful receipt build/verified-ac56aaf/boot-receipt.json; no flash. Latest
+actual PHONE BOOTED image is NOWac56aaf (SHA25689361b56c23138439f1b049820bf538b9cda9d2fe22a2f6f8124d058c67e4be1).
+Working UI and improvement on hardware remain pending. Asked whether interface,
+logs or eMMC/panic appears; do not claim fix of every SpringBoard blocker from
+fastboot ACK. Preserve kernel-only, CPU0, USB-off/no-UART and own HID constraints.
