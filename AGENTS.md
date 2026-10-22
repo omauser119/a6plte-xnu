@@ -1071,3 +1071,22 @@ release. Actual timer test verifies both timestamps and a 64-bit counter rollove
 Importer provenance verification and the complete host suite passed; log:
 artifacts/test-display-modes.private.log. Actual Apple Clang/full link and exact
 checked boot image are still required before loading these corrections.
+
+322d238: ALL three Actions jobs 39744581160 passed (native Apple Clang/NOUNDEFS,
+complete host regressions and packaging). Actual linked publishModes/scanout,
+present, externalMethod, typed-port and notify symbols verified, along with the
+mode property strings. Kernel SHA256
+de74b8640a9badc2e28ea94cbebd3d3dab8e50b2460a09366eb9e980b9e3b23b.
+Immutable image build/verified-322d238/images/xnu-8796-userdata-cpu0-boot.img,
+17242112 bytes, SHA256
+9cb4b8f77194f4838b00ee10db9a0398eb9a97be2a9758d707e970b0ffa42fe3.
+Exact successful source/run/archive/kernel/image hashes, full CRC/nonzero UUID/
+CPU0/userdata/launchd/USB-off profile verified. Expected phone already in
+fastboot; hfs-map-v2 checked, exact image booted at 2026-10-22T08:06:04Z.
+Fastboot ACK: send 0.420 s, boot 0.078 s, total 0.517 s. No flash.
+Private log artifacts/boot-322d238-cpu0-20261022T080604Z.private.log; image and
+boot receipts in verified-322d238. Latest PHONE BOOTED image is NOW 322d238.
+GUI/stability remains unconfirmed; this does not establish the SpringBoard
+crash cause. Asked only whether UI/logs/reboot appears, not for unavailable
+fatal photos. Preserve kernel-only/fixes-only, own HID, Samsung 1080x2220,
+CPU0, USB-off/no-UART and no prepared userspace inspection or modifications.
