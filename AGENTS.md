@@ -1379,3 +1379,30 @@ all original firmware RAM/reservations, and added conservative image/DTB/payload
 reservations. This is not a device or user OS modification. The complete native
 parser/allocator accepts that copy and selects a verified1GiB window atC0000000.
 Actual selection is repeated from the live boot DT in the bridge, not hardcoded.
+
+
+39772374796/a44f455 ended with native and package jobs successful, but its Linux
+job was cancelled during apt. We did not send a cancellation. That image was
+never downloaded/booted; the local watcher stopped on the non-success result.
+The optional local LK rebuild lacks arm-none-eabi-gcc/ld and failed at toolchain
+lookup; no LK sources changed or flashed. The actual new CI LK build passed.
+
+CURRENT VERIFIED BOOT dd86519: ALL three Actions39775634962 jobs succeeded,
+including native Apple Clang/full NOUNDEFS, full host suite/new memory tests,
+actual LK build and both packaging profiles. Source SHAdd8651959ccd4fa23b0a10075c8debfacb695a9e.
+Archive SHA256a474d27b325a3e80a2ea3b0f4faeb11b69ab57f150352912876842e6d0bbb813; kernel SHA256583e189e5b5c4c10acde4f5e9c1cef607fe19889b0cb230dfd2fb83789da78d4.
+Frozen image build/verified-dd86519/images/xnu-8796-userdata-cpu0-boot.img,
+17242112 bytes, SHA256c0a78953c8eb3ad3fc1478c113cee6b6f46d9a2d902bae8972db95a423f0ba94.
+Full CRC/native equality/UUID/CPU0/userdata/launchd/USB-off checks passed.
+Linked kernel has no iOS spawn-success string, preserves the existing sampler
+and eMMC read batches. Final compiled bridge calls platform_alloc_xnu and then
+checked package layout. Receipt includes bridge SHA256 and bounded RAM policy.
+
+Expected4194f2ce and loaderhfs-map-v2 were already present; verified/rehashed
+that exact frozen image and transiently booted at2026-10-22T12:13:41.686017+00:00.
+Boot ACK true, no flash. Private log artifacts/boot-dd86519-cpu0-20261022T121341Z.private.log.
+Latest actual PHONE BOOTED image is NOW dd86519, not ac56aaf/a44f455.
+Screen/UI outcome pending. Do not claim actual live RAM amount or GUI success
+from host selection/fastboot ACK alone. User authorizes ONLY FIXES; no further
+diagnostic extensions. Keep kernel-only, own HID, CPU0, USB-off/no-UART and no
+prepared-userspace inspection/edit. Source/payload/boot receipts in verified path.
