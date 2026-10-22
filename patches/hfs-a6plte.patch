@@ -204,6 +204,75 @@ index 557430b..d04c5fb 100644
  
  #if HFS_LEAK_DEBUG && TARGET_OS_OSX
  	if (hfs_active_mounts == 0) {
+diff --git c/core/hfs_xattr.c w/core/hfs_xattr.c
+index a244114..55aa858 100644
+--- c/core/hfs_xattr.c
++++ w/core/hfs_xattr.c
+@@ -1253,18 +1253,25 @@ int hfs_setxattr_internal (struct cnode *cp, const void *data_ptr, size_t attrsi
+ 			extentblks = count_extent_blocks(blkcnt, recp->overflowExtents.extents);
+ 			blkcnt -= extentblks;
+ 		}
+-	} else { /* Inline data */ 
+-		if (exists) {
+-			result = remove_attribute_records(hfsmp, iterator);
+-			if (result) {
+-				goto exit;
+-			}
++	} else { /* Inline data */
++		const size_t data_offset = offsetof(HFSPlusAttrData, attrData);
++		/* BTInsertRecord's record length is 16 bits, including even padding. */
++		if (attrsize > UINT16_MAX - data_offset - 1) {
++			result = E2BIG;
++			goto exit;
+ 		}
+-		
+ 		/* Calculate size of record rounded up to multiple of 2 bytes. */
+-		btdata.itemSize = sizeof(HFSPlusAttrData) - 2 + attrsize + ((attrsize & 1) ? 1 : 0);
++		btdata.itemSize = data_offset + attrsize + (attrsize & 1);
+ 		recp_size = btdata.itemSize;
+-		recp = hfs_malloc_data(recp_size);
++		recp = hfs_malloc_zero_data(recp_size);
++		if (recp == NULL) {
++			result = ENOMEM;
++			goto exit;
++		}
++		/* attrData[2] describes a variable-length on-disk tail, not the
++		 * allocated buffer's capacity. Derive its address from that buffer
++		 * so the strict copy guard checks the allocation, not the 2-byte member. */
++		u_int8_t *inline_data = (u_int8_t *)recp + data_offset;
+ 
+ 		recp->recordType = kHFSPlusAttrInlineData;
+ 		recp->attrData.reserved[0] = 0;
+@@ -1274,7 +1281,7 @@ int hfs_setxattr_internal (struct cnode *cp, const void *data_ptr, size_t attrsi
+ 		/* Copy in the attribute data (if any). */
+ 		if (attrsize > 0) {
+ 			if (data_ptr) {
+-				bcopy(data_ptr, &recp->attrData.attrData, attrsize);
++				bcopy(data_ptr, inline_data, attrsize);
+ 			} else {
+ 				/* 
+ 				 * A null UIO meant it originated in-kernel.  If they didn't supply data_ptr 
+@@ -1284,7 +1291,7 @@ int hfs_setxattr_internal (struct cnode *cp, const void *data_ptr, size_t attrsi
+ 					result = EPERM;
+ 					goto exit;
+ 				}
+-				result = uiomove((caddr_t)&recp->attrData.attrData, attrsize, uio);
++				result = uiomove((caddr_t)inline_data, attrsize, uio);
+ 			}
+ 			
+ 			if (result) {
+@@ -1292,6 +1299,11 @@ int hfs_setxattr_internal (struct cnode *cp, const void *data_ptr, size_t attrsi
+ 			}
+ 		}
+ 		
++		/* Preserve the old attribute if allocating or reading its replacement fails. */
++		if (exists) {
++			result = remove_attribute_records(hfsmp, iterator);
++			if (result) goto exit;
++		}
+ 		(void) hfs_buildattrkey(target_id, ap->a_name, (HFSPlusAttrKey *)&iterator->key);
+ 		
+ 		btdata.bufferAddress = recp;
 diff --git c/core/kext-config.h w/core/kext-config.h
 index 59088a5..1799853 100644
 --- c/core/kext-config.h

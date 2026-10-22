@@ -20,6 +20,7 @@ clang -fsanitize=address,undefined -g -Wall -Wextra -Werror "$ROOT/tests/test_pa
 python3 "$ROOT/tests/test_pack.py"
 python3 "$ROOT/tests/test_hfs_image.py"
 python3 "$ROOT/tests/test_hfs_finderinfo.py"
+python3 "$ROOT/tests/test_hfs_xattr_inline.py"
 python3 "$ROOT/tests/test_dyld_root_policy.py"
 python3 "$ROOT/tests/test_iokit_catalogue.py"
 python3 "$ROOT/tests/test_amfi_queries.py"

@@ -1090,3 +1090,29 @@ GUI/stability remains unconfirmed; this does not establish the SpringBoard
 crash cause. Asked only whether UI/logs/reboot appears, not for unavailable
 fatal photos. Preserve kernel-only/fixes-only, own HID, Samsung 1080x2220,
 CPU0, USB-off/no-UART and no prepared userspace inspection or modifications.
+
+Latest user photos IMG_3520--3527 show recurring UserEventAgent SIGABRT and
+watchdogd SIGTRAP (watchdog KEXT not discovered), but no captured SpringBoard
+fatal signal. Do not invent that cause or request the unavailable fatal photo
+again. IMG_3527 additionally establishes a real kernel panic: __memmove_chk
+object size (2 < 37), caller 0xfffffff00729bcd4. Linked 322d238 disassembly
+identifies native hfs_setxattr_internal copying into HFSPlusAttrData.attrData[2]
+with w3=2 at 0xfffffff007a2f3c0, then __memmove_chk at 0xfffffff007a2f3c8.
+That field is a variable-length on-disk placeholder, not the allocated capacity.
+
+Fix inline HFS xattr writes using allocation-base plus native offsetof(payload),
+checking padded 16-bit B-tree record size and allocation failure, zeroing the
+odd-byte padding, and retaining the old attribute on input/allocation failure.
+Keep the native copy guard active and preserve the existing on-disk layout.
+The full HFS patch still includes earlier FinderInfo and integration fixes.
+tests/test_hfs_xattr_inline.py executes the actual native inline branch and
+actual __memmove_chk with real HFS disk/FSBufferDescriptor declarations.
+ASan/UBSan tests pass for the exact 37-byte case, kernel/UIO paths, odd padding,
+record bounds and error preservation. Negative control against pristine pinned
+Apple HFS reproduces exactly (2 < 37); a direct invalid copy still panics.
+Complete local scripts/test.sh passed (artifacts/test-hfs-inline.private.log).
+Fresh pristine HFS patch application checked. Linux native-header probe only
+fails on unavailable Apple allocator builtins (__builtin_xnu_type_summary,
+type_signature/types_compatible); actual Apple Clang/full link is required.
+No new diagnostic logging or changes to userspace/graphics/HID/SMP/USB startup.
+Next: native CI, verify the exact linked copy and packaged image, transient boot.
