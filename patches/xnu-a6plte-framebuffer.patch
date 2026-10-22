@@ -2240,7 +2240,7 @@ index 13b08b5..617f992 100644
  
  out:
 diff --git c/bsd/kern/kern_exec.c w/bsd/kern/kern_exec.c
-index f41b75b..a70d0f4 100644
+index f41b75b..f9cd670 100644
 --- c/bsd/kern/kern_exec.c
 +++ w/bsd/kern/kern_exec.c
 @@ -1347,6 +1347,12 @@ grade:
@@ -2277,6 +2277,32 @@ index f41b75b..a70d0f4 100644
  	uint32_t i;
  	int error;
  	vm_map_t map = current_map();
+@@ -7411,9 +7424,14 @@ process_signature(proc_t p, struct image_params *imgp)
+ 				error = EACCES;
+ 				goto done;
+ 			}
++#if !A6PLTE
++			/* The A6PLTE PIO framebuffer is a synchronous boot console.
++			 * Repeated successful xpcproxy activations must not spend the
++			 * only enabled CPU scrolling it. Keep all failure paths above. */
+ 			printf("Allowing spawn of iOS binary %s since it has "
+ 			    "com.apple.private.security.no-sandbox entitlement or unentitled_ios_sim_launch "
+ 			    "boot-arg set to true\n", p->p_name);
++#endif
+ 		} else if (psa->psa_platform != PLATFORM_IOS) {
+ 			/* Simulator binary spawned with wrong platform */
+ 			signature_failure_reason = os_reason_create(OS_REASON_EXEC,
+@@ -7421,8 +7439,10 @@ process_signature(proc_t p, struct image_params *imgp)
+ 			error = EACCES;
+ 			goto done;
+ 		} else {
++#if !A6PLTE
+ 			printf("Allowing spawn of iOS binary %s since correct platform was passed in spawn\n",
+ 			    p->p_name);
++#endif
+ 		}
+ 	}
+ #endif /* XNU_TARGET_OS_OSX */
 diff --git c/bsd/kern/kern_exit.c w/bsd/kern/kern_exit.c
 index 1161432..87cc30e 100644
 --- c/bsd/kern/kern_exit.c

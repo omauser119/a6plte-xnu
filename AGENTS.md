@@ -1314,3 +1314,24 @@ actual PHONE BOOTED image is NOWac56aaf (SHA25689361b56c23138439f1b049820bf538b9
 Working UI and improvement on hardware remain pending. Asked whether interface,
 logs or eMMC/panic appears; do not claim fix of every SpringBoard blocker from
 fastboot ACK. Preserve kernel-only, CPU0, USB-off/no-UART and own HID constraints.
+
+
+Latest user photo /home/damstik/test1.png after ac56aaf: sampler6/40 shows
+SpringBoard[25] t0 tid211 state0x4 runnable, event/queue0 and continuation
+0xfffffff0072cb910 (thread_preempted). No GUI or fatal reason is visible.
+Do not equate runnable with completed startup or assert a permanent eMMC wait.
+The frame is dominated by native successful iOS xpcproxy activation printf
+messages. Their synchronous glyph/scroll work runs on the sole CPU0; remove
+only those TWO success printf calls for A6PLTE in kern_exec.c. All native
+platform/signature/MAC error paths are unchanged; other boards retain their
+original success logs. Keep normal framebuffer logs, panic and existing
+approved sampler. This fixes a demonstrated console-output flood and CPU
+cost, not yet proof of resolving every SpringBoard dependency.
+No new diagnostics or inspection/modification of prepared userspace. CPU0,
+USB-off/no-UART, userdata/launchd and own HID remain. Phone4194f2ce is already
+visible in lk2nd; once CI/exact package pass, boot directly without asking to
+return it again. ac56aaf remains the latest actual boot until a new ACK.
+
+Full local scripts/test.sh passed (artifacts/test-exec-console.private.log),
+pristine aggregate patch application and actual branch preprocessing for both
+A6PLTE=0/1 pass. Native full build/checked transient boot remain next.
