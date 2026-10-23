@@ -1537,3 +1537,17 @@ scripts/test.sh passed (artifacts/test-progress.private.log); pristine aggregate
 patch application passed. All prior kernel-only/CPU0/no-UART/USB-off constraints
 remain. Phone4194f2ce is already in lk2nd: boot checked new image when ready
 without asking for another hardware reset. Hardware UI outcome unconfirmed.
+
+cbde56a: all three Actions39936147859 jobs passed. Native kernel
+SHA25669625e96448c25e2e86ba8dba23fb8b78c480e8cb7d01054192af05767755250, archive
+SHA256ed19d7bcf9d6c6789461d6158022b928d00e925a8be45f5f7e27f9fe58d7bbf9. Full CRC/native/NOUNDEFS/UUID/CPU0/
+userdata/launchd/dof0/USB-off checks passed. Frozen image:
+/home/damstik/a6plte-xnu-8796/build/verified-cbde56a/images/xnu-8796-userdata-cpu0-boot.img
+SHA256b504e910c0817316e9d3697e7196f2d6ff446c40d7b54a591a240fb17fa1ad88. Phone4194f2ce/hfs-map-v2 checked;
+transient fastboot boot ACK at20261023T101034Z, send0.387s boot0.078s
+total0.485s. Latest actual PHONE BOOTED is nowcbde56a. Receipts under
+build/verified-cbde56a. No flash. Hardware GUI result unconfirmed. New
+A6PLTE PROGRESS lines compare snapshots at the existing ten-second interval;
+saved_stack_same/wait_same are repeat observations, not proven loop/deadlock.
+User was told useful capture is two consecutive SpringBoard/backboardd blocks
+with PROGRESS plus adjacent WAIT and pc/lr/bt. No need request older photos.
