@@ -1551,3 +1551,22 @@ A6PLTE PROGRESS lines compare snapshots at the existing ten-second interval;
 saved_stack_same/wait_same are repeat observations, not proven loop/deadlock.
 User was told useful capture is two consecutive SpringBoard/backboardd blocks
 with PROGRESS plus adjacent WAIT and pc/lr/bt. No need request older photos.
+
+User supplied /home/damstik/Downloads/IMG_3568.MOV (45.77s). Analysis frames
+under artifacts/video-3568; no further photo requested. SpringBoard[25] tid211
+CPU time rises across samples (roughly0.7s ->1.36s ->1.50s), saved stacks
+change, new threads appear, later IPC receive/workqueue waits. This is evidence
+of initialization activity, not a confirmed permanent hang or UI success.
+Runningboardd repeatedly aborts (pids90/98/100/104, SIGABRT). Clear runtime
+PC20ea828c0 minus slide4c464000 is1c261e8c0, local authorized cache symbol
+___abort_with_payload+8 (syscall521). Do not misread the PC as20ea328c0.
+Other blurred addresses are not reliable root-cause evidence. Actual reason
+text/namespace is still unknown, and dependence of SpringBoard on this failure
+is not established. The current bounded GUI reason formatter excludes that
+startup dependency. Include only runningboardd in the existing formatter so
+its actual committed namespace/code/description is visible before crash
+delivery; no new heap scan or userspace file inspection/edits. If text was not
+supplied it must remain explicitly absent. Full local host suite and bounded
+reason-parser regression (including runningboardd) pass, pristine patch check
+passes. Native CI and checked transient boot remain next. Phone4194f2ce is
+already visible in lk2nd, no new readiness question needed. UI unresolved.

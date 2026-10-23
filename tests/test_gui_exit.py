@@ -58,6 +58,12 @@ int main(void){
     reason.osr_kcd_buf=data;reason.osr_bufsize=sizeof(data);
     a6_display_gui_exit(&p,6);assert(strstr(displayed,"description: real failure text "));
     strcpy(p.p_comm,"backboardd");a6_display_gui_exit(&p,5);assert(strstr(displayed,"backboardd[25]"));
+    /* A real abort_with_payload path was observed in the startup dependency.
+     * Its kernel-committed reason must be exposed by the same bounded parser. */
+    strcpy(p.p_comm,"runningboardd");reason.osr_namespace=18;reason.osr_code=0x10;
+    a6_display_gui_exit(&p,6);
+    assert(strstr(displayed,"runningboardd[25]") && strstr(displayed,"namespace=18 code=0x10"));
+    assert(strstr(displayed,"description: real failure text "));
     unsigned prior=calls;strcpy(p.p_comm,"unrelated");a6_display_gui_exit(&p,6);assert(calls==prior);
     puts("PASS: native GUI reason parser bounds, missing/malformed/unterminated descriptions, 64-bit reason and target filtering");
 }

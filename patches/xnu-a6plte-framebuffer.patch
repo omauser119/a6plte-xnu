@@ -2313,10 +2313,10 @@ index f41b75b..f9cd670 100644
  	}
  #endif /* XNU_TARGET_OS_OSX */
 diff --git c/bsd/kern/kern_exit.c w/bsd/kern/kern_exit.c
-index 1161432..c44ec48 100644
+index 1161432..012b346 100644
 --- c/bsd/kern/kern_exit.c
 +++ w/bsd/kern/kern_exit.c
-@@ -1303,6 +1303,54 @@ exit_reason_get_string_desc(os_reason_t exit_reason)
+@@ -1303,6 +1303,55 @@ exit_reason_get_string_desc(os_reason_t exit_reason)
  	return (char *)kcdata_iter_payload(iter);
  }
  
@@ -2327,7 +2327,8 @@ index 1161432..c44ec48 100644
 +static void
 +a6_display_gui_exit(proc_t p, int rv)
 +{
-+	if (strcmp(p->p_comm, "SpringBoard") && strcmp(p->p_comm, "backboardd")) {
++	if (strcmp(p->p_comm, "SpringBoard") && strcmp(p->p_comm, "backboardd") &&
++	    strcmp(p->p_comm, "runningboardd")) {
 +		return;
 +	}
 +	os_reason_t reason = p->p_exit_reason;
@@ -2371,7 +2372,7 @@ index 1161432..c44ec48 100644
  static int initproc_spawned = 0;
  
  static int
-@@ -1821,6 +1869,15 @@ proc_handle_critical_exit(proc_t p, int rv)
+@@ -1821,6 +1870,15 @@ proc_handle_critical_exit(proc_t p, int rv)
  
  	sync(p, (void *)NULL, (int *)NULL);
  
@@ -2387,7 +2388,7 @@ index 1161432..c44ec48 100644
  	if (p->p_exit_reason == OS_REASON_NULL) {
  		panic_with_options(0, NULL, DEBUGGER_OPTION_INITPROC_PANIC, "%s -- no exit reason available -- (signal %d, exit status %d %s)",
  		    prefix_str, WTERMSIG(rv), WEXITSTATUS(rv), ((proc_getcsflags(p) & CS_KILLED) ? "CS_KILLED" : ""));
-@@ -1845,6 +1902,12 @@ proc_prepareexit(proc_t p, int rv, boolean_t perf_notify)
+@@ -1845,6 +1903,12 @@ proc_prepareexit(proc_t p, int rv, boolean_t perf_notify)
  	int kr = 0;
  	int create_corpse = FALSE;
  
