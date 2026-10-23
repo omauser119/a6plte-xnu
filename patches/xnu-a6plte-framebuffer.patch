@@ -9523,10 +9523,10 @@ index df672c6..b5dce9e 100644
  #define pmap_pending_preemption _pmap_pending_preemption_real
 diff --git c/osfmk/arm64/a6plte_diagnostics.c w/osfmk/arm64/a6plte_diagnostics.c
 new file mode 100644
-index 0000000..d125ffe
+index 0000000..ff25e0f
 --- /dev/null
 +++ w/osfmk/arm64/a6plte_diagnostics.c
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,169 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if A6PLTE
 +#include <kern/task.h>
@@ -9534,6 +9534,9 @@ index 0000000..d125ffe
 +#include <kern/queue.h>
 +#include <kern/misc_protos.h>
 +#include <kern/syscall_sw.h>
++#include <kern/clock.h>
++#include <kern/locks.h>
++#include "a6plte_progress.h"
 +#include <vm/vm_map.h>
 +#include <vm/vm_shared_region.h>
 +#include <arm/thread.h>
@@ -9543,6 +9546,7 @@ index 0000000..d125ffe
 +    uint64_t tid,event,queue,continuation;
 +    int state,priority;
 +    unsigned hint;
++    uint64_t wall_us,cpu_us;
 +};
 +
 +/* Capture only scheduler-owned scalars. Never walk another thread's kernel
@@ -9557,6 +9561,13 @@ index 0000000..d125ffe
 +    out->event=thread->wait_event;
 +    out->queue=(uintptr_t)thread->waitq.wq_q;
 +    out->continuation=(uintptr_t)thread->continuation;
++    time_value_t user_time={0},system_time={0};
++    thread_read_times(thread,&user_time,&system_time,NULL);
++    out->cpu_us=(uint64_t)user_time.seconds*1000000+user_time.microseconds+
++        (uint64_t)system_time.seconds*1000000+system_time.microseconds;
++    uint64_t nanos=0;
++    absolutetime_to_nanoseconds(mach_absolute_time(),&nanos);
++    out->wall_us=nanos/1000;
 +    thread_unlock(thread);
 +    splx(level);
 +}
@@ -9600,6 +9611,24 @@ index 0000000..d125ffe
 +    return name?name:"unknown";
 +}
 +
++static LCK_GRP_DECLARE(a6_progress_group,"a6plte sample history");
++static LCK_MTX_DECLARE(a6_progress_lock,&a6_progress_group);
++static struct a6_progress_history a6_progress_history;
++
++static void a6_report_progress(const char *name,unsigned index,
++    const struct a6_progress_sample *sample) {
++    /* Crash reporting and the periodic sampler can overlap. Never hold this
++     * mutex while reading user memory or writing the framebuffer. */
++    lck_mtx_lock(&a6_progress_lock);
++    struct a6_progress_result result=a6_progress_update(&a6_progress_history,sample);
++    lck_mtx_unlock(&a6_progress_lock);
++    printf("A6PLTE PROGRESS: %s[%d] t%u tid %llu %s span_us=%llu cpu_us=%llu cpu_delta_us=%llu saved_stack_same=%u wait_same=%u frames=%u short=%u\n",
++        name,sample->pid,index,(unsigned long long)sample->tid,result.activity,
++        (unsigned long long)result.elapsed_us,(unsigned long long)sample->cpu_us,
++        (unsigned long long)result.cpu_delta_us,result.stack_repeats,result.wait_repeats,
++        sample->frame_count,sample->stack_short);
++}
++
 +/* References are captured under the task lock. All pageable memory reads and
 + * framebuffer logging happen after releasing it, so a fault cannot sleep
 + * while holding XNU's task spin lock. Samples show the last saved user state.
@@ -9628,8 +9657,15 @@ index 0000000..d125ffe
 +            a6_wait_kind(wait.state,wait.hint),wait.hint,wait.priority,
 +            (unsigned long long)wait.event,(unsigned long long)wait.queue,
 +            (unsigned long long)wait.continuation);
++        struct a6_progress_sample progress={
++            .pid=pid,.tid=wait.tid,.state=wait.state,.hint=wait.hint,
++            .waiting=!!(wait.state&TH_WAIT),.runnable=!!(wait.state&TH_RUN),
++            .wall_us=wait.wall_us,.cpu_us=wait.cpu_us,
++            .event=wait.event,.queue=wait.queue,.continuation=wait.continuation};
 +        arm_thread_state64_t state={0};mach_msg_type_number_t count=ARM_THREAD_STATE64_COUNT;
 +        if (thread_getstatus(captured[i],ARM_THREAD_STATE64,(thread_state_t)&state,&count)==KERN_SUCCESS) {
++            progress.stack_valid=1;progress.pc=state.pc;
++            progress.lr=state.lr;progress.sp=state.sp;
 +            uintptr_t function;
 +            const char *call=a6_last_trap(state.x[16],&function);
 +            printf("A6PLTE CALL: %s[%d] t%u last %s x16 %lld fn 0x%llx\n",
@@ -9640,13 +9676,21 @@ index 0000000..d125ffe
 +            uint64_t fp=state.fp;
 +            for (unsigned depth=0;depth<16 && fp && !(fp&7) && used>0 && used<(int)sizeof(line)-24;++depth) {
 +                uint64_t frame[2];
-+                if (vm_map_read_user(map,fp,frame,sizeof(frame))!=KERN_SUCCESS) break;
++                if (vm_map_read_user(map,fp,frame,sizeof(frame))!=KERN_SUCCESS) {
++                    progress.stack_short=1;break;
++                }
++                progress.frames[progress.frame_count++]=frame[1];
 +                used+=snprintf(line+used,sizeof(line)-(size_t)used," 0x%llx",frame[1]);
-+                if (frame[0]<=fp || frame[0]-fp>1024*1024) break;
++                if (frame[0] && (frame[0]<=fp || frame[0]-fp>1024*1024)) {
++                    progress.stack_short=1;break;
++                }
 +                fp=frame[0];
 +            }
++            if (fp)
++                progress.stack_short=1;
 +            printf("%s\n",line);
 +        }
++        a6_report_progress(name,i,&progress);
 +        thread_deallocate(captured[i]);
 +    }
 +    vm_map_deallocate(map);
@@ -9712,6 +9756,91 @@ index 0000000..473651e
 +        kprintf("A6PLTE: masked unhandled IRQ %u\n",irq);
 +    }
 +    a6_gic_end(&gic,token);
++}
++#endif
+diff --git c/osfmk/arm64/a6plte_progress.h w/osfmk/arm64/a6plte_progress.h
+new file mode 100644
+index 0000000..17cb1bf
+--- /dev/null
++++ w/osfmk/arm64/a6plte_progress.h
+@@ -0,0 +1,79 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef A6PLTE_PROGRESS_H
++#define A6PLTE_PROGRESS_H
++#include <stdint.h>
++#include <string.h>
++
++#define A6_PROGRESS_SLOTS 128
++#define A6_PROGRESS_FRAMES 16
++/* Saved registers/stack and scheduler scalars are observations, not a live
++ * remote kernel stack. CPU counters are native accumulated execution time. */
++struct a6_progress_sample {
++    uint64_t tid,wall_us,cpu_us,event,queue,continuation;
++    uint64_t pc,lr,sp,frames[A6_PROGRESS_FRAMES];
++    int pid,state;
++    unsigned hint,waiting,runnable,stack_valid,frame_count,stack_short;
++};
++struct a6_progress_entry {
++    struct a6_progress_sample sample;
++    uint64_t stamp;
++    unsigned stack_repeats,wait_repeats;
++};
++struct a6_progress_history {
++    struct a6_progress_entry entries[A6_PROGRESS_SLOTS];
++    uint64_t stamp;
++};
++struct a6_progress_result {
++    uint64_t elapsed_us,cpu_delta_us;
++    unsigned baseline,stack_repeats,wait_repeats;
++    const char *activity;
++};
++
++/* Caller serializes updates. No allocator, scheduler or target-memory access.
++ * Stable thread IDs prevent matching a restarted process by PID alone. */
++static struct a6_progress_result
++a6_progress_update(struct a6_progress_history *history,
++    const struct a6_progress_sample *sample)
++{
++    struct a6_progress_result result={.baseline=1,.activity="baseline"};
++    if (!sample->tid || sample->frame_count>A6_PROGRESS_FRAMES) return result;
++    unsigned slot=0;int found=0;
++    for (unsigned i=0;i<A6_PROGRESS_SLOTS;++i) {
++        struct a6_progress_entry *entry=&history->entries[i];
++        if (entry->stamp && entry->sample.tid==sample->tid && entry->sample.pid==sample->pid) {
++            slot=i;found=1;break;
++        }
++        if (history->entries[i].stamp<history->entries[slot].stamp) slot=i;
++    }
++    struct a6_progress_entry *entry=&history->entries[slot];
++    const struct a6_progress_sample *before=&entry->sample;
++    /* A late concurrent snapshot must not replace a newer one. */
++    if (found && sample->wall_us<=before->wall_us) {
++        result.activity="out-of-order";
++        return result;
++    }
++    /* A reset CPU counter starts a baseline; never underflow it. */
++    if (found && sample->wall_us>before->wall_us && sample->cpu_us>=before->cpu_us) {
++        result.baseline=0;
++        result.elapsed_us=sample->wall_us-before->wall_us;
++        result.cpu_delta_us=sample->cpu_us-before->cpu_us;
++        int same_stack=sample->stack_valid && before->stack_valid &&
++            sample->pc==before->pc && sample->lr==before->lr && sample->sp==before->sp &&
++            sample->frame_count==before->frame_count && sample->stack_short==before->stack_short &&
++            !memcmp(sample->frames,before->frames,sample->frame_count*sizeof(sample->frames[0]));
++        int same_wait=sample->waiting && before->waiting &&
++            sample->hint==before->hint && sample->event==before->event &&
++            sample->queue==before->queue && sample->continuation==before->continuation &&
++            sample->state==before->state;
++        result.stack_repeats=same_stack?entry->stack_repeats+1:0;
++        result.wait_repeats=same_wait?entry->wait_repeats+1:0;
++        result.activity=sample->waiting?"waiting":result.cpu_delta_us?
++            "cpu-active":sample->runnable?"runnable-no-cpu":"not-running";
++    }
++    entry->sample=*sample;
++    entry->stack_repeats=result.stack_repeats;
++    entry->wait_repeats=result.wait_repeats;
++    entry->stamp=++history->stamp;
++    return result;
 +}
 +#endif
 diff --git c/osfmk/arm64/a6plte_smp.c w/osfmk/arm64/a6plte_smp.c

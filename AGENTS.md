@@ -1517,3 +1517,23 @@ committed reason for SpringBoard/backboardd, before existing crash scan and
 ReportCrash delivery. It does not infer a hang cause or invent missing reason
 text. No hardware screen result or working GUI confirmed. Receipts under
 build/verified-4f2c6fc. No flash, userspace changes, SMP or USB-network startup.
+
+User explicitly requested adding CPU-time and repeated-stack comparison to
+the existing sampler ("сделвй", 2026-10-23). Scoped diagnostic authorization:
+SpringBoard/backboardd snapshots now include native thread_read_times total
+CPU microseconds, monotonic wall time, CPU/wall deltas, exact captured stack
+repeat counts, and scheduler wait tuple repeat counts. First sight, CPU counter
+reset and evicted/restarted IDs get a baseline; late concurrent snapshots are
+ignored. 128 bounded history slots protected by a mutex used only for scalar
+comparisons/copies; no user reads or framebuffer writes under that mutex.
+Remote thread scheduler/CPU values are captured under the existing thread lock.
+Do not call repeated samples a confirmed deadlock or unchanged saved registers
+a proof of no UI progress. Labels: baseline, cpu-active, waiting,
+runnable-no-cpu, not-running, out-of-order. Native-header probe passed; actual
+history ASan/UBSan regression covers restarts, waits, stack changes/unavailable
+reads, counter reset, stale snapshots, capacity and eviction. Existing sampler
+regression verifies CPU/wall capture and IRQ/lock restoration. Full local
+scripts/test.sh passed (artifacts/test-progress.private.log); pristine aggregate
+patch application passed. All prior kernel-only/CPU0/no-UART/USB-off constraints
+remain. Phone4194f2ce is already in lk2nd: boot checked new image when ready
+without asking for another hardware reset. Hardware UI outcome unconfirmed.

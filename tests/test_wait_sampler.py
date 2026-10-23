@@ -30,6 +30,7 @@ fixture=r'''
 #define __unused __attribute__((unused))
 ''' + queue + '\n' + defines + '\n' + native[start:end] + r'''
 typedef unsigned spl_t;typedef unsigned wait_result_t;
+typedef struct {int seconds,microseconds;} time_value_t;
 static unsigned irq_level=7,locks=0,unlocks=0,terminated=0,iterations=0,sleeps=0,printed=0;
 static int ticks[40];static const int hz=100,PZERO=0,PROC_ALLPROCLIST=1;
 static char sample_names[128]="SpringBoard,backboardd";
@@ -40,6 +41,9 @@ typedef struct {
 static spl_t splsched(void){unsigned old=irq_level;irq_level=255;return old;}
 static void thread_lock(thread_t t){assert(irq_level==255 && !t->held);t->held=1;++locks;}
 static void thread_unlock(thread_t t){assert(irq_level==255 && t->held);t->held=0;++unlocks;t->wait_event=0;t->continuation=NULL;}
+static void thread_read_times(thread_t t,time_value_t *u,time_value_t *s,time_value_t *r){assert(t->held && irq_level==255 && !r);*u=(time_value_t){2,300};*s=(time_value_t){1,400};}
+static uint64_t mach_absolute_time(void){assert(irq_level==255);return 123456789000ULL;}
+static void absolutetime_to_nanoseconds(uint64_t ticks,uint64_t *out){assert(irq_level==255);*out=ticks;}
 static void splx(spl_t old){assert(locks==unlocks);irq_level=old;}
 static int tsleep(void *chan,int priority,const char *name,int timeout){assert(chan && priority==PZERO && !strcmp(name,"a6sample") && sleeps<40);ticks[sleeps++]=timeout;return 0;}
 static int sample_process(void *p,void *a){(void)p;(void)a;return 0;}
@@ -69,6 +73,7 @@ int main(void){
     assert(out.tid==0x123456789abcdef0ULL && out.event==0xdeadbeef && out.queue==0x1234);
     assert(out.state==(TH_WAIT|TH_UNINT) && out.priority==47 && out.hint==kThreadWaitPortReceive);
     assert(out.continuation==(uintptr_t)resume && !t.continuation && !t.wait_event);
+    assert(out.cpu_us==3000700 && out.wall_us==123456789);
     assert(!strcmp(a6_wait_kind(TH_RUN,kThreadWaitKernelMutex),"runnable"));
     assert(!strcmp(a6_wait_kind(TH_SUSP,kThreadWaitKernelMutex),"stopped"));
     assert(!strcmp(a6_wait_kind(out.state,out.hint),"IPC-receive"));
