@@ -46,10 +46,10 @@ index a77bd10..5fc6f17 100644
  bsd/dev/arm/kern_machdep.c	standard
 diff --git c/bsd/dev/a6plte/compat.c w/bsd/dev/a6plte/compat.c
 new file mode 100644
-index 0000000..535aee3
+index 0000000..ac67475
 --- /dev/null
 +++ w/bsd/dev/a6plte/compat.c
-@@ -0,0 +1,202 @@
+@@ -0,0 +1,204 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +/* Board-only bring-up policies and diagnostics, adapted for native XNU 8796. */
 +#if A6PLTE
@@ -83,6 +83,7 @@ index 0000000..535aee3
 +static struct { int priv; char name[32]; } denied[64];
 +static unsigned denied_count;
 +extern void a6_sample_task(const char *, int, task_t);
++extern void a6_report_display(void);
 +extern void thread_terminate_self(void);
 +extern kern_return_t vm_map_region_recurse_64(vm_map_t,vm_map_offset_t *,vm_map_size_t *,
 +    natural_t *,vm_region_submap_info_64_t,mach_msg_type_number_t *);
@@ -231,6 +232,7 @@ index 0000000..535aee3
 +        (void)tsleep(&channel,PZERO,"a6sample",5*hz);
 +        for (unsigned n=0;n<40;++n) {
 +            printf("A6PLTE SMP: process sample %u/40\n",n+1);
++            a6_report_display();
 +            proc_iterate(PROC_ALLPROCLIST,sample_process,NULL,NULL,NULL);
 +            if (n+1<40) (void)tsleep(&channel,PZERO,"a6sample",10*hz);
 +        }
@@ -3956,6 +3958,31 @@ index 2613ab5..a5adf3f 100644
  	kern_return_t ret = amfi->OSEntitlements.copyEntitlementAsOSObjectWithProc(
  		proc,
  		entitlement,
+diff --git c/iokit/Kernel/arm/A6FramebufferDiagnostics.h w/iokit/Kernel/arm/A6FramebufferDiagnostics.h
+new file mode 100644
+index 0000000..ec9e29a
+--- /dev/null
++++ w/iokit/Kernel/arm/A6FramebufferDiagnostics.h
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++#ifndef A6_FRAMEBUFFER_DIAGNOSTICS_H
++#define A6_FRAMEBUFFER_DIAGNOSTICS_H
++#include <stdint.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++/* Monotonic observations only. They expose no process or surface pointers. */
++enum a6_fb_stat {
++    A6_FB_PUBLISHED, A6_FB_GUI_OPEN, A6_FB_DEFAULT_REQUEST,
++    A6_FB_DEFAULT_FAILED, A6_FB_VSYNC, A6_FB_SWAP, A6_FB_SWAP_REJECT,
++    A6_FB_LAYER_COPY, A6_FB_NONBLACK, A6_FB_PRESENTED, A6_FB_STAT_COUNT
++};
++struct a6_fb_snapshot { uint64_t value[A6_FB_STAT_COUNT]; };
++void a6_framebuffer_snapshot(struct a6_fb_snapshot *);
++#ifdef __cplusplus
++}
++#endif
++#endif
 diff --git c/iokit/Kernel/arm/A6GraphicsLayout.c w/iokit/Kernel/arm/A6GraphicsLayout.c
 new file mode 100644
 index 0000000..9a8bcfe
@@ -9524,10 +9551,10 @@ index df672c6..b5dce9e 100644
  #define pmap_pending_preemption _pmap_pending_preemption_real
 diff --git c/osfmk/arm64/a6plte_diagnostics.c w/osfmk/arm64/a6plte_diagnostics.c
 new file mode 100644
-index 0000000..ff25e0f
+index 0000000..3b7c9d0
 --- /dev/null
 +++ w/osfmk/arm64/a6plte_diagnostics.c
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,185 @@
 +/* SPDX-License-Identifier: BSD-2-Clause */
 +#if A6PLTE
 +#include <kern/task.h>
@@ -9538,6 +9565,7 @@ index 0000000..ff25e0f
 +#include <kern/clock.h>
 +#include <kern/locks.h>
 +#include "a6plte_progress.h"
++#include <iokit/Kernel/arm/A6FramebufferDiagnostics.h>
 +#include <vm/vm_map.h>
 +#include <vm/vm_shared_region.h>
 +#include <arm/thread.h>
@@ -9628,6 +9656,21 @@ index 0000000..ff25e0f
 +        (unsigned long long)result.elapsed_us,(unsigned long long)sample->cpu_us,
 +        (unsigned long long)result.cpu_delta_us,result.stack_repeats,result.wait_repeats,
 +        sample->frame_count,sample->stack_short);
++}
++
++/* Once per existing sampling interval; never logs in the frame callback. */
++void a6_report_display(void) {
++    struct a6_fb_snapshot snapshot={0};
++    a6_framebuffer_snapshot(&snapshot);
++    extern int a6_xnu_graphics_stopped(void);
++    const uint64_t *v=snapshot.value;
++    printf("A6PLTE DISPLAY: published=%llu gui_opens=%llu default=%llu failed=%llu vsync=%llu swaps=%llu rejected=%llu layers=%llu nonblack=%llu presented=%llu stopped=%d\n",
++        (unsigned long long)v[A6_FB_PUBLISHED],(unsigned long long)v[A6_FB_GUI_OPEN],
++        (unsigned long long)v[A6_FB_DEFAULT_REQUEST],(unsigned long long)v[A6_FB_DEFAULT_FAILED],
++        (unsigned long long)v[A6_FB_VSYNC],(unsigned long long)v[A6_FB_SWAP],
++        (unsigned long long)v[A6_FB_SWAP_REJECT],(unsigned long long)v[A6_FB_LAYER_COPY],
++        (unsigned long long)v[A6_FB_NONBLACK],(unsigned long long)v[A6_FB_PRESENTED],
++        a6_xnu_graphics_stopped());
 +}
 +
 +/* References are captured under the task lock. All pageable memory reads and

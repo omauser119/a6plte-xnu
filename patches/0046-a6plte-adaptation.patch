@@ -24,7 +24,7 @@
   */
  #include "A6Surface.h"
  
-@@ -40,9 +38,18 @@
+@@ -40,9 +38,33 @@
  #include <IOKit/IOWorkLoop.h>
  #include <IOKit/IOTimerEventSource.h>
  #include <IOKit/system.h>
@@ -36,14 +36,29 @@
  #include <kern/clock.h>
  #include <sys/proc.h>
 +#include "A6Scanout.h"
++#include "A6FramebufferDiagnostics.h"
 +#include "A6PlatformServicesABI.h"
 +extern "C" void a6_platform_graphics_ready(uint32_t);
 +extern "C" void a6_xnu_graphics_presented(void);
 +extern "C" int a6_xnu_graphics_stopped(void);
++
++/* Collected without logging or target-memory reads in the frame path.
++ * Each field is an independent monotonic observation, not a locked timeline. */
++static uint64_t a6_fb_counters[A6_FB_STAT_COUNT];
++static void a6_fb_count(enum a6_fb_stat field)
++{
++	__atomic_fetch_add(&a6_fb_counters[field], 1, __ATOMIC_RELAXED);
++}
++extern "C" void a6_framebuffer_snapshot(struct a6_fb_snapshot *snapshot)
++{
++	if (!snapshot) return;
++	for (unsigned i = 0; i < A6_FB_STAT_COUNT; ++i)
++		snapshot->value[i] = __atomic_load_n(&a6_fb_counters[i], __ATOMIC_RELAXED);
++}
  
  enum {
  	kA6FBGetLayerDefaultSurface  = 3,
-@@ -54,6 +61,8 @@
+@@ -54,6 +76,8 @@
  	kA6FBIsMainDisplay           = 18,
  	kA6FBGetDotPitch             = 28,
  	kA6FBNotifications           = 72,
@@ -52,7 +67,7 @@
  };
  
  #define A6PLTE_FB_SWAP_REC_SIZE          0x46c
-@@ -61,8 +70,11 @@
+@@ -61,8 +85,11 @@
  #define A6PLTE_FB_NOTIFY_TYPES           8
  #define A6PLTE_FB_NOTIFY_VSYNC           5
  #define A6PLTE_FB_VSYNC_US               16667
@@ -65,7 +80,7 @@
  
  class IOMobileFramebuffer : public IOService {
  	OSDeclareDefaultStructors(IOMobileFramebuffer);
-@@ -75,27 +87,36 @@
+@@ -75,27 +102,36 @@
  class AppleCLCD : public IOMobileFramebuffer {
  	OSDeclareDefaultStructors(AppleCLCD);
  
@@ -114,7 +129,7 @@
  };
  
  OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);
-@@ -104,11 +125,12 @@
+@@ -104,11 +140,12 @@
  	OSDeclareDefaultStructors(IOMobileFramebufferUserClient);
  
  public:
@@ -132,7 +147,7 @@
  
  	bool initWithTask(task_t owningTask, void *securityID, UInt32 type) APPLE_KEXT_OVERRIDE;
  	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
-@@ -123,26 +145,96 @@
+@@ -123,26 +160,96 @@
  
  OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
  
@@ -236,7 +251,7 @@
  	fPixels = fSurface != NULL ? fSurface->kernelAddress() : 0;
  	fWorkLoop = IOWorkLoop::workLoop();
  	if (fLock == NULL || fClients == NULL || fPixels == 0 || fWorkLoop == NULL) {
-@@ -151,17 +243,22 @@
+@@ -151,17 +258,23 @@
  		OSSafeReleaseNULL(fWorkLoop);
  		return false;
  	}
@@ -256,16 +271,18 @@
  	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
  	registerService();
 +	a6_platform_graphics_ready(8);
++	a6_fb_count(A6_FB_PUBLISHED);
  	IOLog("A6PLTE FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u\n",
  	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id);
  	return true;
-@@ -171,12 +268,13 @@
+@@ -171,12 +284,14 @@
  AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
  {
  	AppleCLCD *fb = (AppleCLCD *)owner;
 +	if (a6_xnu_graphics_stopped()) return;
  	uint64_t now = mach_absolute_time();
  	uint64_t count = ++fb->fVsyncCount;
++	a6_fb_count(A6_FB_VSYNC);
  	uint64_t values[6] = {
 +		(uint32_t)now, (uint32_t)(now >> 32),
 +		(uint32_t)now, (uint32_t)(now >> 32),
@@ -275,7 +292,7 @@
  	};
  
  	IOLockLock(fb->fLock);
-@@ -185,7 +283,21 @@
+@@ -185,7 +300,21 @@
  		    (IOMobileFramebufferUserClient *)fb->fClients->getObject(i);
  		client->notify(A6PLTE_FB_NOTIFY_VSYNC, values, 6);
  	}
@@ -297,7 +314,7 @@
  	sender->setTimeoutUS(A6PLTE_FB_VSYNC_US);
  }
  
-@@ -216,23 +328,24 @@
+@@ -216,23 +345,25 @@
  	return v;
  }
  
@@ -311,6 +328,7 @@
 +	IOLockLock(fLock);
 +	memcpy(fPending, rec, A6PLTE_FB_SWAP_REC_SIZE);
 +	fDirty = true;
++	a6_fb_count(A6_FB_SWAP);
 +	IOLockUnlock(fLock);
 +}
 +
@@ -332,7 +350,7 @@
  
  	for (uint32_t layer = 0; layer < A6PLTE_FB_LAYERS; layer++) {
  		uint32_t id = get32(rec, 0x54 + 4 * layer);
-@@ -246,13 +359,7 @@
+@@ -246,13 +377,7 @@
  			continue;
  		}
  		A6Surface *s = a6_surface_copy(id);
@@ -347,10 +365,16 @@
  		if (s == NULL || s == fSurface) {
  			OSSafeReleaseNULL(s);
  			continue;
-@@ -298,6 +405,26 @@
- 	}
- }
- 
+@@ -293,8 +418,34 @@
+ 				    (const void *)(src + s->offset + (uint64_t)(sy + y) * s->bytesPerRow + (uint64_t)sx * 4),
+ 				    (size_t)w * 4);
+ 			}
++			a6_fb_count(A6_FB_LAYER_COPY);
+ 		}
+ 		s->release();
++	}
++}
++
 +void
 +AppleCLCD::scanout()
 +{
@@ -360,7 +384,11 @@
 +	IOLockLock(fLock);
 +	bool gui = fGUIClient;
 +	IOLockUnlock(fLock);
-+	if (!gui || (!fConsolePaused && !a6_scanout_nonblack(&source))) return;
++	if (!gui) return;
++	if (!fConsolePaused) {
++		if (!a6_scanout_nonblack(&source)) return;
++		a6_fb_count(A6_FB_NONBLACK);
++	}
 +	struct a6_rect bounds = {0, 0, (int32_t)fWidth, (int32_t)fHeight};
 +	if (a6_scanout_blit(&source, bounds, &fPanel, bounds, 0, NULL)) {
 +#if defined(__arm64__)
@@ -368,13 +396,11 @@
 +#endif
 +		fConsolePaused = true;
 +		a6_xnu_graphics_presented();
-+	}
-+}
-+
- bool
- IOMobileFramebufferUserClient::initWithTask(task_t owningTask, void *securityID, UInt32 type)
- {
-@@ -315,6 +442,11 @@
++		a6_fb_count(A6_FB_PRESENTED);
+ 	}
+ }
+ 
+@@ -315,6 +466,12 @@
  	if (fFB == NULL || !IOUserClient::start(provider)) {
  		return false;
  	}
@@ -382,11 +408,12 @@
 +	proc_selfname(name, sizeof(name));
 +	if (!strcmp(name, "backboardd") || !strcmp(name, "SpringBoard")) {
 +		IOLockLock(fFB->fLock);fFB->fGUIClient=true;IOLockUnlock(fFB->fLock);
++		a6_fb_count(A6_FB_GUI_OPEN);
 +	}
  	fFB->addClient(this);
  	return true;
  }
-@@ -324,12 +456,16 @@
+@@ -324,12 +481,16 @@
  {
  	if (fFB != NULL) {
  		fFB->removeClient(this);
@@ -407,7 +434,7 @@
  		}
  	}
  	terminate();
-@@ -337,13 +473,15 @@
+@@ -337,13 +498,15 @@
  }
  
  IOReturn
@@ -426,7 +453,7 @@
  	IOLockUnlock(fFB->fLock);
  	if (old != MACH_PORT_NULL) {
  		releaseNotificationPort(old);
-@@ -357,16 +495,19 @@
+@@ -357,16 +520,19 @@
  {
  	OSAsyncReference64 ref;
  
@@ -449,7 +476,25 @@
  
  IOReturn
  IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *args,
-@@ -414,6 +555,10 @@
+@@ -379,7 +545,9 @@
+ 
+ 	switch (selector) {
+ 	case kA6FBGetLayerDefaultSurface:
++		a6_fb_count(A6_FB_DEFAULT_REQUEST);
+ 		out[0] = a6_surface_port_in_task(fFB->fSurface, fTask);
++		if (!out[0]) a6_fb_count(A6_FB_DEFAULT_FAILED);
+ 		outCount = 1;
+ 		break;
+ 	case kA6FBSwapBegin:
+@@ -393,6 +561,7 @@
+ 		if (args->structureInputDescriptor != NULL ||
+ 		    args->structureInputSize < A6PLTE_FB_SWAP_REC_SIZE) {
+ 			ret = kIOReturnBadArgument;
++			a6_fb_count(A6_FB_SWAP_REJECT);
+ 			break;
+ 		}
+ 		memcpy(rec, args->structureInput, sizeof(rec));
+@@ -414,6 +583,10 @@
  		break;
  	case kA6FBGetDotPitch:
  		out[0] = A6PLTE_FB_DOT_PITCH;
@@ -460,7 +505,7 @@
  		outCount = 1;
  		break;
  	case kA6FBNotifications:
-@@ -423,10 +568,7 @@
+@@ -423,10 +596,7 @@
  			fFunc[type] = args->scalarInput[0];
  			fRefcon[type] = args->scalarInput[1];
  			IOLockUnlock(fFB->fLock);
@@ -472,7 +517,7 @@
  		}
  		break;
  	case kA6FBSwapWait:
-@@ -439,17 +581,13 @@
+@@ -439,17 +609,13 @@
  	}
  	if (args->structureOutputDescriptor == NULL && args->structureOutput != NULL) {
  		bzero(args->structureOutput, args->structureOutputSize);

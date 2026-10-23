@@ -59,6 +59,7 @@ public:
  static void vsyncFired(OSObject *,IOTimerEventSource *);
 };
 '''
+fixture+='\n#include "A6FramebufferDiagnostics.h"\n'+source[source.index('static uint64_t a6_fb_counters'): source.index('enum {\n\tkA6FBGetLayerDefaultSurface')]
 for name in ('static uint32_t\nget32(', 'void\nAppleCLCD::swap(', 'void\nAppleCLCD::present(', 'void\nAppleCLCD::scanout(', 'void\nAppleCLCD::vsyncFired('):fixture+=body(name)
 fixture+=r'''
 static void put(uint8_t *p,unsigned n,uint32_t v){memcpy(p+n,&v,4);}
@@ -68,6 +69,8 @@ int main(){
  fb.fPanel={panel+8,18,2,2,9,1,0};
  for(unsigned i=0;i<6;++i)AppleCLCD::vsyncFired(&fb,&timer);
  unchanged(panel,sizeof(panel));assert(!handed && timer.scheduled==6);
+ a6_fb_snapshot status={};a6_framebuffer_snapshot(&status);
+ assert(status.value[A6_FB_VSYNC]==6 && !status.value[A6_FB_PRESENTED] && !status.value[A6_FB_SWAP]);
  fb.fGUIClient=true;
  for(unsigned row=0;row<2;++row){front.storage[8+row*12+3]=255;front.storage[8+row*12+7]=255;memset(front.storage+8+row*12+8,255,4);}
  for(unsigned i=0;i<6;++i)AppleCLCD::vsyncFired(&fb,&timer);
@@ -77,6 +80,8 @@ int main(){
  unchanged(panel,sizeof(panel));
  AppleCLCD::vsyncFired(&fb,&timer);
  assert(fb.fConsolePaused && handed==1 && panel[8]==0x11 && panel[9]==0x22 && panel[10]==0x33);
+ a6_framebuffer_snapshot(&status);
+ assert(status.value[A6_FB_PRESENTED]==handed && status.value[A6_FB_NONBLACK]==1);
  // Exercise copied upstream swap/present with a bounded real layer buffer.
  uint8_t rec[0x46c]={};put(rec,0x104,1);put(rec,0x54,2);put(rec,0xc4+8,2);put(rec,0xc4+12,2);
  layer.storage[8]=0x99;layer.storage[9]=0x88;layer.storage[10]=0x77;
@@ -87,6 +92,8 @@ int main(){
  failAllocation=false;
  for(unsigned i=0;i<6;++i)AppleCLCD::vsyncFired(&fb,&timer);
  assert(!fb.fDirty && panel[8]==0x77 && panel[9]==0x88 && panel[10]==0x99 && layer.refs==1);
+ a6_framebuffer_snapshot(&status);
+ assert(status.value[A6_FB_SWAP]==1 && status.value[A6_FB_LAYER_COPY]==1 && status.value[A6_FB_PRESENTED]==handed);
  // Empty IDs, unknown IDs and clipped rectangles cannot read or write beyond storage.
  put(rec,0x54,999);fb.present(rec);put(rec,0x54,0);fb.present(rec);
  put(rec,0x54,2);put(rec,0xc4,INT32_MAX);fb.present(rec);
@@ -101,9 +108,11 @@ int main(){
  AppleCLCD::vsyncFired(&fb,&timer);
  uint64_t expected[6]={0x9abcdef0,0x12345678,0x9abcdef0,0x12345678,0,1};
  assert(client.calls==1 && !memcmp(client.values,expected,sizeof(expected)));
+ a6_framebuffer_snapshot(&status);a6_fb_snapshot beforeStats=status;
  stopped=true;unsigned before=timer.scheduled;front.storage[8]=255;
  fb.scanout();fb.present(rec);AppleCLCD::vsyncFired(&fb,&timer);
  assert(timer.scheduled==before && !panel[10] && !fb.lock.held && layer.refs==1);
+ a6_framebuffer_snapshot(&status);assert(!memcmp(&status,&beforeStats,sizeof(status)));
  puts("PASS: copied 0046 layer copy + 0056 queue, real vsync payload, A6 RGB888 conversion, direct default refresh, console handoff, allocation failure, clipping/guards and panic stop");
 }
 '''

@@ -141,6 +141,7 @@ public:
  void notify(uint32_t,const uint64_t *,uint32_t);
 };
 '''
+fixture+='\n#include "A6FramebufferDiagnostics.h"\n'+fb[fb.index('static uint64_t a6_fb_counters'): fb.index('enum {\n\tkA6FBGetLayerDefaultSurface')]
 for signature in ('static void\nput32(', 'static IOReturn\na6_struct_out(', 'IOReturn\nIOSurfaceRootUserClient::externalMethod('):
     fixture+=body(surface,signature)
 for signature in ('static bool\na6_fb_number(', 'bool\nAppleCLCD::publishModes(',
@@ -175,6 +176,8 @@ int main(){
  assert(desc.data[0]==63 && desc.data[4]==63 && desc.data[22]==1);guarded(desc.data.data()+24,8);
  uint64_t out[3]={},input[4]={2,0,0,0};a={};a.scalarInput=input;a.scalarInputCount=1;a.scalarOutput=out;a.scalarOutputCount=3;
  assert(!client.externalMethod(3,&a,nullptr,nullptr,nullptr) && out[0]==42 && !out[1] && a.scalarOutputCount==3);
+ a6_fb_snapshot status={};a6_framebuffer_snapshot(&status);
+ assert(status.value[A6_FB_DEFAULT_REQUEST]==1 && !status.value[A6_FB_DEFAULT_FAILED]);
  a={};assert(!client.externalMethod(6,&a,nullptr,nullptr,nullptr));
  uint8_t record[A6PLTE_FB_SWAP_REC_SIZE]={};record[0x50]=99;
  a={};a.structureInput=record;a.structureInputSize=sizeof(record);
@@ -183,6 +186,7 @@ int main(){
  assert(!client.externalMethod(5,&a,nullptr,nullptr,nullptr) && display.swaps==2);
  a.structureInputSize=sizeof(record)-1;
  assert(client.externalMethod(5,&a,nullptr,nullptr,nullptr)==kIOReturnBadArgument && display.swaps==2);
+ a6_framebuffer_snapshot(&status);assert(status.value[A6_FB_SWAP_REJECT]==1);
  a={};a.scalarInput=input;a.scalarInputCount=3;input[0]=0x1234;input[1]=0x5678;input[2]=5;
  assert(!client.externalMethod(72,&a,nullptr,nullptr,nullptr) && client.fFunc[5]==0x1234 && client.fRefcon[5]==0x5678);
  input[2]=8;assert(!client.externalMethod(72,&a,nullptr,nullptr,nullptr) && client.fFunc[5]==0x1234);

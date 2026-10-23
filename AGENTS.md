@@ -1570,3 +1570,24 @@ supplied it must remain explicitly absent. Full local host suite and bounded
 reason-parser regression (including runningboardd) pass, pristine patch check
 passes. Native CI and checked transient boot remain next. Phone4194f2ce is
 already visible in lk2nd, no new readiness question needed. UI unresolved.
+
+User redirected focus to whether GUI frames reach the physical framebuffer.
+Scoped existing sampler now prints A6PLTE DISPLAY once per ten-second interval:
+monotonic published/gui_opens/default requests/failed ports/vsync/swaps/rejected
+swaps/copied layers/nonblack/presented plus panic-stop state. Actual copied
+0046 frame path increments independent relaxed-atomic counters only; there is
+no per-frame logging, new waits, renderer policy or hardware poking. Getter
+copies counters, not surface pointers. Fields are independent observations,
+not an atomic timeline. Counter presented increments only after successful
+BGRA->RGB888 panel-memory blit and normal console handoff. Nonblack increments
+only after the existing real-color guard passes. This distinguishes absent
+service/client, no produced RGB frame, and a frame that reaches scanout. It
+does NOT by itself demonstrate correct physical controller refresh or working UI.
+Actual frame/timer/selector regressions now check the matching counters, pixel
+buffers/guards and no increments after panic stop. Full local host suite
+passed (artifacts/test-display-pipeline.private.log); osfmk diagnostic and BSD
+compat native header probes passed. Graphics remains pinned0046+0068 plus
+explicit adaptation, exact verification passes. Runningboard reason-only
+35709db is building and has NOT been booted; prefer combined checked image.
+Keep prepared userspace unchanged, CPU0/no-UART/USB-off and no repeated old
+photo requests. Latest actual phone boot remains cbde56a until new ACK.

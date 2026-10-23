@@ -32,6 +32,8 @@ fixture=r'''
 typedef unsigned spl_t;typedef unsigned wait_result_t;
 typedef struct {int seconds,microseconds;} time_value_t;
 static unsigned irq_level=7,locks=0,unlocks=0,terminated=0,iterations=0,sleeps=0,printed=0;
+static unsigned display_reports;
+static void a6_report_display(void){++display_reports;}
 static int ticks[40];static const int hz=100,PZERO=0,PROC_ALLPROCLIST=1;
 static char sample_names[128]="SpringBoard,backboardd";
 typedef struct {
@@ -90,7 +92,7 @@ int main(void){
     assert(!strcmp(a6_last_trap((uint64_t)-128,&function),"unknown") && !function);
     assert(!strcmp(a6_last_trap(1ULL<<63,&function),"unknown") && !function);
     sample_thread(NULL,0);
-    assert(sleeps==40 && ticks[0]==5*hz && iterations==40 && printed==40 && terminated==1);
+    assert(sleeps==40 && ticks[0]==5*hz && iterations==40 && printed==40 && terminated==1 && display_reports==40);
     for(unsigned i=1;i<40;++i)assert(ticks[i]==10*hz);
     sample_names[0]='-';sample_thread(NULL,0);
     assert(sleeps==40 && iterations==40 && printed==40 && terminated==2);
