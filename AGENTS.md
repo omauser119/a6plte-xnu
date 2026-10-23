@@ -1591,3 +1591,31 @@ explicit adaptation, exact verification passes. Runningboard reason-only
 35709db is building and has NOT been booted; prefer combined checked image.
 Keep prepared userspace unchanged, CPU0/no-UART/USB-off and no repeated old
 photo requests. Latest actual phone boot remains cbde56a until new ACK.
+
+Latest actual PHONE BOOTED is d2d97e2 (native source
+d2d97e2754647d47e1409f83af942147ecf727b0). Native Apple Clang/full link and package jobs passed;
+complete local host suite passed. Host CI job39942385257 remained blocked in
+apt dependency installation for over15minutes; DO NOT report all3 CI jobs
+successful. Explicit downloader pending-dependencies mode verifies successful
+native AND package jobs and permits only the host dependency-install step,
+never running tests/failed/cancelled builds; archive digest/ZIP checks remain.
+Frozen image /home/damstik/a6plte-xnu-8796/build/verified-d2d97e2/images/xnu-8796-userdata-cpu0-boot.img
+SHA2566fd8fd576911fffee8d6390fb7b7482e3c6e3156293b2e13d7ab25d77320149f; native kernel
+SHA2560bfd20c6ea7e75157900cbf69588515a9f62c8dd3adb402de8da2398a9b8f657. Full CRC/native/UUID/NOUNDEFS/profile
+checks passed;4194f2ce/hfs-map-v2 verified and transient boot ACK at
+20261023T111921Z, total0.482s. No flash. Receipts under
+build/verified-d2d97e2. The reason-only35709db was never booted separately.
+
+User reports DISPLAY published=1 and every other field zero. This identifies
+a published service with no observed GUI open/default request/swap/presentation
+and no timer callback at that snapshot. Duration/repeated snapshots were NOT
+provided: do not assert a permanent timer failure or a ready GUI frame. No
+confirmed framebuffer code defect found yet; native IOEventSource starts
+enabled=true, so blindly adding enable() is NOT an established fix.
+
+LATEST USER INSTRUCTION overrides earlier diagnostic permissions:
+"больще не надо дебажить ... разрешаю только исправления". Stop new/extended
+diagnostics, counters, logging, sampler additions and diagnostic-only rebuilds.
+Continue only concrete kernel fixes supported by source evidence. Do not ask
+for the same photos or use earlier scoped permission for more instrumentation.
+No new framebuffer/SpringBoard fix or working GUI is established.
